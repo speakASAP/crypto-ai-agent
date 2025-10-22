@@ -299,14 +299,32 @@ async def init_db():
                 await db.execute("""
                 CREATE TABLE IF NOT EXISTS portfolio (
                     symbol TEXT PRIMARY KEY,
-                    amount REAL,
-                    price_buy REAL,
+                    amount DECIMAL(20,8),
+                    price_buy DECIMAL(20,8),
                     purchase_date DATETIME,
                     base_currency TEXT DEFAULT 'USD',
-                    purchase_price_eur REAL,
-                    purchase_price_czk REAL
+                    purchase_price_eur DECIMAL(20,8),
+                    purchase_price_czk DECIMAL(20,8),
+                    source TEXT DEFAULT 'Unknown',
+                    commission DECIMAL(20,8) DEFAULT 0
                 )
                 """)
+                
+                # Check if source column exists, if not add it (migration)
+                cursor = await db.execute("PRAGMA table_info(portfolio)")
+                columns = await cursor.fetchall()
+                column_names = [col[1] for col in columns]
+                
+                if 'source' not in column_names:
+                    log_info_with_context("Adding source column to portfolio table", "init_db", "agent")
+                    await db.execute("ALTER TABLE portfolio ADD COLUMN source TEXT DEFAULT 'Unknown'")
+                    log_info_with_context("Source column added successfully", "init_db", "agent")
+                
+                # Check if commission column exists, if not add it (migration)
+                if 'commission' not in column_names:
+                    log_info_with_context("Adding commission column to portfolio table", "init_db", "agent")
+                    await db.execute("ALTER TABLE portfolio ADD COLUMN commission DECIMAL(20,8) DEFAULT 0")
+                    log_info_with_context("Commission column added successfully", "init_db", "agent")
                 
                 log_database_operation("create_table", "currency_rates", "agent")
                 await db.execute("""

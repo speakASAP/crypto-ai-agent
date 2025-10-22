@@ -20,6 +20,7 @@
 - 💱 **Multi-currency portfolio tracking** with USD, EUR, and CZK support
 - 🔄 **Real-time currency conversion** with live exchange rates and caching
 - 📅 **Purchase date tracking** for complete transaction history
+- 🏪 **Source tracking** - track where each asset was bought (Binance, Coinbase, Revolut, etc.)
 - 🗄️ **SQLite database** for storing portfolio and alerts
 - 🎛️ **UI dashboard** for portfolio management and alerts
 - 🐳 **Docker Compose** for easy deployment in development and production
@@ -100,6 +101,7 @@ Storing user portfolio with multi-currency support.
 | `base_currency` | TEXT | Currency used for purchase (USD/EUR/CZK) |
 | `purchase_price_eur` | REAL | Purchase price converted to EUR |
 | `purchase_price_czk` | REAL | Purchase price converted to CZK |
+| `source` | TEXT | Where the asset was bought (Binance, Coinbase, etc.) |
 
 ### 2. 🕯️ `candles`
 
@@ -261,10 +263,11 @@ docker-compose up --build
 
 ### 💼 Portfolio Management
 
-- ➕ **Adding/editing coins**: symbol, quantity, purchase price, purchase date, currency
+- ➕ **Adding/editing coins**: symbol, quantity, purchase price, purchase date, currency, source
 - 👀 **Viewing current coins** in portfolio with multi-currency support
 - 💱 **Multi-currency tracking**: USD, EUR, and CZK support
 - 📅 **Purchase date tracking**: Complete transaction history
+- 🏪 **Source tracking**: Track where each asset was purchased
 - 🔄 **Real-time currency conversion**: Live exchange rates with caching
 - 📊 **Multi-currency analytics**: Performance metrics in all supported currencies
 
@@ -297,8 +300,9 @@ docker-compose up --build
 2. Specify quantity and purchase price
 3. Select purchase currency (USD, EUR, or CZK)
 4. Choose purchase date
-5. Click **Add / Update Coin**
-6. Coin will be saved to database and tracked by agent
+5. Select source (Binance, Coinbase, Revolut, etc.)
+6. Click **Add / Update Coin**
+7. Coin will be saved to database and tracked by agent
 
 ### 💱 Multi-Currency Portfolio Features
 
@@ -339,7 +343,8 @@ docker-compose up --build
 4. Select **Purchase Currency** (USD, EUR, or CZK)
 5. Enter purchase price in selected currency
 6. Choose purchase date
-7. Click **Add to Portfolio**
+7. Select **Source** (Binance, Coinbase, Revolut, etc.)
+8. Click **Add to Portfolio**
 
 #### Viewing Portfolio in Different Currencies
 

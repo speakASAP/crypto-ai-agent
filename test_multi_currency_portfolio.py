@@ -35,14 +35,25 @@ async def test_multi_currency_portfolio():
             await db.execute("""
             CREATE TABLE IF NOT EXISTS portfolio (
                 symbol TEXT PRIMARY KEY,
-                amount REAL,
-                price_buy REAL,
+                amount DECIMAL(20,8),
+                price_buy DECIMAL(20,8),
                 purchase_date DATETIME,
                 base_currency TEXT DEFAULT 'USD',
-                purchase_price_eur REAL,
-                purchase_price_czk REAL
+                purchase_price_eur DECIMAL(20,8),
+                purchase_price_czk DECIMAL(20,8),
+                source TEXT DEFAULT 'Unknown'
             )
             """)
+            
+            # Check if source column exists, if not add it (migration)
+            cursor = await db.execute("PRAGMA table_info(portfolio)")
+            columns = await cursor.fetchall()
+            column_names = [col[1] for col in columns]
+            
+            if 'source' not in column_names:
+                print("   🔄 Adding source column to portfolio table...")
+                await db.execute("ALTER TABLE portfolio ADD COLUMN source TEXT DEFAULT 'Unknown'")
+                print("   ✅ Source column added successfully")
             
             # Create currency rates table
             await db.execute("""
@@ -86,12 +97,12 @@ async def test_multi_currency_portfolio():
     print("\n3. Testing Multi-Currency Portfolio Operations...")
     
     test_coins = [
-        ("BTC", 0.5, 45000.0, date(2024, 1, 15), "USD"),
-        ("ETH", 2.0, 3000.0, date(2024, 2, 20), "EUR"),
-        ("BNB", 10.0, 300.0, date(2024, 3, 10), "CZK")
+        ("BTC", 0.5, 45000.0, date(2024, 1, 15), "USD", "Binance"),
+        ("ETH", 2.0, 3000.0, date(2024, 2, 20), "EUR", "Coinbase"),
+        ("BNB", 10.0, 300.0, date(2024, 3, 10), "CZK", "Revolut")
     ]
     
-    for symbol, amount, price, purchase_date, base_currency in test_coins:
+    for symbol, amount, price, purchase_date, base_currency, source in test_coins:
         try:
             async with aiosqlite.connect(DB_PATH) as db:
                 # Convert prices to other currencies
@@ -101,12 +112,12 @@ async def test_multi_currency_portfolio():
                 
                 await db.execute("""
                     INSERT OR REPLACE INTO portfolio 
-                    (symbol, amount, price_buy, purchase_date, base_currency, purchase_price_eur, purchase_price_czk) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (symbol, amount, price, purchase_date, base_currency, price_eur, price_czk))
+                    (symbol, amount, price_buy, purchase_date, base_currency, purchase_price_eur, purchase_price_czk, source) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, amount, price, purchase_date, base_currency, price_eur, price_czk, source))
                 await db.commit()
             
-            print(f"   ✅ Added {symbol}: {amount} coins @ {price} {base_currency} on {purchase_date}")
+            print(f"   ✅ Added {symbol}: {amount} coins @ {price} {base_currency} on {purchase_date} from {source}")
             
         except Exception as e:
             print(f"   ❌ Failed to add {symbol}: {e}")
@@ -117,19 +128,19 @@ async def test_multi_currency_portfolio():
         async with aiosqlite.connect(DB_PATH) as db:
             cursor = await db.execute("""
                 SELECT symbol, amount, price_buy, purchase_date, base_currency, 
-                       purchase_price_eur, purchase_price_czk 
+                       purchase_price_eur, purchase_price_czk, source
                 FROM portfolio
             """)
             rows = await cursor.fetchall()
             portfolio_df = pd.DataFrame(rows, columns=[
                 "symbol", "amount", "price_buy", "purchase_date", 
-                "base_currency", "purchase_price_eur", "purchase_price_czk"
+                "base_currency", "purchase_price_eur", "purchase_price_czk", "source"
             ])
             
             print(f"   ✅ Retrieved {len(portfolio_df)} portfolio items with multi-currency data")
             print("   Portfolio:")
             for _, row in portfolio_df.iterrows():
-                print(f"     - {row['symbol']}: {row['amount']} coins @ {row['price_buy']} {row['base_currency']} on {row['purchase_date']}")
+                print(f"     - {row['symbol']}: {row['amount']} coins @ {row['price_buy']} {row['base_currency']} on {row['purchase_date']} from {row['source']}")
                 print(f"       EUR: {row['purchase_price_eur']:.2f}, CZK: {row['purchase_price_czk']:.2f}")
                 
     except Exception as e:

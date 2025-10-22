@@ -13,6 +13,41 @@ class PortfolioComponents:
     """Reusable portfolio management components"""
     
     @staticmethod
+    def get_common_exchanges():
+        """Get list of common cryptocurrency exchanges"""
+        return [
+            "Binance",
+            "Coinbase",
+            "Revolut", 
+            "Kraken",
+            "KuCoin",
+            "Huobi",
+            "OKX",
+            "Bybit",
+            "Gate.io",
+            "Bitfinex",
+            "Bitstamp",
+            "Gemini",
+            "Crypto.com",
+            "eToro",
+            "Robinhood",
+            "Webull",
+            "Other",
+            "Unknown"
+        ]
+    
+    @staticmethod
+    def get_user_sources_from_portfolio(portfolio_data):
+        """Get unique sources from user's portfolio for suggestions"""
+        if portfolio_data.empty or 'source' not in portfolio_data.columns:
+            return []
+        
+        # Get unique sources, excluding 'Unknown' and 'Other'
+        sources = portfolio_data['source'].dropna().unique()
+        sources = [s for s in sources if s not in ['Unknown', 'Other']]
+        return sorted(sources)
+    
+    @staticmethod
     def display_portfolio_summary(metrics: Dict[str, Any]):
         """Display portfolio summary metrics in cards"""
         if not metrics or metrics.get('total_value', 0) == 0:
@@ -22,14 +57,14 @@ class PortfolioComponents:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Total Value", f"${metrics['total_value']:,.2f}")
+            st.metric("Total Value", f"${metrics['total_value']:,.8f}")
         
         with col2:
-            st.metric("Total Cost", f"${metrics['total_cost']:,.2f}")
+            st.metric("Total Cost", f"${metrics['total_cost']:,.8f}")
         
         with col3:
             pnl_color = "normal" if metrics['total_pnl'] >= 0 else "inverse"
-            st.metric("P&L", f"${metrics['total_pnl']:,.2f}", delta=f"{metrics['total_pnl_percent']:.2f}%")
+            st.metric("P&L", f"${metrics['total_pnl']:,.8f}", delta=f"{metrics['total_pnl_percent']:.8f}%")
         
         with col4:
             portfolio_count = len(metrics.get('portfolio_data', []))
@@ -49,6 +84,16 @@ class PortfolioComponents:
         # Format the dataframe with correct currency symbols
         def format_currency(value, currency):
             if currency == 'USD':
+                return f"${value:,.0f}"
+            elif currency == 'EUR':
+                return f"€{value:,.0f}"
+            elif currency == 'CZK':
+                return f"{value:,.0f} Kč"
+            else:
+                return f"{value:,.0f} {currency}"
+        
+        def format_price(value, currency):
+            if currency == 'USD':
                 return f"${value:,.2f}"
             elif currency == 'EUR':
                 return f"€{value:,.2f}"
@@ -64,14 +109,22 @@ class PortfolioComponents:
         display_df['P&L'] = display_df['P&L'].astype('object')
         display_df['P&L %'] = display_df['P&L %'].astype('object')
         
-        # Format each row with its original currency
+        # Format each row with its original currency (for display only)
         for idx, row in display_df.iterrows():
             currency = row['Currency']
-            display_df.at[idx, 'Buy Price'] = format_currency(row['Buy Price'], currency)
-            display_df.at[idx, 'Current Price'] = format_currency(row['Current Price'], currency)
-            display_df.at[idx, 'Current Value'] = format_currency(row['Current Value'], currency)
-            display_df.at[idx, 'P&L'] = format_currency(row['P&L'], currency)
-            display_df.at[idx, 'P&L %'] = f"{row['P&L %']:.2f}%"
+            # Store the original numeric values for calculations
+            original_buy_price = row['Buy Price']
+            original_current_price = row['Current Price']
+            original_current_value = row['Current Value']
+            original_pnl = row['P&L']
+            original_pnl_percent = row['P&L %']
+            
+            # Format for display only
+            display_df.at[idx, 'Buy Price'] = format_price(original_buy_price, currency)
+            display_df.at[idx, 'Current Price'] = format_price(original_current_price, currency)
+            display_df.at[idx, 'Current Value'] = format_currency(original_current_value, currency)
+            display_df.at[idx, 'P&L'] = format_currency(original_pnl, currency)
+            display_df.at[idx, 'P&L %'] = f"{original_pnl_percent:.2f}%"
         
         # Remove the Currency column from display
         display_df = display_df.drop('Currency', axis=1)
@@ -85,16 +138,24 @@ class PortfolioComponents:
             st.info("No portfolio holdings to display")
             return
         
-        st.write("**Portfolio Holdings**")
-        
         # Display each portfolio item with action buttons
         for idx, row in portfolio_data.iterrows():
             with st.container():
-                col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1, 1])
+                col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.2, 1, 1])
                 
-                # Format currency values
+                # Format currency values for display only
                 currency = row.get('base_currency', 'USD')
                 def format_currency(value, currency):
+                    if currency == 'USD':
+                        return f"${value:,.0f}"
+                    elif currency == 'EUR':
+                        return f"€{value:,.0f}"
+                    elif currency == 'CZK':
+                        return f"{value:,.0f} Kč"
+                    else:
+                        return f"{value:,.0f} {currency}"
+                
+                def format_price(value, currency):
                     if currency == 'USD':
                         return f"${value:,.2f}"
                     elif currency == 'EUR':
@@ -107,31 +168,44 @@ class PortfolioComponents:
                 with col1:
                     st.write(f"**{row['symbol']}**")
                 with col2:
-                    st.write(f"{row['amount']:,.6f}")
+                    st.write(f"{row['amount']:,.8f}")
                 with col3:
-                    st.write(format_currency(row['price_buy'], currency))
+                    st.write(format_price(row['price_buy'], currency))
                 with col4:
-                    st.write(format_currency(row['current_price'], currency))
+                    st.write(format_price(row['current_price'], currency))
                 with col5:
-                    st.write(format_currency(row['current_value'], currency))
+                    st.write(format_currency(row['cost_basis'], currency))
                 with col6:
+                    st.write(format_currency(row['current_value'], currency))
+                with col7:
                     pnl_color = "normal" if row['pnl'] >= 0 else "inverse"
                     st.write(format_currency(row['pnl'], currency))
-                with col7:
+                with col8:
                     pnl_percent_color = "normal" if row['pnl_percent'] >= 0 else "inverse"
                     st.write(f"{row['pnl_percent']:.2f}%")
-                with col8:
-                    if st.button("✏️", key=f"edit_{row['symbol']}_{idx}", help="Edit this coin"):
-                        st.session_state[f"edit_{row['symbol']}_{idx}"] = True
                 with col9:
-                    if st.button("🗑️", key=f"delete_{row['symbol']}_{idx}", help="Remove this coin"):
-                        delete_callback(row['symbol'])
-                        st.success(f"Removed {row['symbol']} from portfolio")
-                        st.rerun()
+                    source = row.get('source', 'Unknown')
+                    st.write(f"**{source}**")
+                
+                # Use forms for better session state management
+                with col10:
+                    with st.form(f"edit_form_{row['symbol']}_{idx}", clear_on_submit=False):
+                        if st.form_submit_button("✏️", help="Edit this coin", use_container_width=True):
+                            st.session_state[f"editing_{row['symbol']}_{idx}"] = True
+                            st.rerun()
+                
+                with col11:
+                    with st.form(f"delete_form_{row['symbol']}_{idx}", clear_on_submit=False):
+                        if st.form_submit_button("🗑️", help="Remove this coin", use_container_width=True):
+                            # Call the synchronous delete callback
+                            delete_callback(row['symbol'])
+                            st.success(f"Removed {row['symbol']} from portfolio")
                 
                 # Edit form (appears when Edit button is clicked)
-                if st.session_state.get(f"edit_{row['symbol']}_{idx}", False):
-                    with st.expander(f"Edit {row['symbol']}", expanded=True):
+                editing_key = f"editing_{row['symbol']}_{idx}"
+                is_editing = st.session_state.get(editing_key, False)
+                if is_editing:
+                    with st.expander(f"✏️ Edit {row['symbol']}", expanded=True):
                         PortfolioComponents._display_edit_form_enhanced(row, update_callback, idx)
                 
                 st.divider()
@@ -139,31 +213,79 @@ class PortfolioComponents:
     @staticmethod
     def _display_edit_form_enhanced(row: pd.Series, update_callback, idx):
         """Display enhanced edit form for portfolio item"""
-        with st.form(f"edit_form_{row['symbol']}_{idx}"):
+        with st.form(f"edit_form_{row['symbol']}_{idx}_main", clear_on_submit=True):
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                new_amount = st.number_input("Amount", value=float(row['amount']), min_value=0.0, step=0.001, key=f"amount_{row['symbol']}_{idx}")
+                new_amount = st.number_input("Amount", value=float(row['amount']), min_value=0.0, step=0.00000001, format="%.8f", key=f"amount_{row['symbol']}_{idx}")
             with col2:
-                new_price = st.number_input("Buy Price", value=float(row['price_buy']), min_value=0.0, step=0.01, key=f"price_{row['symbol']}_{idx}")
+                new_price = st.number_input("Buy Price", value=float(row['price_buy']), min_value=0.0, step=0.00000001, format="%.8f", key=f"price_{row['symbol']}_{idx}")
             with col3:
                 new_currency = st.selectbox("Currency", ["USD", "EUR", "CZK"], index=["USD", "EUR", "CZK"].index(row.get('base_currency', 'USD')), key=f"currency_{row['symbol']}_{idx}")
+            
+            col4, col5, col6 = st.columns(3)
+            with col4:
+                # Optional: Total Invested helper field
+                current_total_invested = float(row['amount']) * float(row['price_buy'])
+                new_total_invested = st.number_input("Total Invested (Optional)", value=current_total_invested, min_value=0.0, step=0.00000001, format="%.8f", key=f"total_invested_{row['symbol']}_{idx}", help="If provided, will calculate buy price when buy price is 0")
+                
+                # Calculate buy price from total invested only if buy price is 0
+                if new_price == 0 and new_total_invested > 0 and new_amount > 0:
+                    calculated_price = new_total_invested / new_amount
+                    st.info(f"💰 Calculated buy price: {calculated_price:.8f} {new_currency} per coin")
+                    new_price = calculated_price
+            
+            with col5:
+                # Get source options (user's previous sources + common exchanges)
+                common_exchanges = PortfolioComponents.get_common_exchanges()
+                source_options = common_exchanges.copy()
+                
+                # Add user's previous sources at the top
+                if 'portfolio_data' in st.session_state:
+                    user_sources = PortfolioComponents.get_user_sources_from_portfolio(st.session_state.portfolio_data)
+                    for source in user_sources:
+                        if source not in source_options:
+                            source_options.insert(0, source)
+                
+                current_source = row.get('source', 'Unknown')
+                source_index = source_options.index(current_source) if current_source in source_options else 0
+                new_source = st.selectbox("Source", source_options, index=source_index, key=f"source_{row['symbol']}_{idx}")
+            
+            with col6:
+                new_commission = st.number_input("Commission/Fees", value=float(row.get('commission', 0)), min_value=0.0, step=0.00000001, format="%.8f", key=f"commission_{row['symbol']}_{idx}")
             
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.form_submit_button("✅ Update", use_container_width=True):
-                    update_callback(row['symbol'], new_amount, new_price, new_currency)
-                    st.session_state[f"edit_{row['symbol']}_{idx}"] = False
-                    st.success(f"Updated {row['symbol']}")
-                    st.rerun()
+                    try:
+                        # Update the coin
+                        update_callback(row['symbol'], new_amount, new_price, new_currency, new_source, new_commission)
+                        
+                        # Clear the editing session state to close the form
+                        editing_key = f"editing_{row['symbol']}_{idx}"
+                        if editing_key in st.session_state:
+                            del st.session_state[editing_key]
+                        
+                        # Show success message and force refresh
+                        st.success(f"✅ Successfully updated {row['symbol']}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error updating {row['symbol']}: {str(e)}")
+                        # Keep form open on error so user can fix and retry
             with col2:
                 if st.form_submit_button("❌ Cancel", use_container_width=True):
-                    st.session_state[f"edit_{row['symbol']}_{idx}"] = False
+                    # Clear form editing state
+                    editing_key = f"editing_{row['symbol']}_{idx}"
+                    if editing_key in st.session_state:
+                        del st.session_state[editing_key]
                     st.rerun()
             with col3:
                 if st.form_submit_button("🗑️ Delete", use_container_width=True):
-                    # This will be handled by the delete callback
-                    st.session_state[f"edit_{row['symbol']}_{idx}"] = False
+                    # Clear form editing state
+                    editing_key = f"editing_{row['symbol']}_{idx}"
+                    if editing_key in st.session_state:
+                        del st.session_state[editing_key]
+                    st.info(f"Deleting {row['symbol']}...")
                     st.rerun()
     
     @staticmethod
@@ -182,9 +304,9 @@ class PortfolioComponents:
                     st.session_state[f"edit_{row['symbol']}"] = True
             with col3:
                 if st.button("Delete", key=f"delete_{row['symbol']}"):
+                    # Call the synchronous delete callback
                     delete_callback(row['symbol'])
                     st.success(f"Deleted {row['symbol']} from portfolio")
-                    st.rerun()
             
             # Edit form (appears when Edit button is clicked)
             if st.session_state.get(f"edit_{row['symbol']}", False):
@@ -195,16 +317,20 @@ class PortfolioComponents:
         """Display edit form for portfolio item"""
         with st.form(f"edit_form_{row['symbol']}"):
             st.write(f"Edit {row['symbol']}")
-            new_amount = st.number_input("Amount", value=float(row['amount']), min_value=0.0, step=0.001, key=f"amount_{row['symbol']}")
-            new_price = st.number_input("Buy Price", value=float(row['price_buy']), min_value=0.0, step=0.01, key=f"price_{row['symbol']}")
+            new_amount = st.number_input("Amount", value=float(row['amount']), min_value=0.0, step=0.00000001, format="%.8f", key=f"amount_{row['symbol']}")
+            new_price = st.number_input("Buy Price", value=float(row['price_buy']), min_value=0.0, step=0.00000001, format="%.8f", key=f"price_{row['symbol']}")
             
             col1, col2 = st.columns(2)
             with col1:
                 if st.form_submit_button("Update"):
-                    update_callback(row['symbol'], new_amount, new_price)
-                    st.session_state[f"edit_{row['symbol']}"] = False
-                    st.success(f"Updated {row['symbol']}")
-                    st.rerun()
+                    try:
+                        update_callback(row['symbol'], new_amount, new_price)
+                        st.session_state[f"edit_{row['symbol']}"] = False
+                        st.success(f"✅ Successfully updated {row['symbol']}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error updating {row['symbol']}: {str(e)}")
+                        # Keep form open on error so user can fix and retry
             with col2:
                 if st.form_submit_button("Cancel"):
                     st.session_state[f"edit_{row['symbol']}"] = False
@@ -222,10 +348,10 @@ class PortfolioComponents:
                 symbol = st.text_input("Symbol", placeholder="BTC", help="Enter the trading pair symbol (e.g., BTC)")
             
             with col2:
-                amount = st.number_input("Amount", min_value=0.0, step=0.001, help="Number of coins you own")
+                amount = st.number_input("Amount", min_value=0.0, step=0.00000001, format="%.8f", help="Number of coins you own")
             
             with col3:
-                price_buy = st.number_input("Buy Price (USD)", min_value=0.0, step=0.01, help="Price per coin when you bought")
+                price_buy = st.number_input("Buy Price (USD)", min_value=0.0, step=0.00000001, format="%.8f", help="Price per coin when you bought")
             
             if st.form_submit_button("Add to Portfolio", type="primary"):
                 if symbol and amount > 0 and price_buy > 0:
@@ -303,16 +429,16 @@ class PortfolioComponents:
         
         with col1:
             total_value = portfolio_data['current_value'].sum()
-            st.metric("Total Value", f"{target_currency} {total_value:,.2f}")
+            st.metric("Total Value", f"{target_currency} {total_value:,.0f}")
         
         with col2:
             total_cost = portfolio_data['cost_basis'].sum()
-            st.metric("Total Cost", f"{target_currency} {total_cost:,.2f}")
+            st.metric("Total Cost", f"{target_currency} {total_cost:,.0f}")
         
         with col3:
             total_pnl = portfolio_data['pnl'].sum()
             pnl_color = "normal" if total_pnl >= 0 else "inverse"
-            st.metric("Total P&L", f"{target_currency} {total_pnl:,.2f}")
+            st.metric("Total P&L", f"{target_currency} {total_pnl:,.0f}")
         
         with col4:
             total_pnl_percent = (total_pnl / total_cost * 100) if total_cost > 0 else 0
@@ -365,7 +491,7 @@ class PortfolioComponents:
                 st.metric(
                     "Best Performer", 
                     best_performer['symbol'],
-                    f"{target_currency} {best_performer['pnl']:,.2f} ({best_performer['pnl_percent']:.2f}%)"
+                    f"{target_currency} {best_performer['pnl']:,.8f} ({best_performer['pnl_percent']:.8f}%)"
                 )
         
         with col2:
@@ -374,7 +500,7 @@ class PortfolioComponents:
                 st.metric(
                     "Worst Performer", 
                     worst_performer['symbol'],
-                    f"{target_currency} {worst_performer['pnl']:,.2f} ({worst_performer['pnl_percent']:.2f}%)"
+                    f"{target_currency} {worst_performer['pnl']:,.8f} ({worst_performer['pnl_percent']:.8f}%)"
                 )
     
     @staticmethod
@@ -411,7 +537,16 @@ class PortfolioComponents:
             col4, col5, col6 = st.columns(3)
             
             with col4:
-                price_str = st.text_input("Buy Price", placeholder="0.00000000", help=f"Price per coin in {base_currency} (e.g., 50000.00000000)")
+                total_invested_str = st.text_input("Total Invested", placeholder="0.00000000", help=f"Total amount spent in {base_currency} (e.g., 1500.00000000)")
+                try:
+                    total_invested = float(total_invested_str) if total_invested_str else 0.0
+                except ValueError:
+                    total_invested = 0.0
+                    if total_invested_str:
+                        st.error("Invalid total invested format. Use decimal point (.) not comma (,).")
+            
+            with col5:
+                price_str = st.text_input("Buy Price (Optional)", placeholder="0.00000000", help=f"Price per coin in {base_currency} - will be calculated from Total Invested if left empty")
                 try:
                     price_buy = float(price_str) if price_str else 0.0
                 except ValueError:
@@ -419,10 +554,35 @@ class PortfolioComponents:
                     if price_str:
                         st.error("Invalid price format. Use decimal point (.) not comma (,).")
             
-            with col5:
+            with col6:
+                commission_str = st.text_input("Commission/Fees", placeholder="0.00000000", help=f"Trading fees/commission in {base_currency} (e.g., 45.00000000)")
+                try:
+                    commission = float(commission_str) if commission_str else 0.0
+                except ValueError:
+                    commission = 0.0
+                    if commission_str:
+                        st.error("Invalid commission format. Use decimal point (.) not comma (,).")
+            
+            col7, col8, col9 = st.columns(3)
+            
+            with col7:
                 purchase_date = st.date_input("Purchase Date", value=datetime.now().date(), help="Date when you purchased")
             
-            with col6:
+            with col8:
+                # Get source options (user's previous sources + common exchanges)
+                common_exchanges = PortfolioComponents.get_common_exchanges()
+                source_options = common_exchanges.copy()
+                
+                # Add user's previous sources at the top
+                if 'portfolio_data' in st.session_state:
+                    user_sources = PortfolioComponents.get_user_sources_from_portfolio(st.session_state.portfolio_data)
+                    for source in user_sources:
+                        if source not in source_options:
+                            source_options.insert(0, source)
+                
+                source = st.selectbox("Source", source_options, help="Where you bought this cryptocurrency")
+            
+            with col9:
                 st.write("")  # Empty column for spacing
             
             if st.form_submit_button("Add to Portfolio", type="primary"):
@@ -436,8 +596,14 @@ class PortfolioComponents:
                 if amount is None or amount <= 0:
                     errors.append("Amount must be greater than 0")
                 
-                if price_buy is None or price_buy <= 0:
-                    errors.append("Buy price must be greater than 0")
+                # Calculate buy price from total invested if provided, otherwise use direct price input
+                if total_invested > 0 and amount > 0:
+                    # Calculate price from total invested
+                    calculated_price = total_invested / amount
+                    price_buy = calculated_price
+                    st.info(f"💰 Calculated buy price: {calculated_price:.8f} {base_currency} per coin (Total Invested ÷ Amount)")
+                elif price_buy <= 0:
+                    errors.append("Either Total Invested or Buy Price must be provided and greater than 0")
                 
                 if not purchase_date:
                     errors.append("Purchase date is required")
@@ -447,6 +613,9 @@ class PortfolioComponents:
                 if not base_currency:
                     errors.append("Purchase currency is required")
                 
+                if not source:
+                    errors.append("Source is required")
+                
                 if errors:
                     for error in errors:
                         st.error(error)
@@ -454,42 +623,38 @@ class PortfolioComponents:
                     # Round to 8 decimal places for precision
                     amount_rounded = round(float(amount), 8)
                     price_rounded = round(float(price_buy), 8)
+                    commission_rounded = round(float(commission), 8)
                     
                     # Handle async callback properly
                     import asyncio
-                    asyncio.run(add_callback(symbol, amount_rounded, price_rounded, purchase_date, base_currency))
+                    asyncio.run(add_callback(symbol, amount_rounded, price_rounded, purchase_date, base_currency, source, commission_rounded))
                     st.success(f"Added {symbol.upper()} to portfolio!")
+                    # Set active tab to Overview after adding coin
+                    st.session_state['active_portfolio_tab'] = 0
                     st.rerun()
     
     @staticmethod
     def display_add_coin_form_with_search(add_callback, search_callback, default_currency="USD"):
-        """Display enhanced form to add new coin with cryptocurrency search functionality
+        """Display enhanced form to add new coin with cryptocurrency validation
         
         Args:
             add_callback: Function to call when coin is added
-            search_callback: Function to search for cryptocurrencies
+            search_callback: Function to search for cryptocurrencies (used for validation)
             default_currency: Default currency for purchase
         """
         st.subheader("Add New Coin to Portfolio")
         
-        # Symbol selection with search using real-time search component
-        from .real_time_search import RealTimeSearch
-        RealTimeSearch.display_portfolio_search(search_callback, add_callback)
-        
-        # Initialize selected_symbol
-        selected_symbol = None
-        if 'selected_portfolio_symbol' in st.session_state:
-            selected_symbol = st.session_state.selected_portfolio_symbol
-        
+        # Form section
         with st.form("add_coin_form_with_search"):
             col1, col2, col3 = st.columns(3)
             
             with col1:
+                # Symbol input field - user types directly here
                 symbol = st.text_input(
                     "Symbol", 
-                    value=selected_symbol if selected_symbol else "",
-                    placeholder="BTC",
-                    help="Enter the trading pair symbol (e.g., BTC) or use search above"
+                    placeholder="BTC, ADA, ETH...",
+                    help="Enter the cryptocurrency symbol (e.g., BTC, ADA, ETH)",
+                    key="symbol_input_direct"
                 )
             
             with col2:
@@ -510,7 +675,16 @@ class PortfolioComponents:
             col4, col5, col6 = st.columns(3)
             
             with col4:
-                price_str = st.text_input("Buy Price", placeholder="0.00000000", help=f"Price per coin in {base_currency} (e.g., 50000.00000000)")
+                total_invested_str = st.text_input("Total Invested", placeholder="0.00000000", help=f"Total amount spent in {base_currency} (e.g., 1500.00000000)")
+                try:
+                    total_invested = float(total_invested_str) if total_invested_str else 0.0
+                except ValueError:
+                    total_invested = 0.0
+                    if total_invested_str:
+                        st.error("Invalid total invested format. Use decimal point (.) not comma (,).")
+            
+            with col5:
+                price_str = st.text_input("Buy Price (Optional)", placeholder="0.00000000", help=f"Price per coin in {base_currency} - will be calculated from Total Invested if left empty")
                 try:
                     price_buy = float(price_str) if price_str else 0.0
                 except ValueError:
@@ -518,10 +692,37 @@ class PortfolioComponents:
                     if price_str:
                         st.error("Invalid price format. Use decimal point (.) not comma (,).")
             
-            with col5:
+            with col6:
+                commission_str = st.text_input("Commission/Fees", placeholder="0.00000000", help=f"Trading fees/commission in {base_currency} (e.g., 45.00000000)")
+                try:
+                    commission = float(commission_str) if commission_str else 0.0
+                except ValueError:
+                    commission = 0.0
+                    if commission_str:
+                        st.error("Invalid commission format. Use decimal point (.) not comma (,).")
+            
+            col7, col8, col9 = st.columns(3)
+            
+            with col7:
                 purchase_date = st.date_input("Purchase Date", value=datetime.now().date(), help="Date when you purchased")
             
-            with col6:
+            with col8:
+                # Get source options (user's previous sources + common exchanges)
+                common_exchanges = PortfolioComponents.get_common_exchanges()
+                source_options = common_exchanges.copy()
+                
+                # Add user's previous sources at the top
+                if 'portfolio_data' in st.session_state:
+                    user_sources = PortfolioComponents.get_user_sources_from_portfolio(st.session_state.portfolio_data)
+                    for source in user_sources:
+                        if source not in source_options:
+                            source_options.insert(0, source)
+                
+                source = st.selectbox("Source", source_options, help="Where you bought this cryptocurrency")
+            
+            with col8:
+                st.write("")  # Empty column for spacing
+            with col9:
                 st.write("")  # Empty column for spacing
             
             if st.form_submit_button("Add to Portfolio", type="primary"):
@@ -529,12 +730,34 @@ class PortfolioComponents:
                 errors = []
                 if not symbol or not symbol.strip():
                     errors.append("Symbol is required")
+                else:
+                    # Validate symbol exists in database
+                    try:
+                        # Use search callback to validate symbol
+                        search_results = search_callback(symbol.strip().upper())
+                        if not search_results:
+                            errors.append(f"Symbol '{symbol.upper()}' not found in cryptocurrency database")
+                        else:
+                            # Use the first result (most relevant match)
+                            symbol = search_results[0]['symbol']
+                    except Exception as e:
+                        errors.append(f"Error validating symbol: {str(e)}")
+                
                 if not amount or amount <= 0:
                     errors.append("Amount must be greater than 0")
-                if not price_buy or price_buy <= 0:
-                    errors.append("Buy price must be greater than 0")
+                
+                # Calculate buy price from total invested if provided, otherwise use direct price input
+                if total_invested > 0 and amount > 0:
+                    # Calculate price from total invested
+                    calculated_price = total_invested / amount
+                    price_buy = calculated_price
+                    st.info(f"💰 Calculated buy price: {calculated_price:.8f} {base_currency} per coin (Total Invested ÷ Amount)")
+                elif price_buy <= 0:
+                    errors.append("Either Total Invested or Buy Price must be provided and greater than 0")
                 if not purchase_date:
                     errors.append("Purchase date is required")
+                if not source:
+                    errors.append("Source is required")
                 
                 if errors:
                     for error in errors:
@@ -543,12 +766,12 @@ class PortfolioComponents:
                     # Round to 8 decimal places for precision
                     amount_rounded = round(float(amount), 8)
                     price_rounded = round(float(price_buy), 8)
+                    commission_rounded = round(float(commission), 8)
                     
                     # Handle async callback properly
                     import asyncio
-                    asyncio.run(add_callback(symbol, amount_rounded, price_rounded, purchase_date, base_currency))
+                    asyncio.run(add_callback(symbol, amount_rounded, price_rounded, purchase_date, base_currency, source, commission_rounded))
                     st.success(f"Added {symbol.upper()} to portfolio!")
-                    # Clear selected symbol
-                    if 'selected_portfolio_symbol' in st.session_state:
-                        del st.session_state.selected_portfolio_symbol
+                    # Set active tab to Overview after adding coin
+                    st.session_state['active_portfolio_tab'] = 0
                     st.rerun()

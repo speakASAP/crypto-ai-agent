@@ -75,7 +75,7 @@ async def get_portfolio():
     try:
         log_database_operation("select", "portfolio", "ui_dashboard")
         async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("SELECT symbol, amount, price_buy, purchase_date, base_currency, purchase_price_eur, purchase_price_czk FROM portfolio")
+            cursor = await db.execute("SELECT symbol, amount, price_buy, purchase_date, base_currency, purchase_price_eur, purchase_price_czk, source, commission FROM portfolio")
             rows = await cursor.fetchall()
             
             # Handle both old and new schema
@@ -85,8 +85,17 @@ async def get_portfolio():
                 result['base_currency'] = 'USD'
                 result['purchase_price_eur'] = None
                 result['purchase_price_czk'] = None
-            else:  # New schema
+                result['source'] = 'Unknown'
+                result['commission'] = 0
+            elif rows and len(rows[0]) == 7:  # Schema without source
                 result = pd.DataFrame(rows, columns=["symbol", "amount", "price_buy", "purchase_date", "base_currency", "purchase_price_eur", "purchase_price_czk"])
+                result['source'] = 'Unknown'
+                result['commission'] = 0
+            elif rows and len(rows[0]) == 8:  # Schema without commission
+                result = pd.DataFrame(rows, columns=["symbol", "amount", "price_buy", "purchase_date", "base_currency", "purchase_price_eur", "purchase_price_czk", "source"])
+                result['commission'] = 0
+            else:  # New schema with commission
+                result = pd.DataFrame(rows, columns=["symbol", "amount", "price_buy", "purchase_date", "base_currency", "purchase_price_eur", "purchase_price_czk", "source", "commission"])
             
             log_info_with_context(f"Retrieved {len(result)} portfolio items", "get_portfolio", "ui_dashboard", count=len(result))
             log_function_exit("get_portfolio", "ui_dashboard", result=f"{len(result)} items")
@@ -435,43 +444,73 @@ async def restore_symbol(symbol):
 
 # Portfolio Management Functions
 @log_performance_timing("add_coin_to_portfolio", "ui_dashboard")
-async def add_coin_to_portfolio(symbol, amount, price_buy, purchase_date=None, base_currency='USD'):
+async def add_coin_to_portfolio(symbol, amount, price_buy, purchase_date=None, base_currency='USD', source='Unknown', commission=0):
     """Add a new coin to the portfolio with multi-currency support"""
-    log_function_entry("add_coin_to_portfolio", "ui_dashboard", symbol=symbol, amount=amount, price_buy=price_buy, base_currency=base_currency)
+    log_function_entry("add_coin_to_portfolio", "ui_dashboard", symbol=symbol, amount=amount, price_buy=price_buy, base_currency=base_currency, source=source, commission=commission)
     
     try:
         # Convert purchase price to other currencies
         price_eur = await currency_converter.convert_currency(price_buy, base_currency, 'EUR')
         price_czk = await currency_converter.convert_currency(price_buy, base_currency, 'CZK')
         
-        log_database_operation("insert", "portfolio", "ui_dashboard", symbol=symbol, amount=amount, price_buy=price_buy)
+        log_database_operation("insert", "portfolio", "ui_dashboard", symbol=symbol, amount=amount, price_buy=price_buy, source=source, commission=commission)
         async with aiosqlite.connect(DB_PATH) as db:
             # Add to portfolio
             await db.execute("""
                 INSERT OR REPLACE INTO portfolio 
-                (symbol, amount, price_buy, purchase_date, base_currency, purchase_price_eur, purchase_price_czk) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (symbol.upper(), amount, price_buy, purchase_date, base_currency, price_eur, price_czk))
+                (symbol, amount, price_buy, purchase_date, base_currency, purchase_price_eur, purchase_price_czk, source, commission) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (symbol.upper(), amount, price_buy, purchase_date, base_currency, price_eur, price_czk, source, commission))
             
             # Also add to tracked_symbols for price monitoring
             await db.execute("INSERT OR IGNORE INTO tracked_symbols (symbol, is_active) VALUES (?, ?)", (symbol.upper(), 1))
             
             await db.commit()
         
-        log_user_action("add_coin", {"symbol": symbol, "amount": amount, "price_buy": price_buy, "base_currency": base_currency}, "ui_dashboard")
-        log_info_with_context(f"Added {symbol} to portfolio and tracking in {base_currency}", "add_coin_to_portfolio", "ui_dashboard", symbol=symbol)
+        log_user_action("add_coin", {"symbol": symbol, "amount": amount, "price_buy": price_buy, "base_currency": base_currency, "source": source}, "ui_dashboard")
+        log_info_with_context(f"Added {symbol} to portfolio and tracking in {base_currency} from {source}", "add_coin_to_portfolio", "ui_dashboard", symbol=symbol)
         log_function_exit("add_coin_to_portfolio", "ui_dashboard", result="success")
     except Exception as e:
         log_error_with_context(e, "add_coin_to_portfolio", "ui_dashboard", symbol=symbol)
         log_function_exit("add_coin_to_portfolio", "ui_dashboard", result="error")
         raise
 
-async def update_coin_in_portfolio(symbol, amount, price_buy):
-    """Update an existing coin in the portfolio"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE portfolio SET amount = ?, price_buy = ? WHERE symbol = ?", 
-                        (amount, price_buy, symbol.upper()))
-        await db.commit()
+async def update_coin_in_portfolio(symbol, amount, price_buy, base_currency='USD', source='Unknown', commission=0):
+    """Update an existing coin in the portfolio with multi-currency support"""
+    try:
+        log_info_with_context(f"Updating coin: {symbol}, amount: {amount}, price: {price_buy}, currency: {base_currency}, source: {source}, commission: {commission}", "update_coin_in_portfolio", "ui_dashboard")
+        
+        # Convert prices to EUR and CZK for storage
+        price_eur = await currency_converter.convert_currency(price_buy, base_currency, 'EUR')
+        price_czk = await currency_converter.convert_currency(price_buy, base_currency, 'CZK')
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            # First, check if the coin exists
+            cursor = await db.execute("SELECT symbol FROM portfolio WHERE symbol = ?", (symbol.upper(),))
+            existing = await cursor.fetchone()
+            
+            if not existing:
+                log_warning_with_context(f"Coin {symbol} not found in portfolio", "update_coin_in_portfolio", "ui_dashboard")
+                raise ValueError(f"Coin {symbol} not found in portfolio")
+            
+            # Update the coin
+            await db.execute("""
+                UPDATE portfolio 
+                SET amount = ?, price_buy = ?, base_currency = ?, purchase_price_eur = ?, purchase_price_czk = ?, source = ?, commission = ?
+                WHERE symbol = ?
+            """, (amount, price_buy, base_currency, price_eur, price_czk, source, commission, symbol.upper()))
+            await db.commit()
+            
+            # Verify the update
+            cursor = await db.execute("SELECT symbol, amount, price_buy, base_currency FROM portfolio WHERE symbol = ?", (symbol.upper(),))
+            updated_row = await cursor.fetchone()
+            log_info_with_context(f"Updated coin verified: {updated_row}", "update_coin_in_portfolio", "ui_dashboard")
+            
+        log_user_action("update_coin", {"symbol": symbol, "amount": amount, "price_buy": price_buy, "base_currency": base_currency, "source": source}, "ui_dashboard")
+        
+    except Exception as e:
+        log_error_with_context(e, "update_coin_in_portfolio", "ui_dashboard", symbol=symbol)
+        raise
 
 async def delete_coin_from_portfolio(symbol):
     """Delete a coin from the portfolio"""
@@ -591,8 +630,8 @@ async def calculate_portfolio_metrics(portfolio_df, current_prices, target_curre
         # Calculate current value in original currency
         portfolio_data.at[idx, 'current_value'] = row['amount'] * portfolio_data.at[idx, 'current_price']
     
-    # Use original prices for cost basis (no conversion needed for display)
-    portfolio_data['cost_basis'] = portfolio_data['amount'] * portfolio_data['price_buy']
+    # Use original prices for cost basis including commission (no conversion needed for display)
+    portfolio_data['cost_basis'] = portfolio_data['amount'] * portfolio_data['price_buy'] + portfolio_data.get('commission', 0)
     portfolio_data['pnl'] = portfolio_data['current_value'] - portfolio_data['cost_basis']
     portfolio_data['pnl_percent'] = (portfolio_data['pnl'] / portfolio_data['cost_basis'] * 100).fillna(0)
     
@@ -669,6 +708,9 @@ current_prices = {}
 if not portfolio.empty:
     current_prices = asyncio.run(get_current_prices(portfolio['symbol'].tolist()))
 
+# Store portfolio data in session state for source suggestions
+st.session_state['portfolio_data'] = portfolio
+
 # Currency selection
 selected_currency, show_rates = PortfolioComponents.display_currency_selector()
 
@@ -686,18 +728,31 @@ metrics = asyncio.run(calculate_portfolio_metrics(portfolio, current_prices, sel
 PortfolioComponents.display_multi_currency_portfolio(metrics['portfolio_data'], currency_rates, selected_currency)
 
 # Portfolio Management Tabs using components
-async def add_coin_callback(symbol, amount, price_buy, purchase_date=None, base_currency='USD'):
-    await add_coin_to_portfolio(symbol, amount, price_buy, purchase_date, base_currency)
+async def add_coin_callback(symbol, amount, price_buy, purchase_date=None, base_currency='USD', source='Unknown', commission=0):
+    await add_coin_to_portfolio(symbol, amount, price_buy, purchase_date, base_currency, source, commission)
+    # Set active tab to Overview after adding coin
+    st.session_state['active_portfolio_tab'] = 0  # 0 = Overview tab
     # Force refresh of portfolio data after adding coin
     st.rerun()
 
-async def update_coin_callback(symbol, amount, price_buy, base_currency='USD'):
-    await update_coin_in_portfolio(symbol, amount, price_buy, base_currency)
-    # Force refresh of portfolio data after updating coin
-    st.rerun()
+async def update_coin_callback(symbol, amount, price_buy, base_currency='USD', source='Unknown', commission=0):
+    try:
+        await update_coin_in_portfolio(symbol, amount, price_buy, base_currency, source, commission)
+        # Set active tab to Overview after updating coin
+        st.session_state['active_portfolio_tab'] = 0
+        # Clear any cached data
+        if 'portfolio_data' in st.session_state:
+            del st.session_state['portfolio_data']
+        # Force refresh of portfolio data after updating coin
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error updating coin: {str(e)}")
+        log_error_with_context(e, "update_coin_callback", "ui_dashboard", symbol=symbol)
 
 async def delete_coin_callback(symbol):
     await delete_coin_from_portfolio(symbol)
+    # Set active tab to Overview after deleting coin
+    st.session_state['active_portfolio_tab'] = 0
     # Force refresh of portfolio data after deleting coin
     st.rerun()
 
@@ -706,28 +761,101 @@ async def clear_all_portfolio_callback():
     # Force refresh of portfolio data after clearing all
     st.rerun()
 
+# Synchronous wrapper functions for Streamlit form callbacks
+def sync_update_coin_callback(symbol, amount, price_buy, base_currency='USD', source='Unknown', commission=0):
+    """Synchronous wrapper for update_coin_callback to work with Streamlit forms"""
+    try:
+        asyncio.run(update_coin_in_portfolio(symbol, amount, price_buy, base_currency, source, commission))
+        # Set active tab to Overview after updating coin
+        st.session_state['active_portfolio_tab'] = 0
+        # Clear any cached data
+        if 'portfolio_data' in st.session_state:
+            del st.session_state['portfolio_data']
+        # Note: st.rerun() is handled by the calling form to avoid race conditions
+    except Exception as e:
+        st.error(f"Error updating coin: {str(e)}")
+        log_error_with_context(e, "sync_update_coin_callback", "ui_dashboard", symbol=symbol)
+
+def sync_delete_coin_callback(symbol):
+    """Synchronous wrapper for delete_coin_callback to work with Streamlit forms"""
+    try:
+        asyncio.run(delete_coin_from_portfolio(symbol))
+        # Set active tab to Overview after deleting coin
+        st.session_state['active_portfolio_tab'] = 0
+        # Note: st.rerun() is handled by the calling form to avoid race conditions
+    except Exception as e:
+        st.error(f"Error deleting coin: {str(e)}")
+        log_error_with_context(e, "sync_delete_coin_callback", "ui_dashboard", symbol=symbol)
+
 # Display multi-currency portfolio tabs
-st.subheader("Portfolio Management")
+# Create custom tab system for better control
+# Initialize active tab if not set
+if 'active_portfolio_tab' not in st.session_state:
+    st.session_state['active_portfolio_tab'] = 0
 
-# Create tabs for different views
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "➕ Add Coin", "📈 Performance", "📅 History"])
+# Tab selection
+tab_options = ["📊 Overview", "➕ Add Coin", "📈 Performance", "📅 History"]
+selected_tab = st.radio(
+    "Portfolio Management",
+    options=tab_options,
+    index=st.session_state['active_portfolio_tab'],
+    horizontal=True,
+    key="portfolio_tab_selector"
+)
 
-with tab1:
-    # Display portfolio table
+# Update session state when tab changes
+if st.session_state['active_portfolio_tab'] != tab_options.index(selected_tab):
+    st.session_state['active_portfolio_tab'] = tab_options.index(selected_tab)
+    st.rerun()
+
+# Display content based on selected tab
+if selected_tab == "📊 Overview":
+    # Display portfolio table with Edit and Remove buttons
     if not metrics['portfolio_data'].empty:
-        # Add clear all portfolio button
-        col1, col2 = st.columns([3, 1])
+        # Add clear all portfolio button and refresh button
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
-            st.write("**Portfolio Holdings**")
+            st.write("")  # Empty column for spacing
         with col2:
-            if st.button("🗑️ Clear All Portfolio", key="clear_all_portfolio", type="secondary"):
+            if st.button("🔄 Refresh", key="refresh_portfolio", type="secondary", help="Refresh portfolio data"):
+                st.rerun()
+        with col3:
+            if st.button("🗑️ Clear All", key="clear_all_portfolio", type="secondary", help="Clear all portfolio items"):
                 asyncio.run(clear_all_portfolio_callback())
         
-        PortfolioComponents.display_portfolio_table(metrics['portfolio_data'])
+        # Display table headers
+        col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.2, 1, 1])
+        with col1:
+            st.write("**Symbol**")
+        with col2:
+            st.write("**Amount**")
+        with col3:
+            st.write("**Buy Price**")
+        with col4:
+            st.write("**Current Price**")
+        with col5:
+            st.write("**Total Invested**")
+        with col6:
+            st.write("**Current Value**")
+        with col7:
+            st.write("**P&L**")
+        with col8:
+            st.write("**P&L %**")
+        with col9:
+            st.write("**Source**")
+        with col10:
+            st.write("**Edit**")
+        with col11:
+            st.write("**Remove**")
+        
+        st.divider()
+        
+        # Display portfolio with action buttons
+        PortfolioComponents.display_portfolio_table_with_actions(metrics['portfolio_data'], sync_update_coin_callback, sync_delete_coin_callback)
     else:
         st.info("No portfolio holdings to display")
 
-with tab2:
+elif selected_tab == "➕ Add Coin":
     # Add coin form with multi-currency support and cryptocurrency search
     if crypto_symbols_count > 0:
         # Use enhanced form with search functionality
@@ -741,11 +869,11 @@ with tab2:
         st.info("💡 **Tip**: Use the symbol input field to add cryptocurrency symbols to your portfolio.")
         PortfolioComponents.display_add_coin_form_multi_currency(add_coin_callback, selected_currency)
 
-with tab3:
+elif selected_tab == "📈 Performance":
     # Performance metrics
     PortfolioComponents.display_multi_currency_metrics(metrics['portfolio_data'], selected_currency)
 
-with tab4:
+elif selected_tab == "📅 History":
     # Purchase history
     PortfolioComponents.display_purchase_date_tracking(portfolio)
 

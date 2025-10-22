@@ -47,12 +47,12 @@ Enhance the existing portfolio tracking system to support multiple currencies (U
 -- Enhanced portfolio table
 CREATE TABLE IF NOT EXISTS portfolio (
     symbol TEXT PRIMARY KEY,
-    amount REAL,
-    price_buy REAL,
+    amount DECIMAL(20,8),
+    price_buy DECIMAL(20,8),
     purchase_date DATETIME,
     base_currency TEXT DEFAULT 'USD',
-    purchase_price_eur REAL,
-    purchase_price_czk REAL
+    purchase_price_eur DECIMAL(20,8),
+    purchase_price_czk DECIMAL(20,8)
 );
 
 -- Currency conversion rates table

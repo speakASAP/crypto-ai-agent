@@ -36,7 +36,8 @@ class AlertComponents:
                 threshold_price = st.number_input(
                     "Threshold Price (USD)",
                     min_value=0.0,
-                    step=0.01,
+                    step=0.00000001,
+                    format="%.8f",
                     help="Set the price threshold for the alert"
                 )
                 
@@ -121,7 +122,8 @@ class AlertComponents:
                     "Threshold Price",
                     value=float(alert['threshold_price']),
                     min_value=0.0,
-                    step=0.01,
+                    step=0.00000001,
+                    format="%.8f",
                     key=f"edit_threshold_{alert['id']}"
                 )
             

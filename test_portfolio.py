@@ -57,8 +57,8 @@ async def test_portfolio_functions():
             await db.execute("""
             CREATE TABLE IF NOT EXISTS portfolio (
                 symbol TEXT PRIMARY KEY,
-                amount REAL,
-                price_buy REAL
+                amount DECIMAL(20,8),
+                price_buy DECIMAL(20,8)
             )
             """)
             await db.commit()
