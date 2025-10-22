@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,8 +24,17 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
     purchase_date: '',
     base_currency: selectedCurrency,
     source: '',
-    commission: '0'
+    commission: '0',
+    total_investment_text: ''
   })
+
+  // Calculate total investment (amount * price_buy + commission)
+  const totalInvestment = React.useMemo(() => {
+    const amount = parseFloat(formData.amount) || 0
+    const price = parseFloat(formData.price_buy) || 0
+    const commission = parseFloat(formData.commission) || 0
+    return (amount * price) + commission
+  }, [formData.amount, formData.price_buy, formData.commission])
 
   const [loading, setLoading] = useState(false)
 
@@ -38,7 +47,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         purchase_date: item.purchase_date || '',
         base_currency: item.base_currency,
         source: item.source || '',
-        commission: item.commission.toString()
+        commission: item.commission.toString(),
+        total_investment_text: item.total_investment_text || ''
       })
     } else {
       setFormData({
@@ -48,7 +58,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         purchase_date: '',
         base_currency: selectedCurrency,
         source: '',
-        commission: '0'
+        commission: '0',
+        total_investment_text: ''
       })
     }
   }, [item, selectedCurrency, isOpen])
@@ -107,7 +118,7 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                   step="0.00000001"
                   value={formData.amount}
                   onChange={(e) => handleChange('amount', e.target.value)}
-                  placeholder="0.5"
+                  placeholder="0.50000000"
                   required
                 />
               </div>
@@ -119,10 +130,10 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                 <Input
                   id="price_buy"
                   type="number"
-                  step="0.01"
+                  step="0.00000001"
                   value={formData.price_buy}
                   onChange={(e) => handleChange('price_buy', e.target.value)}
-                  placeholder="30000"
+                  placeholder="30000.00000000"
                   required
                 />
               </div>
@@ -166,11 +177,46 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                 <Input
                   id="commission"
                   type="number"
-                  step="0.01"
+                  step="0.00000001"
                   value={formData.commission}
                   onChange={(e) => handleChange('commission', e.target.value)}
-                  placeholder="0"
+                  placeholder="0.00000000"
                 />
+              </div>
+            </div>
+
+            {/* Total Investment Text Field */}
+            <div className="space-y-2">
+              <Label htmlFor="total_investment_text">Total Investment (Original Currency)</Label>
+              <Input
+                id="total_investment_text"
+                value={formData.total_investment_text}
+                onChange={(e) => handleChange('total_investment_text', e.target.value)}
+                placeholder="e.g., $15,015 or €4,200 or 50,000 CZK"
+              />
+              <div className="text-sm text-gray-600">
+                Enter the total amount you invested in the original currency (e.g., $15,015, €4,200, 50,000 CZK)
+              </div>
+            </div>
+
+            {/* Calculated Total Investment Display */}
+            <div className="space-y-2">
+              <Label htmlFor="calculated_total">Calculated Total Investment</Label>
+              <div className="p-3 bg-gray-50 rounded-md border">
+                <div className="text-lg font-semibold">
+                  {totalInvestment > 0 ? 
+                    new Intl.NumberFormat('en-US', {
+                      style: 'currency',
+                      currency: formData.base_currency,
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 8
+                    }).format(totalInvestment) : 
+                    'Enter amount and price to calculate'
+                  }
+                </div>
+                <div className="text-sm text-gray-600">
+                  (Amount × Price + Commission)
+                </div>
               </div>
             </div>
           </div>

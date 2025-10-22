@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import List, Optional
 from pydantic import BaseModel
 import logging
+from .services.currency_service import currency_service
 
 # Configure logging
 logging.basicConfig(
@@ -29,12 +30,18 @@ class PortfolioItem(BaseModel):
     purchase_price_czk: Optional[float] = None
     source: Optional[str] = None
     commission: float = 0.0
+    total_investment_text: Optional[str] = None
     created_at: str
     updated_at: str
     current_price: Optional[float] = None
     current_value: Optional[float] = None
     pnl: Optional[float] = None
     pnl_percent: Optional[float] = None
+
+    class Config:
+        json_encoders = {
+            float: lambda v: round(v, 8) if v is not None else None
+        }
 
 class PortfolioCreate(BaseModel):
     symbol: str
@@ -44,6 +51,12 @@ class PortfolioCreate(BaseModel):
     base_currency: str
     source: Optional[str] = None
     commission: float = 0.0
+    total_investment_text: Optional[str] = None
+
+    class Config:
+        json_encoders = {
+            float: lambda v: round(v, 8) if v is not None else None
+        }
 
 class PortfolioUpdate(BaseModel):
     symbol: Optional[str] = None
@@ -53,6 +66,12 @@ class PortfolioUpdate(BaseModel):
     base_currency: Optional[str] = None
     source: Optional[str] = None
     commission: Optional[float] = None
+    total_investment_text: Optional[str] = None
+
+    class Config:
+        json_encoders = {
+            float: lambda v: round(v, 8) if v is not None else None
+        }
 
 class PriceAlert(BaseModel):
     id: int
@@ -94,6 +113,7 @@ portfolio_items = [
         "purchase_price_czk": 700000,
         "source": "Binance",
         "commission": 15.0,
+        "total_investment_text": "$15,015",
         "created_at": "2024-01-15T10:00:00Z",
         "updated_at": "2024-01-15T10:00:00Z",
         "current_price": 45000,
@@ -112,6 +132,7 @@ portfolio_items = [
         "purchase_price_czk": 46000,
         "source": "Coinbase",
         "commission": 20.0,
+        "total_investment_text": "$4,020",
         "created_at": "2024-02-20T14:30:00Z",
         "updated_at": "2024-02-20T14:30:00Z",
         "current_price": 2500,
@@ -130,6 +151,7 @@ portfolio_items = [
         "purchase_price_czk": 11.5,
         "source": "Kraken",
         "commission": 5.0,
+        "total_investment_text": "$505",
         "created_at": "2024-03-10T09:15:00Z",
         "updated_at": "2024-03-10T09:15:00Z",
         "current_price": 0.6,
@@ -183,12 +205,55 @@ tracked_symbols = [
 
 next_id = 4
 
+def convert_portfolio_item(item: dict, target_currency: str) -> dict:
+    """Convert a portfolio item to target currency"""
+    if item["base_currency"] == target_currency:
+        return item
+    
+    # Convert all price values
+    converted_item = item.copy()
+    converted_item["base_currency"] = target_currency
+    
+    # Convert buy price
+    converted_item["price_buy"] = currency_service.convert_amount(
+        item["price_buy"], item["base_currency"], target_currency
+    )
+    
+    # Convert current price
+    if item.get("current_price"):
+        converted_item["current_price"] = currency_service.convert_amount(
+            item["current_price"], item["base_currency"], target_currency
+        )
+    
+    # Convert current value
+    if item.get("current_value"):
+        converted_item["current_value"] = currency_service.convert_amount(
+            item["current_value"], item["base_currency"], target_currency
+        )
+    
+    # Convert P&L
+    if item.get("pnl"):
+        converted_item["pnl"] = currency_service.convert_amount(
+            item["pnl"], item["base_currency"], target_currency
+        )
+    
+    # Convert commission
+    if item.get("commission"):
+        converted_item["commission"] = currency_service.convert_amount(
+            item["commission"], item["base_currency"], target_currency
+        )
+    
+    return converted_item
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting Crypto AI Agent API v2.0 (Simple Mode)")
     logger.info("✅ Running without external databases for demo")
+    logger.info("💱 Initializing currency exchange rates...")
+    await currency_service.get_exchange_rates()
+    logger.info("✅ Currency service initialized")
     
     yield
     
@@ -238,8 +303,12 @@ async def root():
 # Portfolio CRUD endpoints
 @app.get("/api/portfolio/", response_model=List[PortfolioItem])
 async def get_portfolio(currency: str = "USD"):
-    """Get all portfolio items"""
-    return portfolio_items
+    """Get all portfolio items converted to target currency"""
+    converted_items = []
+    for item in portfolio_items:
+        converted_item = convert_portfolio_item(item, currency)
+        converted_items.append(converted_item)
+    return converted_items
 
 @app.post("/api/portfolio/", response_model=PortfolioItem)
 async def create_portfolio_item(item: PortfolioCreate):
@@ -258,10 +327,11 @@ async def create_portfolio_item(item: PortfolioCreate):
         "purchase_price_czk": None,
         "source": item.source,
         "commission": item.commission,
+        "total_investment_text": item.total_investment_text,
         "created_at": datetime.now().isoformat() + "Z",
         "updated_at": datetime.now().isoformat() + "Z",
-        "current_price": item.price_buy,  # Demo: set current price same as buy price
-        "current_value": item.amount * item.price_buy,
+        "current_price": round(item.price_buy, 8),  # Demo: set current price same as buy price
+        "current_value": round(item.amount * item.price_buy, 8),
         "pnl": 0.0,
         "pnl_percent": 0.0
     }
@@ -284,10 +354,11 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate):
             
             existing_item["updated_at"] = datetime.now().isoformat() + "Z"
             
-            # Recalculate values
-            existing_item["current_value"] = existing_item["amount"] * existing_item["current_price"]
-            existing_item["pnl"] = existing_item["current_value"] - (existing_item["amount"] * existing_item["price_buy"])
-            existing_item["pnl_percent"] = (existing_item["pnl"] / (existing_item["amount"] * existing_item["price_buy"])) * 100
+            # Recalculate values with 8 decimal precision
+            existing_item["current_value"] = round(existing_item["amount"] * existing_item["current_price"], 8)
+            total_investment = round(existing_item["amount"] * existing_item["price_buy"] + existing_item["commission"], 8)
+            existing_item["pnl"] = round(existing_item["current_value"] - total_investment, 8)
+            existing_item["pnl_percent"] = round((existing_item["pnl"] / total_investment) * 100, 8) if total_investment > 0 else 0
             
             return existing_item
     
@@ -307,16 +378,22 @@ async def delete_portfolio_item(item_id: int):
 
 @app.get("/api/portfolio/summary")
 async def get_portfolio_summary(currency: str = "USD"):
-    """Get portfolio summary"""
-    total_value = sum(item["current_value"] for item in portfolio_items)
-    total_pnl = sum(item["pnl"] for item in portfolio_items)
+    """Get portfolio summary converted to target currency"""
+    # Convert all items to target currency first
+    converted_items = []
+    for item in portfolio_items:
+        converted_item = convert_portfolio_item(item, currency)
+        converted_items.append(converted_item)
+    
+    total_value = sum(item["current_value"] for item in converted_items)
+    total_pnl = sum(item["pnl"] for item in converted_items)
     total_pnl_percent = (total_pnl / (total_value - total_pnl)) * 100 if total_value > total_pnl else 0
     
     return {
-        "total_value": total_value,
-        "total_pnl": total_pnl,
-        "total_pnl_percent": total_pnl_percent,
-        "item_count": len(portfolio_items),
+        "total_value": round(total_value, 8),
+        "total_pnl": round(total_pnl, 8),
+        "total_pnl_percent": round(total_pnl_percent, 8),
+        "item_count": len(converted_items),
         "currency": currency
     }
 
@@ -381,6 +458,28 @@ async def get_tracked_symbols(active_only: bool = True):
     if active_only:
         return [symbol for symbol in tracked_symbols if symbol["active"]]
     return tracked_symbols
+
+@app.post("/api/currency/refresh")
+async def refresh_exchange_rates():
+    """Refresh exchange rates from external API"""
+    try:
+        await currency_service.refresh_rates()
+        return {
+            "message": "Exchange rates refreshed successfully",
+            "rates_count": len(currency_service.rates),
+            "last_updated": currency_service.last_updated
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh exchange rates: {str(e)}")
+
+@app.get("/api/currency/rates")
+async def get_exchange_rates():
+    """Get current exchange rates"""
+    return {
+        "base_currency": currency_service.base_currency,
+        "rates": currency_service.rates,
+        "last_updated": currency_service.last_updated
+    }
 
 if __name__ == "__main__":
     import uvicorn

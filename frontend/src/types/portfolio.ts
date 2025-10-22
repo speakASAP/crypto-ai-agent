@@ -9,6 +9,7 @@ export interface PortfolioItem {
   purchase_price_czk?: number
   source?: string
   commission: number
+  total_investment_text?: string
   created_at: string
   updated_at: string
   current_price?: number
@@ -25,6 +26,7 @@ export interface PortfolioCreate {
   base_currency: string
   source?: string
   commission?: number
+  total_investment_text?: string
 }
 
 export interface PortfolioUpdate {
@@ -35,6 +37,7 @@ export interface PortfolioUpdate {
   base_currency?: string
   source?: string
   commission?: number
+  total_investment_text?: string
 }
 
 export interface PortfolioSummary {

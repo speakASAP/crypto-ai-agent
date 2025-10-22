@@ -1,18 +1,33 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { usePortfolioStore } from '@/stores/portfolioStore'
 import { useAlertsStore } from '@/stores/alertsStore'
 import { useSymbolsStore } from '@/stores/symbolsStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { PortfolioModal } from '@/components/PortfolioModal'
+import { AlertModal } from '@/components/AlertModal'
+import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PriceAlert, PriceAlertCreate, PriceAlertUpdate } from '@/types'
+import { apiClient } from '@/lib/api'
 
 export default function Home() {
-  const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency } = usePortfolioStore()
-  const { alerts, fetchAlerts } = useAlertsStore()
+  const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem } = usePortfolioStore()
+  const { alerts, fetchAlerts, createAlert, updateAlert, deleteAlert } = useAlertsStore()
   const { trackedSymbols, fetchTrackedSymbols } = useSymbolsStore()
   const { isConnected, subscribeToPrices, subscribeToAlerts } = useWebSocket()
+
+  // Modal states
+  const [portfolioModalOpen, setPortfolioModalOpen] = useState(false)
+  const [editingPortfolioItem, setEditingPortfolioItem] = useState<PortfolioItem | null>(null)
+  const [alertModalOpen, setAlertModalOpen] = useState(false)
+  const [editingAlert, setEditingAlert] = useState<PriceAlert | null>(null)
+  
+  // Currency states
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
+  const [lastUpdated, setLastUpdated] = useState<string>('')
+  const [refreshingRates, setRefreshingRates] = useState(false)
 
   useEffect(() => {
     // Fetch initial data
@@ -20,7 +35,33 @@ export default function Home() {
     fetchSummary()
     fetchAlerts()
     fetchTrackedSymbols()
+    loadExchangeRates()
   }, [fetchPortfolio, fetchSummary, fetchAlerts, fetchTrackedSymbols])
+
+  const loadExchangeRates = async () => {
+    try {
+      const rates = await apiClient.getExchangeRates()
+      setExchangeRates(rates.rates)
+      setLastUpdated(rates.last_updated)
+    } catch (error) {
+      console.error('Failed to load exchange rates:', error)
+    }
+  }
+
+  const refreshExchangeRates = async () => {
+    setRefreshingRates(true)
+    try {
+      const result = await apiClient.refreshExchangeRates()
+      setLastUpdated(result.last_updated)
+      // Reload portfolio data with new rates
+      fetchPortfolio()
+      fetchSummary()
+    } catch (error) {
+      console.error('Failed to refresh exchange rates:', error)
+    } finally {
+      setRefreshingRates(false)
+    }
+  }
 
   useEffect(() => {
     // Subscribe to WebSocket updates
@@ -37,11 +78,70 @@ export default function Home() {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: selectedCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 8
     }).format(amount)
   }
 
   const formatPercent = (percent: number) => {
     return `${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%`
+  }
+
+  const formatAmount = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 8
+    }).format(amount)
+  }
+
+  // Portfolio handlers
+  const handleAddPortfolioItem = () => {
+    setEditingPortfolioItem(null)
+    setPortfolioModalOpen(true)
+  }
+
+  const handleEditPortfolioItem = (item: PortfolioItem) => {
+    setEditingPortfolioItem(item)
+    setPortfolioModalOpen(true)
+  }
+
+  const handleDeletePortfolioItem = async (id: number) => {
+    if (confirm('Are you sure you want to delete this portfolio item?')) {
+      await deleteItem(id)
+    }
+  }
+
+  const handleSavePortfolioItem = async (item: PortfolioCreate | PortfolioUpdate) => {
+    if (editingPortfolioItem) {
+      await updateItem(editingPortfolioItem.id, item as PortfolioUpdate)
+    } else {
+      await createItem(item as PortfolioCreate)
+    }
+  }
+
+  // Alert handlers
+  const handleAddAlert = () => {
+    setEditingAlert(null)
+    setAlertModalOpen(true)
+  }
+
+  const handleEditAlert = (alert: PriceAlert) => {
+    setEditingAlert(alert)
+    setAlertModalOpen(true)
+  }
+
+  const handleDeleteAlert = async (id: number) => {
+    if (confirm('Are you sure you want to delete this alert?')) {
+      await deleteAlert(id)
+    }
+  }
+
+  const handleSaveAlert = async (alert: PriceAlertCreate | PriceAlertUpdate) => {
+    if (editingAlert) {
+      await updateAlert(editingAlert.id, alert as PriceAlertUpdate)
+    } else {
+      await createAlert(alert as PriceAlertCreate)
+    }
   }
 
   return (
@@ -64,6 +164,14 @@ export default function Home() {
               <option value="EUR">EUR</option>
               <option value="CZK">CZK</option>
             </select>
+            <Button 
+              onClick={refreshExchangeRates}
+              disabled={refreshingRates}
+              size="sm"
+              variant="outline"
+            >
+              {refreshingRates ? 'Refreshing...' : '🔄'}
+            </Button>
           </div>
           <div className="flex items-center space-x-2">
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
@@ -71,6 +179,11 @@ export default function Home() {
               {isConnected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
+          {lastUpdated && (
+            <div className="text-xs text-muted-foreground">
+              Rates: {lastUpdated}
+            </div>
+          )}
         </div>
       </div>
 
@@ -124,8 +237,15 @@ export default function Home() {
       {/* Portfolio Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Portfolio</CardTitle>
-          <CardDescription>Your cryptocurrency holdings</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Portfolio</CardTitle>
+              <CardDescription>Your cryptocurrency holdings</CardDescription>
+            </div>
+            <Button onClick={handleAddPortfolioItem}>
+              Add New Item
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -140,12 +260,22 @@ export default function Home() {
                 <div key={item.id} className="flex items-center justify-between p-4 border rounded-lg">
                   <div className="flex items-center space-x-4">
                     <div className="font-semibold">{item.symbol}</div>
+                    {item.total_investment_text && (
+                      <div className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                        {item.total_investment_text}
+                      </div>
+                    )}
                     <div className="text-sm text-muted-foreground">
-                      {item.amount} @ {formatCurrency(item.price_buy)}
+                      {formatAmount(item.amount)} @ {formatCurrency(item.price_buy)}
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {item.base_currency}
                     </div>
+                    {item.source && (
+                      <div className="text-sm text-muted-foreground">
+                        via {item.source}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center space-x-4">
                     <div className="text-right">
@@ -158,9 +288,23 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                    <Button variant="outline" size="sm">
-                      Edit
-                    </Button>
+                    <div className="flex items-center space-x-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleEditPortfolioItem(item)}
+                      >
+                        Edit
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleDeletePortfolioItem(item.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -172,8 +316,15 @@ export default function Home() {
       {/* Alerts */}
       <Card>
         <CardHeader>
-          <CardTitle>Price Alerts</CardTitle>
-          <CardDescription>Active price notifications</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Price Alerts</CardTitle>
+              <CardDescription>Active price notifications</CardDescription>
+            </div>
+            <Button onClick={handleAddAlert}>
+              Create Alert
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {alerts.length === 0 ? (
@@ -189,6 +340,11 @@ export default function Home() {
                     <span className="ml-2 text-sm text-muted-foreground">
                       {alert.alert_type} {formatCurrency(alert.threshold_price)}
                     </span>
+                    {alert.message && (
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {alert.message}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className={`px-2 py-1 text-xs rounded ${
@@ -196,9 +352,23 @@ export default function Home() {
                     }`}>
                       {alert.is_active ? 'Active' : 'Inactive'}
                     </span>
-                    <Button variant="outline" size="sm">
-                      Edit
-                    </Button>
+                    <div className="flex items-center space-x-1">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleEditAlert(alert)}
+                      >
+                        Edit
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleDeleteAlert(alert.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -206,6 +376,22 @@ export default function Home() {
           )}
         </CardContent>
       </Card>
+
+      {/* Modals */}
+      <PortfolioModal
+        isOpen={portfolioModalOpen}
+        onClose={() => setPortfolioModalOpen(false)}
+        onSave={handleSavePortfolioItem}
+        item={editingPortfolioItem}
+        selectedCurrency={selectedCurrency}
+      />
+
+      <AlertModal
+        isOpen={alertModalOpen}
+        onClose={() => setAlertModalOpen(false)}
+        onSave={handleSaveAlert}
+        alert={editingAlert}
+      />
     </div>
   )
 }
