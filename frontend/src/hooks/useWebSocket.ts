@@ -134,10 +134,9 @@ export const useWebSocket = (): WebSocketHook => {
       timestamp
     }
     
-    // Refresh portfolio data to get updated prices
-    fetchPortfolio()
-    fetchSummary()
-  }, [fetchPortfolio, fetchSummary])
+    // Update portfolio values locally without refetching from API
+    usePortfolioStore.getState().updatePortfolioWithNewPrice(symbol, price)
+  }, [])
 
   const handleAlertTriggered = useCallback((message: AlertTriggeredMessage) => {
     console.log('🚨 Alert triggered:', message.data)

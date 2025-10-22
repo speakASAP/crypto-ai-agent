@@ -16,8 +16,9 @@ interface PortfolioState {
   updateItem: (id: number, item: PortfolioUpdate) => Promise<void>
   deleteItem: (id: number) => Promise<void>
   fetchSummary: () => Promise<void>
-  setCurrency: (currency: Currency) => void
+  setCurrency: (currency: Currency) => Promise<void>
   clearError: () => void
+  updatePortfolioWithNewPrice: (symbol: string, price: number) => void
 }
 
 export const usePortfolioStore = create<PortfolioState>()(
@@ -107,14 +108,69 @@ export const usePortfolioStore = create<PortfolioState>()(
         }
       },
 
-      setCurrency: (currency: Currency) => {
-        set({ selectedCurrency: currency })
+      setCurrency: async (currency: Currency) => {
+        set({ selectedCurrency: currency, loading: true })
         // Refresh data with new currency
-        get().fetchPortfolio()
-        get().fetchSummary()
+        await Promise.all([
+          get().fetchPortfolio(),
+          get().fetchSummary()
+        ])
+        // Keep loading state for a bit longer to ensure smooth transition
+        setTimeout(() => {
+          set({ loading: false })
+        }, 200)
       },
 
-      clearError: () => set({ error: null })
+      clearError: () => set({ error: null }),
+
+      updatePortfolioWithNewPrice: (symbol: string, price: number) => {
+        const state = get()
+        const { selectedCurrency } = state
+        
+        // Update items with new price for the specific symbol
+        const updatedItems = state.items.map(item => {
+          if (item.symbol === symbol) {
+            // Calculate new values based on the updated price
+            const currentValue = item.amount * price
+            const totalInvestment = (item.amount * item.price_buy) + item.commission
+            const pnl = currentValue - totalInvestment
+            const pnlPercent = totalInvestment > 0 ? (pnl / totalInvestment) * 100 : 0
+            
+            return {
+              ...item,
+              current_price: price,
+              current_value: currentValue,
+              pnl: pnl,
+              pnl_percent: pnlPercent,
+              updated_at: new Date().toISOString()
+            }
+          }
+          return item
+        })
+        
+        // Update summary with new totals
+        const newSummary = updatedItems.reduce((acc, item) => {
+          acc.total_investment += (item.amount * item.price_buy) + item.commission
+          acc.total_current_value += item.current_value
+          acc.total_pnl += item.pnl
+          return acc
+        }, {
+          total_investment: 0,
+          total_current_value: 0,
+          total_pnl: 0,
+          total_pnl_percent: 0,
+          currency: selectedCurrency
+        })
+        
+        newSummary.total_pnl_percent = newSummary.total_investment > 0 
+          ? (newSummary.total_pnl / newSummary.total_investment) * 100 
+          : 0
+        
+        set({ 
+          items: updatedItems,
+          summary: newSummary
+        })
+      }
     }),
     {
       name: 'portfolio-store'

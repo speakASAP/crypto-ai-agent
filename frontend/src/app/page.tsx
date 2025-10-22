@@ -28,6 +28,7 @@ export default function Home() {
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
   const [lastUpdated, setLastUpdated] = useState<string>('')
   const [refreshingRates, setRefreshingRates] = useState(false)
+  const [currencyChanging, setCurrencyChanging] = useState(false)
 
   useEffect(() => {
     // Fetch initial data
@@ -122,6 +123,17 @@ export default function Home() {
     }).format(amount)
   }
 
+  const handleCurrencyChange = async (newCurrency: string) => {
+    if (currencyChanging || loading) return
+    
+    setCurrencyChanging(true)
+    try {
+      await setCurrency(newCurrency as any)
+    } finally {
+      setCurrencyChanging(false)
+    }
+  }
+
   // Portfolio handlers
   const handleAddPortfolioItem = () => {
     setEditingPortfolioItem(null)
@@ -183,15 +195,23 @@ export default function Home() {
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
             <span className="text-sm text-muted-foreground">Currency:</span>
-            <select 
-              value={selectedCurrency} 
-              onChange={(e) => setCurrency(e.target.value as any)}
-              className="px-3 py-1 border rounded"
-            >
-              <option value="USD">USD</option>
-              <option value="EUR">EUR</option>
-              <option value="CZK">CZK</option>
-            </select>
+            <div className="relative">
+              <select 
+                value={selectedCurrency} 
+                onChange={(e) => handleCurrencyChange(e.target.value)}
+                className="px-3 py-1 border rounded transition-all duration-300 ease-in-out disabled:opacity-50"
+                disabled={loading || currencyChanging}
+              >
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="CZK">CZK</option>
+              </select>
+              {(loading || currencyChanging) && (
+                <div className="absolute -right-6 top-1/2 transform -translate-y-1/2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                </div>
+              )}
+            </div>
             <Button 
               onClick={refreshExchangeRates}
               disabled={refreshingRates}
@@ -223,11 +243,15 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <div className="text-2xl font-bold">
-                {summary ? formatCurrencyWhole(summary.total_value) : 'Loading...'}
+              <div className="text-2xl font-bold transition-all duration-300 ease-in-out">
+                {(loading || currencyChanging) ? (
+                  <span className="animate-pulse">Loading...</span>
+                ) : summary ? formatCurrencyWhole(summary.total_value) : 'Loading...'}
               </div>
-              <div className="text-lg text-blue-600 font-medium">
-                Invested: {summary ? formatCurrencyWhole(summary.total_invested) : 'Loading...'}
+              <div className="text-lg text-blue-600 font-medium transition-all duration-300 ease-in-out">
+                {(loading || currencyChanging) ? (
+                  <span className="animate-pulse">Loading...</span>
+                ) : summary ? formatCurrencyWhole(summary.total_invested) : 'Loading...'}
               </div>
             </div>
           </CardContent>
@@ -238,8 +262,10 @@ export default function Home() {
             <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${summary && summary.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {summary ? formatCurrencyWhole(summary.total_pnl) : 'Loading...'}
+            <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${summary && summary.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {(loading || currencyChanging) ? (
+                <span className="animate-pulse">Loading...</span>
+              ) : summary ? formatCurrencyWhole(summary.total_pnl) : 'Loading...'}
             </div>
           </CardContent>
         </Card>
@@ -249,8 +275,10 @@ export default function Home() {
             <CardTitle className="text-sm font-medium">P&L %</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${summary && summary.total_pnl_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {summary ? formatPercent(summary.total_pnl_percent) : 'Loading...'}
+            <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${summary && summary.total_pnl_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {(loading || currencyChanging) ? (
+                <span className="animate-pulse">Loading...</span>
+              ) : summary ? formatPercent(summary.total_pnl_percent) : 'Loading...'}
             </div>
           </CardContent>
         </Card>
@@ -309,22 +337,32 @@ export default function Home() {
                   </div>
                   <div className="flex items-center space-x-4">
                     <div className="text-right">
-                      <div className="text-sm text-muted-foreground">
-                        {item.current_price ? formatCurrency(item.current_price) : 'N/A'}
+                      <div className="text-sm text-muted-foreground transition-all duration-300 ease-in-out">
+                        {(loading || currencyChanging) ? (
+                          <span className="animate-pulse">Loading...</span>
+                        ) : item.current_price ? formatCurrency(item.current_price) : 'N/A'}
                       </div>
                     </div>
                     {item.current_value && (
                       <div className="text-right">
-                        <div className={`text-sm font-medium px-2 py-1 rounded ${
+                        <div className={`text-sm font-medium px-2 py-1 rounded transition-all duration-300 ease-in-out ${
                           item.current_value >= (item.amount * item.price_buy) + item.commission
                             ? 'text-green-600 bg-green-50'
                             : 'text-red-600 bg-red-50'
                         }`}>
-                          {formatCurrency(item.current_value)}
+                          {(loading || currencyChanging) ? (
+                            <span className="animate-pulse">Loading...</span>
+                          ) : formatCurrency(item.current_value)}
                         </div>
                         {item.pnl !== undefined && (
-                          <div className={`text-sm ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(item.pnl)} ({formatPercent(item.pnl_percent || 0)})
+                          <div className={`text-sm transition-all duration-300 ease-in-out ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {(loading || currencyChanging) ? (
+                              <span className="animate-pulse">Loading...</span>
+                            ) : (
+                              <>
+                                {formatCurrency(item.pnl)} ({formatPercent(item.pnl_percent || 0)})
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
