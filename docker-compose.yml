@@ -1,50 +1,71 @@
-services:
-  crypto-agent:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent
-    container_name: crypto-ai-agent
-    env_file:
-      - .env
-    environment:
-      - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-      - SYMBOLS=${SYMBOLS:-}
-      - WINDOW=${WINDOW:-50}
-      - PREDICTION_CACHE_TIME=${PREDICTION_CACHE_TIME:-10}
-      - MAX_PRICE_HISTORY=${MAX_PRICE_HISTORY:-200}
-      - DB_PATH=${DB_PATH:-data/crypto_history.db}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FILE=${LOG_FILE:-logs/crypto_agent.log}
-      - LOG_FORMAT=${LOG_FORMAT:-"%(asctime)s - %(name)s - %(levelname)s - %(message)s"}
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    restart: unless-stopped
-    # Agent automatically loads tracked symbols from database
-    # Symbols can be managed via UI dashboard
+version: '3.8'
 
-  ui-dashboard:
-    build:
-      context: ./ui_dashboard
-      dockerfile: Dockerfile.ui
-    container_name: crypto-ui-dashboard
-    env_file:
-      - .env
-    environment:
-      - UI_PORT=${UI_PORT:-8501}
-      - UI_HOST=${UI_HOST:-0.0.0.0}
-      - DB_PATH=${DB_PATH:-data/crypto_history.db}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FILE=${LOG_FILE:-logs/crypto_agent.log}
-      - LOG_FORMAT=${LOG_FORMAT:-"%(asctime)s - %(name)s - %(levelname)s - %(message)s"}
+services:
+  frontend:
+    build: ./frontend
     ports:
-      - "${UI_PORT:-8501}:${UI_PORT:-8501}"
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000
+    depends_on:
+      - backend
     volumes:
-      - ./data:/app/data
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/crypto_agent
+      - REDIS_URL=redis://redis:6379
+      - BINANCE_API_URL=https://api.binance.com/api/v3
+      - CURRENCY_API_URL=https://api.exchangerate-api.com/v4/latest/USD
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGINS=http://localhost:3000,https://yourdomain.com
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
       - ./logs:/app/logs
-    restart: unless-stopped
-    # UI provides symbol management interface
-    # Changes are reflected in agent within 30 seconds
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=crypto_agent
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d crypto_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:

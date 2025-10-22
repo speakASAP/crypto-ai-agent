@@ -87,3 +87,7 @@ For production, use Docker Compose:
 ```bash
 docker compose up --build
 ```
+
+---
+
+**Happy Trading! 📈**

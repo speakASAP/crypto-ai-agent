@@ -1,0 +1,56 @@
+from pydantic_settings import BaseSettings
+from typing import List
+import os
+
+
+class Settings(BaseSettings):
+    # Database Configuration
+    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/crypto_agent"
+    postgres_db: str = "crypto_agent"
+    postgres_user: str = "user"
+    postgres_password: str = "password"
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    
+    # Redis Configuration
+    redis_url: str = "redis://localhost:6379"
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str = ""
+    
+    # API Configuration
+    secret_key: str = "your-secret-key-here"
+    jwt_secret: str = "your-jwt-secret-here"
+    cors_origins: List[str] = ["http://localhost:3000", "https://yourdomain.com"]
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+    
+    # External APIs
+    binance_api_url: str = "https://api.binance.com/api/v3"
+    currency_api_url: str = "https://api.exchangerate-api.com/v4/latest/USD"
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    
+    # Performance Configuration
+    max_connections: int = 20
+    price_cache_duration: int = 60
+    currency_cache_duration: int = 1800
+    
+    # Database Connection Pooling
+    db_pool_size: int = 20
+    db_max_overflow: int = 30
+    db_pool_recycle: int = 3600
+    db_pool_pre_ping: bool = True
+    
+    # Logging Configuration
+    log_level: str = "INFO"
+    log_file: str = "logs/crypto_agent.log"
+    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+
+
+# Create settings instance
+settings = Settings()
