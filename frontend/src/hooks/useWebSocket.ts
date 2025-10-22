@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { usePortfolioStore } from '@/stores/portfolioStore'
 import { useAlertsStore } from '@/stores/alertsStore'
 import { useSymbolsStore } from '@/stores/symbolsStore'
@@ -15,7 +15,7 @@ interface WebSocketHook {
 export const useWebSocket = (): WebSocketHook => {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const isConnectedRef = useRef(false)
+  const [isConnected, setIsConnected] = useState(false)
   
   const { fetchPortfolio, fetchSummary } = usePortfolioStore()
   const { fetchAlerts, fetchHistory } = useAlertsStore()
@@ -26,7 +26,7 @@ export const useWebSocket = (): WebSocketHook => {
       return
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000'
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/'
     console.log('🔌 Connecting to WebSocket:', wsUrl)
 
     try {
@@ -34,7 +34,7 @@ export const useWebSocket = (): WebSocketHook => {
 
       wsRef.current.onopen = () => {
         console.log('✅ WebSocket connected')
-        isConnectedRef.current = true
+        setIsConnected(true)
         // Clear any pending reconnection
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current)
@@ -53,7 +53,7 @@ export const useWebSocket = (): WebSocketHook => {
 
       wsRef.current.onclose = (event) => {
         console.log('🔌 WebSocket disconnected:', event.code, event.reason)
-        isConnectedRef.current = false
+        setIsConnected(false)
         
         // Attempt to reconnect after 5 seconds
         if (event.code !== 1000) { // Not a normal closure
@@ -66,7 +66,7 @@ export const useWebSocket = (): WebSocketHook => {
 
       wsRef.current.onerror = (error) => {
         console.error('❌ WebSocket error:', error)
-        isConnectedRef.current = false
+        setIsConnected(false)
       }
     } catch (error) {
       console.error('❌ Failed to create WebSocket connection:', error)
@@ -83,7 +83,7 @@ export const useWebSocket = (): WebSocketHook => {
       wsRef.current.close(1000, 'User disconnected')
       wsRef.current = null
     }
-    isConnectedRef.current = false
+    setIsConnected(false)
   }, [])
 
   const subscribeToPrices = useCallback((symbols: string[]) => {
@@ -164,7 +164,7 @@ export const useWebSocket = (): WebSocketHook => {
   }, [connect, disconnect])
 
   return {
-    isConnected: isConnectedRef.current,
+    isConnected,
     connect,
     disconnect,
     subscribeToPrices,

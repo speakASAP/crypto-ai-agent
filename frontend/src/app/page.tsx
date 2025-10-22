@@ -67,19 +67,47 @@ export default function Home() {
     // Subscribe to WebSocket updates
     if (isConnected) {
       subscribeToAlerts()
+      
+      // Subscribe to price updates for portfolio symbols
+      if (items.length > 0) {
+        const symbols = items.map(item => item.symbol)
+        subscribeToPrices(symbols)
+        console.log('📊 Subscribing to portfolio symbols:', symbols)
+      }
+      
+      // Also subscribe to tracked symbols if available
       if (trackedSymbols.length > 0) {
         const symbols = trackedSymbols.map(s => s.symbol)
         subscribeToPrices(symbols)
+        console.log('📊 Subscribing to tracked symbols:', symbols)
       }
     }
-  }, [isConnected, trackedSymbols, subscribeToPrices, subscribeToAlerts])
+  }, [isConnected, items, trackedSymbols, subscribeToPrices, subscribeToAlerts])
+
+  // Currency to locale mapping for proper symbol display
+  const currencyToLocale: Record<string, string> = {
+    'USD': 'en-US',
+    'EUR': 'de-DE', 
+    'CZK': 'cs-CZ'
+  }
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    const locale = currencyToLocale[selectedCurrency] || 'en-US'
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: selectedCurrency,
       minimumFractionDigits: 2,
-      maximumFractionDigits: 8
+      maximumFractionDigits: 2
+    }).format(amount)
+  }
+
+  const formatCurrencyWhole = (amount: number) => {
+    const locale = currencyToLocale[selectedCurrency] || 'en-US'
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: selectedCurrency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
     }).format(amount)
   }
 
@@ -89,8 +117,8 @@ export default function Home() {
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 8
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(amount)
   }
 
@@ -150,7 +178,7 @@ export default function Home() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold">Crypto AI Agent v2.0</h1>
-          <p className="text-muted-foreground">Next.js + FastAPI + PostgreSQL + Redis architecture + Telegram + AI</p>
+          <p className="text-muted-foreground">Next.js + FastAPI + Telegram + AI</p>
         </div>
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
@@ -194,8 +222,13 @@ export default function Home() {
             <CardTitle className="text-sm font-medium">Total Value</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {summary ? formatCurrency(summary.total_value) : 'Loading...'}
+            <div className="space-y-2">
+              <div className="text-2xl font-bold">
+                {summary ? formatCurrencyWhole(summary.total_value) : 'Loading...'}
+              </div>
+              <div className="text-lg text-blue-600 font-medium">
+                Invested: {summary ? formatCurrencyWhole(summary.total_invested) : 'Loading...'}
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -206,7 +239,7 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${summary && summary.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {summary ? formatCurrency(summary.total_pnl) : 'Loading...'}
+              {summary ? formatCurrencyWhole(summary.total_pnl) : 'Loading...'}
             </div>
           </CardContent>
         </Card>
@@ -268,9 +301,6 @@ export default function Home() {
                     <div className="text-sm text-muted-foreground">
                       {formatAmount(item.amount)} @ {formatCurrency(item.price_buy)}
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {item.base_currency}
-                    </div>
                     {item.source && (
                       <div className="text-sm text-muted-foreground">
                         via {item.source}
@@ -279,15 +309,26 @@ export default function Home() {
                   </div>
                   <div className="flex items-center space-x-4">
                     <div className="text-right">
-                      <div className="font-semibold">
+                      <div className="text-sm text-muted-foreground">
                         {item.current_price ? formatCurrency(item.current_price) : 'N/A'}
                       </div>
-                      {item.pnl !== undefined && (
-                        <div className={`text-sm ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {formatCurrency(item.pnl)} ({formatPercent(item.pnl_percent || 0)})
-                        </div>
-                      )}
                     </div>
+                    {item.current_value && (
+                      <div className="text-right">
+                        <div className={`text-sm font-medium px-2 py-1 rounded ${
+                          item.current_value >= (item.amount * item.price_buy) + item.commission
+                            ? 'text-green-600 bg-green-50'
+                            : 'text-red-600 bg-red-50'
+                        }`}>
+                          {formatCurrency(item.current_value)}
+                        </div>
+                        {item.pnl !== undefined && (
+                          <div className={`text-sm ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(item.pnl)} ({formatPercent(item.pnl_percent || 0)})
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center space-x-2">
                       <Button 
                         variant="outline" 
@@ -395,3 +436,5 @@ export default function Home() {
     </div>
   )
 }
+
+

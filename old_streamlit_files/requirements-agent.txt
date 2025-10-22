@@ -1,8 +1,0 @@
-python-binance
-python-telegram-bot[aio]
-numpy
-pandas
-aiohttp
-aiosqlite
-APScheduler
-python-dotenv

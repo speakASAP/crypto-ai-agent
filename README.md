@@ -1,8 +1,8 @@
-# 🚀 Crypto AI Agent v2.0 - Next.js + FastAPI Migration
+# 🚀 Crypto AI Agent v2.0 - Next.js + FastAPI + SQLite
 
 ## Project Overview
 
-This is the next-generation version of the Crypto AI Agent, successfully migrated from Streamlit to a modern Next.js + FastAPI + PostgreSQL + Redis architecture for optimal performance and scalability.
+This is the next-generation version of the Crypto AI Agent, successfully migrated from Streamlit to a modern Next.js + FastAPI + SQLite architecture for optimal performance and simplicity.
 
 ## Architecture
 
@@ -12,37 +12,29 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 - **Styling**: Tailwind CSS + shadcn/ui components
 - **State Management**: Zustand + React Query
 - **Real-time**: WebSocket integration
-- **Deployment**: Vercel or Docker
+- **Deployment**: Vercel or local development
 
 ### Backend: FastAPI
 
 - **Framework**: FastAPI with Python 3.12+
-- **Database**: PostgreSQL with asyncpg
-- **Caching**: Redis with aioredis
+- **Database**: SQLite (file-based, no server required)
 - **WebSocket**: FastAPI WebSocket support
-- **Authentication**: JWT tokens
-- **Deployment**: Docker + Docker Compose
+- **Real-time**: Live price updates and alerts
+- **Deployment**: Local development or simple server
 
-### Database: PostgreSQL
+### Database: SQLite
 
-- **Primary DB**: PostgreSQL 15+
-- **Connection Pooling**: asyncpg pool
-- **Migrations**: Alembic
-- **Backup**: Automated backups
-
-### Caching: Redis
-
-- **Session Storage**: User sessions and preferences
-- **API Caching**: Currency rates, price data
-- **Real-time Data**: WebSocket connection management
+- **Primary DB**: SQLite (built into Python)
+- **File Storage**: `crypto_portfolio.db`
+- **Backup**: Simple file copy
+- **Zero Configuration**: No database server needed
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- Node.js 18+ (for local development)
-- Python 3.12+ (for local development)
+- Node.js 18+
+- Python 3.12+
 
 ### Development Setup
 
@@ -52,20 +44,35 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
    cd crypto-ai-agent
    ```
 
-2. **Copy environment variables:**
+2. **Install backend dependencies:**
 
    ```bash
-   cp .env.example .env
-   # Edit .env with your actual values
+   cd backend
+   pip install -r requirements.txt
    ```
 
-3. **Start with Docker Compose:**
+3. **Install frontend dependencies:**
 
    ```bash
-   docker-compose up --build
+   cd frontend
+   npm install
    ```
 
-4. **Access the application:**
+4. **Start the backend:**
+
+   ```bash
+   cd backend
+   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+5. **Start the frontend (in a new terminal):**
+
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+6. **Access the application:**
    - Frontend: <http://localhost:3000>
    - Backend API: <http://localhost:8000>
    - API Docs: <http://localhost:8000/docs>

@@ -1,37 +1,39 @@
 import aiohttp
 import asyncio
+import json
 import logging
+import ssl
 from typing import Dict, List, Optional
 from decimal import Decimal
 from app.core.config import settings
-from app.services.cache_service import CacheService
 
 logger = logging.getLogger(__name__)
 
 
 class PriceService:
-    def __init__(self, cache: CacheService):
-        self.cache = cache
-        self.api_url = settings.binance_api_url
-        self.cache_duration = settings.price_cache_duration
+    def __init__(self):
+        # Handle the case where .env might have the wrong URL format
+        api_url = settings.binance_api_url
+        if api_url.endswith('/ticker/price'):
+            api_url = api_url.replace('/ticker/price', '')
+        self.api_url = api_url
     
     async def get_current_prices(self, symbols: List[str]) -> Dict[str, float]:
         """Get current prices for multiple symbols in parallel"""
         if not symbols:
             return {}
         
-        # Check cache first
-        cache_key = f"prices:{':'.join(sorted(symbols))}"
-        cached_prices = await self.cache.get(cache_key)
-        if cached_prices:
-            logger.debug(f"Retrieved prices from cache for {len(symbols)} symbols")
-            return cached_prices
-        
         # Create symbol list for Binance API
         symbol_list = [f"{symbol.upper()}USDT" for symbol in symbols]
         
         try:
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 # Create tasks for parallel execution
                 tasks = [
                     self._fetch_price(session, symbol)
@@ -51,9 +53,7 @@ class PriceService:
                         base_symbol = symbol_list[i].replace('USDT', '')
                         prices[base_symbol] = result
                 
-                # Cache the results
-                await self.cache.set(cache_key, prices, self.cache_duration)
-                logger.info(f"Fetched and cached prices for {len(prices)} symbols")
+                logger.info(f"Fetched prices for {len(prices)} symbols")
                 
                 return prices
                 
@@ -81,13 +81,15 @@ class PriceService:
     
     async def get_price_history(self, symbol: str, limit: int = 100) -> List[Dict]:
         """Get price history for a symbol"""
-        cache_key = f"price_history:{symbol}:{limit}"
-        cached_history = await self.cache.get(cache_key)
-        if cached_history:
-            return cached_history
         
         try:
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 url = f"{self.api_url}/klines"
                 params = {
                     'symbol': f"{symbol.upper()}USDT",
@@ -110,8 +112,6 @@ class PriceService:
                             for candle in data
                         ]
                         
-                        # Cache for 5 minutes
-                        await self.cache.set(cache_key, history, 300)
                         return history
                     else:
                         logger.warning(f"API returned status {response.status} for {symbol} history")
@@ -126,13 +126,14 @@ class PriceService:
         if not symbols:
             return {}
         
-        cache_key = f"24h_stats:{':'.join(sorted(symbols))}"
-        cached_stats = await self.cache.get(cache_key)
-        if cached_stats:
-            return cached_stats
-        
         try:
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 # Create symbol list for Binance API
                 symbol_list = [f"{symbol.upper()}USDT" for symbol in symbols]
                 
@@ -153,8 +154,6 @@ class PriceService:
                                 'count': int(item['count'])
                             }
                         
-                        # Cache for 1 minute
-                        await self.cache.set(cache_key, stats, 60)
                         return stats
                     else:
                         logger.warning(f"API returned status {response.status} for 24h stats")

@@ -4,19 +4,8 @@ import os
 
 
 class Settings(BaseSettings):
-    # Database Configuration
-    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/crypto_agent"
-    postgres_db: str = "crypto_agent"
-    postgres_user: str = "user"
-    postgres_password: str = "password"
-    postgres_host: str = "localhost"
-    postgres_port: int = 5432
-    
-    # Redis Configuration
-    redis_url: str = "redis://localhost:6379"
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_password: str = ""
+    # Database Configuration (SQLite)
+    database_file: str = "crypto_portfolio.db"
     
     # API Configuration
     secret_key: str = "your-secret-key-here"
@@ -50,6 +39,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra environment variables
 
 
 # Create settings instance

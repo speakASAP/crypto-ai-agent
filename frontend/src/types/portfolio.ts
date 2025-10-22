@@ -42,6 +42,7 @@ export interface PortfolioUpdate {
 
 export interface PortfolioSummary {
   total_value: number
+  total_invested: number
   total_pnl: number
   total_pnl_percent: number
   currency: string

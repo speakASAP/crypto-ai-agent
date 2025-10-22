@@ -17,6 +17,13 @@ interface PortfolioModalProps {
 }
 
 export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency }: PortfolioModalProps) {
+  // Currency to locale mapping for proper symbol display
+  const currencyToLocale: Record<string, string> = {
+    'USD': 'en-US',
+    'EUR': 'de-DE', 
+    'CZK': 'cs-CZ'
+  }
+
   const [formData, setFormData] = useState({
     symbol: '',
     amount: '',
@@ -192,10 +199,10 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                 id="total_investment_text"
                 value={formData.total_investment_text}
                 onChange={(e) => handleChange('total_investment_text', e.target.value)}
-                placeholder="e.g., $15,015 or €4,200 or 50,000 CZK"
+                placeholder="e.g., $15,015 or €4,200 or 50,000 Kč"
               />
               <div className="text-sm text-gray-600">
-                Enter the total amount you invested in the original currency (e.g., $15,015, €4,200, 50,000 CZK)
+                Enter the total amount you invested in the original currency (e.g., $15,015, €4,200, 50,000 Kč)
               </div>
             </div>
 
@@ -205,7 +212,7 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
               <div className="p-3 bg-gray-50 rounded-md border">
                 <div className="text-lg font-semibold">
                   {totalInvestment > 0 ? 
-                    new Intl.NumberFormat('en-US', {
+                    new Intl.NumberFormat(currencyToLocale[formData.base_currency] || 'en-US', {
                       style: 'currency',
                       currency: formData.base_currency,
                       minimumFractionDigits: 2,
