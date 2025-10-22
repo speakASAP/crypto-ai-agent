@@ -9,9 +9,14 @@ import sqlite3
 import json
 import os
 import asyncio
+import aiohttp
 from datetime import datetime
+from dotenv import load_dotenv
 from .services.currency_service import currency_service
 from .services.price_service import PriceService
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -188,6 +193,9 @@ async def fetch_prices_for_symbols(symbols: List[str]):
             # Broadcast updates via WebSocket
             for symbol, price in prices.items():
                 await manager.broadcast_price_update(symbol, price)
+            
+            # Check and trigger alerts
+            await check_and_trigger_alerts(prices)
                 
         logger.info(f"Fetched and updated prices for {len(prices)} symbols")
     except Exception as e:
@@ -221,6 +229,109 @@ async def background_currency_fetcher():
         
         # Wait 30 minutes before next fetch
         await asyncio.sleep(1800)
+
+async def send_telegram_notification(message: str):
+    """Send notification to Telegram bot"""
+    try:
+        telegram_token = os.getenv('TELEGRAM_TOKEN')
+        telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
+        
+        if not telegram_token or not telegram_chat_id:
+            logger.warning("Telegram credentials not found in environment variables")
+            return False
+            
+        url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+        data = {
+            "chat_id": telegram_chat_id,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=data) as response:
+                if response.status == 200:
+                    logger.info(f"Telegram notification sent successfully: {message[:50]}...")
+                    return True
+                else:
+                    logger.error(f"Failed to send Telegram notification: {response.status}")
+                    return False
+                    
+    except Exception as e:
+        logger.error(f"Error sending Telegram notification: {e}")
+        return False
+
+async def check_and_trigger_alerts(current_prices: Dict[str, float]):
+    """Check all active alerts against current prices and trigger notifications"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all active alerts
+        cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
+        alerts = cursor.fetchall()
+        
+        triggered_alerts = []
+        
+        for alert in alerts:
+            alert_id, symbol, threshold_price, alert_type, message, is_active, created_at = alert
+            
+            if symbol not in current_prices:
+                continue
+                
+            current_price = current_prices[symbol]
+            should_trigger = False
+            
+            # Check if alert should trigger
+            if alert_type == 'ABOVE' and current_price >= threshold_price:
+                should_trigger = True
+            elif alert_type == 'BELOW' and current_price <= threshold_price:
+                should_trigger = True
+                
+            if should_trigger:
+                # Log alert history
+                cursor.execute('''
+                    INSERT INTO alert_history 
+                    (alert_id, symbol, triggered_price, threshold_price, alert_type, message, triggered_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (alert_id, symbol, current_price, threshold_price, alert_type, message, datetime.now().isoformat() + "Z"))
+                
+                # Deactivate the alert
+                cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
+                
+                # Prepare notification message
+                alert_message = f"🚨 <b>Price Alert Triggered!</b>\n\n"
+                alert_message += f"📈 <b>{symbol}</b>\n"
+                alert_message += f"💰 Current Price: ${current_price:,.2f}\n"
+                alert_message += f"🎯 Threshold: ${threshold_price:,.2f} ({alert_type})\n"
+                if message:
+                    alert_message += f"💬 Message: {message}\n"
+                alert_message += f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                
+                triggered_alerts.append({
+                    'alert_id': alert_id,
+                    'symbol': symbol,
+                    'current_price': current_price,
+                    'threshold_price': threshold_price,
+                    'alert_type': alert_type,
+                    'message': message,
+                    'notification_message': alert_message
+                })
+        
+        conn.commit()
+        conn.close()
+        
+        # Send Telegram notifications for triggered alerts
+        for alert_data in triggered_alerts:
+            await send_telegram_notification(alert_data['notification_message'])
+            
+            # Broadcast alert triggered via WebSocket
+            await manager.send_alert_triggered(alert_data)
+            
+        if triggered_alerts:
+            logger.info(f"Triggered {len(triggered_alerts)} alerts")
+            
+    except Exception as e:
+        logger.error(f"Error checking alerts: {e}")
 
 # Pydantic models
 class PortfolioItem(BaseModel):
@@ -353,6 +464,21 @@ def init_database():
             name TEXT NOT NULL,
             active BOOLEAN DEFAULT 1,
             last_updated TEXT NOT NULL
+        )
+    ''')
+    
+    # Create alert_history table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alert_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            triggered_price REAL NOT NULL,
+            threshold_price REAL NOT NULL,
+            alert_type TEXT NOT NULL,
+            message TEXT,
+            triggered_at TEXT NOT NULL,
+            FOREIGN KEY (alert_id) REFERENCES alerts (id)
         )
     ''')
     

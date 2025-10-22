@@ -23,6 +23,17 @@ export default function Home() {
   const [editingPortfolioItem, setEditingPortfolioItem] = useState<PortfolioItem | null>(null)
   const [alertModalOpen, setAlertModalOpen] = useState(false)
   const [editingAlert, setEditingAlert] = useState<PriceAlert | null>(null)
+  const [presetAlertData, setPresetAlertData] = useState<{ 
+    symbol: string; 
+    currentPrice: number;
+    portfolioItem?: {
+      amount: number;
+      price_buy: number;
+      current_value?: number;
+      pnl?: number;
+      pnl_percent?: number;
+    }
+  } | null>(null)
   
   // Currency states
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
@@ -163,6 +174,23 @@ export default function Home() {
   const handleAddAlert = () => {
     setEditingAlert(null)
     setAlertModalOpen(true)
+  }
+
+  const handleAddAlertForCoin = (item: PortfolioItem) => {
+    setEditingAlert(null)
+    setAlertModalOpen(true)
+    // Store preset data in state to pass to modal
+    setPresetAlertData({ 
+      symbol: item.symbol, 
+      currentPrice: item.current_price || 0,
+      portfolioItem: {
+        amount: item.amount,
+        price_buy: item.price_buy,
+        current_value: item.current_value,
+        pnl: item.pnl,
+        pnl_percent: item.pnl_percent
+      }
+    })
   }
 
   const handleEditAlert = (alert: PriceAlert) => {
@@ -371,6 +399,15 @@ export default function Home() {
                       <Button 
                         variant="outline" 
                         size="sm"
+                        onClick={() => handleAddAlertForCoin(item)}
+                        className="text-blue-600 hover:text-blue-700"
+                        disabled={!item.current_price}
+                      >
+                        Set Alert
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
                         onClick={() => handleEditPortfolioItem(item)}
                       >
                         Edit
@@ -467,9 +504,15 @@ export default function Home() {
 
       <AlertModal
         isOpen={alertModalOpen}
-        onClose={() => setAlertModalOpen(false)}
+        onClose={() => {
+          setAlertModalOpen(false)
+          setPresetAlertData(null)
+        }}
         onSave={handleSaveAlert}
         alert={editingAlert}
+        presetSymbol={presetAlertData?.symbol}
+        currentPrice={presetAlertData?.currentPrice}
+        portfolioItem={presetAlertData?.portfolioItem}
       />
     </div>
   )

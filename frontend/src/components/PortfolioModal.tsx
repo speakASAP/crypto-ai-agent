@@ -52,7 +52,7 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         amount: item.amount.toString(),
         price_buy: item.price_buy.toString(),
         purchase_date: item.purchase_date || '',
-        base_currency: item.base_currency,
+        base_currency: item.base_currency as 'USD' | 'EUR' | 'CZK',
         source: item.source || '',
         commission: item.commission.toString(),
         total_investment_text: item.total_investment_text || ''

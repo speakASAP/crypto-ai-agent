@@ -150,20 +150,22 @@ export const usePortfolioStore = create<PortfolioState>()(
         
         // Update summary with new totals
         const newSummary = updatedItems.reduce((acc, item) => {
-          acc.total_investment += (item.amount * item.price_buy) + item.commission
-          acc.total_current_value += item.current_value
-          acc.total_pnl += item.pnl
+          acc.total_invested += (item.amount * item.price_buy) + item.commission
+          acc.total_value += item.current_value || 0
+          acc.total_pnl += item.pnl || 0
+          acc.item_count += 1
           return acc
         }, {
-          total_investment: 0,
-          total_current_value: 0,
+          total_value: 0,
+          total_invested: 0,
           total_pnl: 0,
           total_pnl_percent: 0,
-          currency: selectedCurrency
+          currency: selectedCurrency,
+          item_count: 0
         })
         
-        newSummary.total_pnl_percent = newSummary.total_investment > 0 
-          ? (newSummary.total_pnl / newSummary.total_investment) * 100 
+        newSummary.total_pnl_percent = newSummary.total_invested > 0 
+          ? (newSummary.total_pnl / newSummary.total_invested) * 100 
           : 0
         
         set({ 
