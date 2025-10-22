@@ -1,0 +1,50 @@
+services:
+  crypto-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: crypto-ai-agent
+    env_file:
+      - .env
+    environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - SYMBOLS=${SYMBOLS:-}
+      - WINDOW=${WINDOW:-50}
+      - PREDICTION_CACHE_TIME=${PREDICTION_CACHE_TIME:-10}
+      - MAX_PRICE_HISTORY=${MAX_PRICE_HISTORY:-200}
+      - DB_PATH=${DB_PATH:-data/crypto_history.db}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FILE=${LOG_FILE:-logs/crypto_agent.log}
+      - LOG_FORMAT=${LOG_FORMAT:-"%(asctime)s - %(name)s - %(levelname)s - %(message)s"}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    # Agent automatically loads tracked symbols from database
+    # Symbols can be managed via UI dashboard
+
+  ui-dashboard:
+    build:
+      context: ./ui_dashboard
+      dockerfile: Dockerfile.ui
+    container_name: crypto-ui-dashboard
+    env_file:
+      - .env
+    environment:
+      - UI_PORT=${UI_PORT:-8501}
+      - UI_HOST=${UI_HOST:-0.0.0.0}
+      - DB_PATH=${DB_PATH:-data/crypto_history.db}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FILE=${LOG_FILE:-logs/crypto_agent.log}
+      - LOG_FORMAT=${LOG_FORMAT:-"%(asctime)s - %(name)s - %(levelname)s - %(message)s"}
+    ports:
+      - "${UI_PORT:-8501}:${UI_PORT:-8501}"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    # UI provides symbol management interface
+    # Changes are reflected in agent within 30 seconds
