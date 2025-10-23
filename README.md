@@ -77,6 +77,158 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
    - Backend API: <http://localhost:8000>
    - API Docs: <http://localhost:8000/docs>
 
+7. **First Time Setup:**
+   - Navigate to <http://localhost:3000/register>
+   - Create your account
+   - Login and start managing your portfolio
+
+## User Management System
+
+The Crypto AI Agent now features a complete multi-user authentication system that allows multiple users to manage their personal portfolios independently.
+
+### 🔐 Authentication Features
+
+- **JWT-based Authentication**: Secure login/logout with JSON Web Tokens
+- **User Registration**: Open registration with email and username validation
+- **Password Security**: bcrypt hashing for secure password storage
+- **Password Reset**: Email-based password reset functionality
+- **User Profile Management**: Update profile information and change passwords
+- **Data Isolation**: Complete separation of user data - each user sees only their own portfolio
+
+### 🚀 Getting Started with User Management
+
+1. **Start the application:**
+
+   ```bash
+   ./start.sh
+   ```
+
+2. **Register a new account:**
+   - Navigate to <http://localhost:3000/register>
+   - Fill in your email, username, and password
+   - Click "Register" to create your account
+
+3. **Login to your account:**
+   - Navigate to <http://localhost:3000/login>
+   - Enter your credentials
+   - You'll be redirected to your personal dashboard
+
+4. **Manage your portfolio:**
+   - Add, edit, and delete portfolio items
+   - Set up price alerts
+   - Track your investments
+   - All data is private to your account
+
+### 🔒 Security Features
+
+- **Password Hashing**: All passwords are hashed using bcrypt
+- **JWT Tokens**:
+  - Access tokens (30 minutes)
+  - Refresh tokens (7 days)
+- **Route Protection**: Automatic redirection for unauthenticated users
+- **Data Isolation**: Users can only access their own data
+- **Session Management**: Automatic token refresh and logout
+
+### 📱 User Interface
+
+- **Login Page**: `/login` - User authentication
+- **Register Page**: `/register` - New user registration
+- **Profile Page**: `/profile` - Manage account settings
+- **Forgot Password**: `/forgot-password` - Request password reset
+- **Reset Password**: `/reset-password` - Set new password
+- **Dashboard**: `/` - Main portfolio interface (protected)
+
+### 🛠️ API Endpoints
+
+All API endpoints now require authentication:
+
+- `POST /api/auth/register` - User registration
+- `POST /api/auth/login` - User login
+- `POST /api/auth/refresh` - Refresh access token
+- `GET /api/auth/me` - Get current user info
+- `PUT /api/auth/profile` - Update user profile
+- `POST /api/auth/change-password` - Change password
+- `POST /api/auth/password-reset-request` - Request password reset
+- `POST /api/auth/password-reset-confirm` - Confirm password reset
+
+All portfolio, alerts, and symbols endpoints are now user-specific and require authentication.
+
+### 🔧 Configuration
+
+The system uses the following environment variables:
+
+```bash
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+SECRET_KEY=your-secret-key-here
+```
+
+**Important**: Change the JWT_SECRET in production for security.
+
+### 📊 Database Schema
+
+The system includes the following user-related tables:
+
+- `users` - User accounts and profiles
+- `password_reset_tokens` - Password reset functionality
+- `user_sessions` - Session tracking (optional)
+- All existing tables now include `user_id` foreign keys
+
+### 🧪 Testing User Management
+
+1. **Test Registration:**
+   - Visit `/register`
+   - Create multiple test accounts
+   - Verify each user has isolated data
+
+2. **Test Login/Logout:**
+   - Login with different accounts
+   - Verify data isolation
+   - Test logout functionality
+
+3. **Test Password Reset:**
+   - Use `/forgot-password` to request reset
+   - Check logs for reset token
+   - Use token to reset password
+
+4. **Test Profile Management:**
+   - Update profile information
+   - Change passwords
+   - Verify changes persist
+
+### 🚨 Troubleshooting
+
+**Common Issues:**
+
+1. **"JWT_SECRET not configured" warning:**
+   - Add `JWT_SECRET=your-secret-key` to `.env` file
+
+2. **Authentication errors:**
+   - Check if backend is running on port 8000
+   - Verify JWT_SECRET is set correctly
+
+3. **Data not loading:**
+   - Ensure you're logged in
+   - Check browser console for errors
+   - Verify API endpoints are accessible
+
+4. **Password reset not working:**
+   - Check backend logs for reset tokens
+   - Verify email configuration (currently logs tokens)
+
+### 📈 Performance
+
+- **User Isolation**: O(1) data filtering by user_id
+- **Token Validation**: Fast JWT verification
+- **Password Hashing**: Secure bcrypt with configurable rounds
+- **Session Management**: Efficient token refresh mechanism
+
+### 🔄 Migration Notes
+
+- **Existing Data**: All existing portfolio data was cleared during migration
+- **Fresh Start**: Users need to re-register and recreate their portfolios
+- **Backup**: Original data was backed up before migration
+
 ### Local Development
 
 #### Backend Development
@@ -128,12 +280,23 @@ crypto-ai-agent/
 
 ## Features
 
+### User Management
+
+- **Multi-user support**: Each user has their own personal portfolio
+- **JWT Authentication**: Secure login/logout with JWT tokens
+- **User Registration**: Open registration with email and username
+- **Password Security**: bcrypt hashing for secure password storage
+- **Password Reset**: Email-based password reset functionality
+- **Profile Management**: Users can update their profile information
+- **Data Isolation**: Complete separation of user data
+
 ### Portfolio Management
 
 - Multi-currency support (USD, EUR, CZK)
 - Real-time price tracking
 - Purchase history and source tracking
 - Performance analytics
+- **Personal portfolios**: Each user sees only their own data
 
 ### Price Monitoring
 

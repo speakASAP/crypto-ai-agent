@@ -22,6 +22,12 @@ psutil==5.9.6
 pytest==7.4.3
 pytest-asyncio==0.21.1
 
+# Authentication and security
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.6
+email-validator==2.1.0
+
 # Development
 black==23.11.0
 isort==5.12.0
