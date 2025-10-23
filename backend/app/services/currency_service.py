@@ -36,7 +36,7 @@ class CurrencyService:
         return {
             "USD": 1.0,
             "EUR": 0.85,
-            "CZK": 23.5,
+            "CZK": 20.94,  # Updated to match current market rate
             "GBP": 0.73,
             "JPY": 110.0
         }
@@ -46,9 +46,19 @@ class CurrencyService:
         if from_currency == to_currency:
             return amount
             
+        # Ensure we have rates before conversion
         if not self.rates:
-            logger.warning("No exchange rates available, using fallback")
+            logger.warning("No exchange rates available, initializing with fallback rates")
             self.rates = self.get_fallback_rates()
+        
+        # Validate that we have the required currency rates
+        if from_currency != "USD" and from_currency not in self.rates:
+            logger.error(f"Missing exchange rate for {from_currency}, using fallback")
+            self.rates[from_currency] = self.get_fallback_rates().get(from_currency, 1.0)
+            
+        if to_currency != "USD" and to_currency not in self.rates:
+            logger.error(f"Missing exchange rate for {to_currency}, using fallback")
+            self.rates[to_currency] = self.get_fallback_rates().get(to_currency, 1.0)
         
         # Convert to USD first, then to target currency
         if from_currency != "USD":
@@ -66,6 +76,23 @@ class CurrencyService:
     async def refresh_rates(self):
         """Refresh exchange rates"""
         await self.get_exchange_rates()
+    
+    def ensure_rates_initialized(self):
+        """Ensure rates are initialized, using fallback if needed"""
+        if not self.rates:
+            logger.info("Initializing currency rates with fallback values")
+            self.rates = self.get_fallback_rates()
+        return self.rates
+    
+    def get_rate(self, currency: str) -> float:
+        """Get exchange rate for a currency, with fallback"""
+        if currency == "USD":
+            return 1.0
+        
+        if not self.rates:
+            self.ensure_rates_initialized()
+            
+        return self.rates.get(currency, self.get_fallback_rates().get(currency, 1.0))
 
 # Global currency service instance
 currency_service = CurrencyService()

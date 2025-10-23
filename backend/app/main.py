@@ -10,6 +10,7 @@ import json
 import os
 import asyncio
 import aiohttp
+import ssl
 from datetime import datetime
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
@@ -132,6 +133,9 @@ manager = ConnectionManager()
 async def fetch_prices_for_symbols(symbols: List[str]):
     """Fetch prices for symbols and broadcast updates"""
     try:
+        # Ensure currency rates are initialized before any conversions
+        currency_service.ensure_rates_initialized()
+        
         prices = await price_service.get_current_prices(symbols)
         
         # Update database with new prices
@@ -247,13 +251,20 @@ async def send_telegram_notification(message: str):
             "parse_mode": "HTML"
         }
         
-        async with aiohttp.ClientSession() as session:
+        # Create SSL context that doesn't verify certificates (for development)
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(url, json=data) as response:
                 if response.status == 200:
                     logger.info(f"Telegram notification sent successfully: {message[:50]}...")
                     return True
                 else:
-                    logger.error(f"Failed to send Telegram notification: {response.status}")
+                    response_text = await response.text()
+                    logger.error(f"Failed to send Telegram notification: {response.status} - {response_text}")
                     return False
                     
     except Exception as e:
@@ -288,6 +299,41 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 should_trigger = True
                 
             if should_trigger:
+                # Get portfolio information for this symbol
+                # First, get all base currencies for this symbol
+                cursor.execute("""
+                    SELECT DISTINCT base_currency 
+                    FROM portfolio_items 
+                    WHERE symbol = ? AND base_currency IS NOT NULL
+                """, (symbol,))
+                
+                base_currencies = [row[0] for row in cursor.fetchall()]
+                portfolio_data = []
+                
+                # Calculate portfolio data for each base currency
+                for base_currency in base_currencies:
+                    # Convert USD price to base currency
+                    if base_currency != "USD":
+                        converted_price = currency_service.convert_amount(current_price, "USD", base_currency)
+                    else:
+                        converted_price = current_price
+                    
+                    # Get portfolio data for this base currency
+                    cursor.execute("""
+                        SELECT 
+                            SUM(amount) as total_amount,
+                            SUM(amount * price_buy + commission) as total_investment,
+                            SUM(amount * ?) as current_value,
+                            base_currency
+                        FROM portfolio_items 
+                        WHERE symbol = ? AND base_currency = ?
+                        GROUP BY base_currency
+                    """, (converted_price, symbol, base_currency))
+                    
+                    result = cursor.fetchone()
+                    if result:
+                        portfolio_data.append(result)
+                
                 # Log alert history
                 cursor.execute('''
                     INSERT INTO alert_history 
@@ -298,14 +344,28 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 # Deactivate the alert
                 cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
                 
-                # Prepare notification message
+                # Prepare enhanced notification message
                 alert_message = f"🚨 <b>Price Alert Triggered!</b>\n\n"
-                alert_message += f"📈 <b>{symbol}</b>\n"
-                alert_message += f"💰 Current Price: ${current_price:,.2f}\n"
-                alert_message += f"🎯 Threshold: ${threshold_price:,.2f} ({alert_type})\n"
+                alert_message += f"📈 <b>Symbol:</b> {symbol}\n"
+                alert_message += f"💰 <b>Current Price:</b> ${current_price:,.2f}\n"
+                alert_message += f"🎯 <b>Threshold:</b> ${threshold_price:,.2f} ({alert_type})\n"
+                
+                # Add portfolio information if available
+                if portfolio_data:
+                    for total_amount, total_investment, current_value, base_currency in portfolio_data:
+                        if total_amount > 0:
+                            pnl = current_value - total_investment
+                            pnl_percent = (pnl / total_investment * 100) if total_investment > 0 else 0
+                            
+                            alert_message += f"\n💼 <b>Portfolio Summary ({base_currency}):</b>\n"
+                            alert_message += f"📊 <b>Amount:</b> {total_amount:,.6f} {symbol}\n"
+                            alert_message += f"💵 <b>Original Investment:</b> {base_currency} {total_investment:,.2f}\n"
+                            alert_message += f"💎 <b>Current Value:</b> {base_currency} {current_value:,.2f}\n"
+                            alert_message += f"📈 <b>P&L:</b> {base_currency} {pnl:,.2f} ({pnl_percent:+.2f}%)\n"
+                
                 if message:
-                    alert_message += f"💬 Message: {message}\n"
-                alert_message += f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    alert_message += f"\n💬 <b>Alert Message:</b> {message}\n"
+                alert_message += f"\n⏰ <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 
                 triggered_alerts.append({
                     'alert_id': alert_id,
@@ -594,15 +654,21 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
             item.get("current_price", 0), item["base_currency"], target_currency
         ) if item.get("current_price") else None
         
-        # Convert current_value
-        converted_current_value = currency_service.convert_amount(
-            item.get("current_value", 0), item["base_currency"], target_currency
-        ) if item.get("current_value") else None
+        # Convert current_value - FIXED: Don't convert if already in target currency
+        if item.get("current_value") and item["base_currency"] == target_currency:
+            converted_current_value = item.get("current_value")
+        else:
+            converted_current_value = currency_service.convert_amount(
+                item.get("current_value", 0), item["base_currency"], target_currency
+            ) if item.get("current_value") else None
         
-        # Convert pnl
-        converted_pnl = currency_service.convert_amount(
-            item.get("pnl", 0), item["base_currency"], target_currency
-        ) if item.get("pnl") else None
+        # Convert pnl - FIXED: Don't convert if already in target currency
+        if item.get("pnl") and item["base_currency"] == target_currency:
+            converted_pnl = item.get("pnl")
+        else:
+            converted_pnl = currency_service.convert_amount(
+                item.get("pnl", 0), item["base_currency"], target_currency
+            ) if item.get("pnl") else None
         
         # Convert commission
         converted_commission = currency_service.convert_amount(
@@ -1037,6 +1103,49 @@ async def delete_alert(alert_id: int):
         raise HTTPException(status_code=404, detail="Alert not found")
     
     return {"message": "Alert deleted successfully"}
+
+@app.get("/api/alerts/history")
+async def get_alert_history(limit: int = 100):
+    """Get alert history"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT 
+                ah.id,
+                ah.alert_id,
+                ah.symbol,
+                ah.triggered_price,
+                ah.threshold_price,
+                ah.alert_type,
+                ah.message,
+                ah.triggered_at
+            FROM alert_history ah
+            ORDER BY ah.triggered_at DESC
+            LIMIT ?
+        """, (limit,))
+        
+        history = []
+        for row in cursor.fetchall():
+            history.append({
+                "id": row[0],
+                "alert_id": row[1],
+                "symbol": row[2],
+                "triggered_price": row[3],
+                "threshold_price": row[4],
+                "alert_type": row[5],
+                "message": row[6],
+                "triggered_at": row[7]
+            })
+        
+        return history
+        
+    except Exception as e:
+        logger.error(f"Error fetching alert history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch alert history")
+    finally:
+        conn.close()
 
 # Tracked symbols endpoints
 @app.get("/api/symbols/tracked", response_model=List[TrackedSymbol])

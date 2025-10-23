@@ -248,6 +248,63 @@ See `.env.example` for all available configuration options. Key variables includ
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token
 - `CORS_ORIGINS`: Allowed CORS origins
 
+## Telegram Notifications Setup
+
+The Crypto AI Agent supports Telegram notifications for price alerts. Here's how to set it up:
+
+### 1. Create a Telegram Bot
+
+1. Open Telegram and search for `@BotFather`
+2. Send `/newbot` command
+3. Follow the instructions to create your bot
+4. Save the bot token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+### 2. Get Your Chat ID
+
+1. Start a conversation with your bot
+2. Send any message to the bot
+3. Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+4. Find your chat ID in the response (look for `"chat":{"id":123456789`)
+
+### 3. Configure Environment Variables
+
+Add these variables to your `.env` file:
+
+```bash
+# Telegram Bot Configuration
+TELEGRAM_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+```
+
+### 4. Enhanced Alert Templates
+
+When alerts are triggered, you'll receive rich notifications including:
+
+- **Symbol**: The cryptocurrency symbol (e.g., BTC, ETH)
+- **Current Price**: Real-time price when alert triggered
+- **Threshold**: The price threshold you set
+- **Portfolio Summary**: Your investment details (if you have holdings)
+  - Amount of cryptocurrency owned
+  - Original investment amount
+  - Current value
+  - Profit/Loss percentage
+- **Custom Message**: Your personal alert message
+- **Timestamp**: When the alert was triggered
+
+### 5. Testing Notifications
+
+To test your Telegram setup:
+
+1. Create a price alert in the dashboard
+2. Set a threshold that will trigger (e.g., set BTC alert for $1,000,000 if current price is $50,000)
+3. The notification will be sent immediately when the condition is met
+
+### Troubleshooting
+
+- **No notifications received**: Check that `TELEGRAM_TOKEN` and `TELEGRAM_CHAT_ID` are correctly set
+- **SSL errors**: The system automatically handles SSL certificate issues in development
+- **Bot not responding**: Make sure you've started a conversation with your bot first
+
 ## Contributing
 
 1. Fork the repository

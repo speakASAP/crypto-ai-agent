@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { PriceAlert, PriceAlertCreate, PriceAlertUpdate } from '@/types'
+import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, Currency } from '@/types'
 
 interface AlertModalProps {
   isOpen: boolean
@@ -15,6 +15,7 @@ interface AlertModalProps {
   alert?: PriceAlert | null
   presetSymbol?: string
   currentPrice?: number
+  selectedCurrency: Currency
   portfolioItem?: {
     amount: number
     price_buy: number
@@ -24,7 +25,7 @@ interface AlertModalProps {
   }
 }
 
-export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, currentPrice, portfolioItem }: AlertModalProps) {
+export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, currentPrice, selectedCurrency, portfolioItem }: AlertModalProps) {
   const [formData, setFormData] = useState({
     symbol: '',
     threshold_price: '',
@@ -96,10 +97,18 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
+  // Currency to locale mapping for proper symbol display
+  const currencyToLocale: Record<string, string> = {
+    'USD': 'en-US',
+    'EUR': 'de-DE', 
+    'CZK': 'cs-CZ'
+  }
+
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    const locale = currencyToLocale[selectedCurrency] || 'en-US'
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency: selectedCurrency,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(amount)

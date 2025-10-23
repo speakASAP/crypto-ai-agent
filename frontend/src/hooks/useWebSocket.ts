@@ -10,19 +10,22 @@ interface WebSocketHook {
   disconnect: () => void
   subscribeToPrices: (symbols: string[]) => void
   subscribeToAlerts: () => void
+  setExchangeRates: (rates: Record<string, number>) => void
 }
 
 export const useWebSocket = (): WebSocketHook => {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [isConnected, setIsConnected] = useState(false)
+  const exchangeRatesRef = useRef<Record<string, number>>({})
   
   const { fetchPortfolio, fetchSummary } = usePortfolioStore()
   const { fetchAlerts, fetchHistory } = useAlertsStore()
   const { fetchSymbolPrices } = useSymbolsStore()
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) {
+      console.log('WebSocket already connected or connecting, skipping...')
       return
     }
 
@@ -66,6 +69,8 @@ export const useWebSocket = (): WebSocketHook => {
 
       wsRef.current.onerror = (error) => {
         console.error('❌ WebSocket error:', error)
+        console.error('WebSocket readyState:', wsRef.current?.readyState)
+        console.error('WebSocket URL:', wsUrl)
         setIsConnected(false)
       }
     } catch (error) {
@@ -110,7 +115,7 @@ export const useWebSocket = (): WebSocketHook => {
   const handleWebSocketMessage = useCallback((message: any) => {
     switch (message.type) {
       case 'price_update':
-        handlePriceUpdate(message as PriceUpdateMessage)
+        handlePriceUpdate(message as PriceUpdateMessage, exchangeRatesRef.current)
         break
       case 'alert_triggered':
         handleAlertTriggered(message as AlertTriggeredMessage)
@@ -123,7 +128,7 @@ export const useWebSocket = (): WebSocketHook => {
     }
   }, [])
 
-  const handlePriceUpdate = useCallback((message: PriceUpdateMessage) => {
+  const handlePriceUpdate = useCallback((message: PriceUpdateMessage, exchangeRates?: Record<string, number>) => {
     console.log('📈 Price update:', message.data)
     
     // Update symbol prices in store
@@ -135,7 +140,8 @@ export const useWebSocket = (): WebSocketHook => {
     }
     
     // Update portfolio values locally without refetching from API
-    usePortfolioStore.getState().updatePortfolioWithNewPrice(symbol, price)
+    // Note: WebSocket prices are always in USD, so we need to convert them
+    usePortfolioStore.getState().updatePortfolioWithNewPrice(symbol, price, exchangeRates)
   }, [])
 
   const handleAlertTriggered = useCallback((message: AlertTriggeredMessage) => {
@@ -162,11 +168,16 @@ export const useWebSocket = (): WebSocketHook => {
     }
   }, [connect, disconnect])
 
+  const setExchangeRates = useCallback((rates: Record<string, number>) => {
+    exchangeRatesRef.current = rates
+  }, [])
+
   return {
     isConnected,
     connect,
     disconnect,
     subscribeToPrices,
-    subscribeToAlerts
+    subscribeToAlerts,
+    setExchangeRates
   }
 }

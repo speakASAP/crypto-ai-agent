@@ -16,7 +16,7 @@ export default function Home() {
   const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem } = usePortfolioStore()
   const { alerts, fetchAlerts, createAlert, updateAlert, deleteAlert } = useAlertsStore()
   const { trackedSymbols, fetchTrackedSymbols } = useSymbolsStore()
-  const { isConnected, subscribeToPrices, subscribeToAlerts } = useWebSocket()
+  const { isConnected, subscribeToPrices, subscribeToAlerts, setExchangeRates: setWebSocketExchangeRates } = useWebSocket()
 
   // Modal states
   const [portfolioModalOpen, setPortfolioModalOpen] = useState(false)
@@ -50,10 +50,16 @@ export default function Home() {
     loadExchangeRates()
   }, [fetchPortfolio, fetchSummary, fetchAlerts, fetchTrackedSymbols])
 
+  useEffect(() => {
+    // Update WebSocket exchange rates whenever they change
+    setWebSocketExchangeRates(exchangeRates)
+  }, [exchangeRates, setWebSocketExchangeRates])
+
   const loadExchangeRates = async () => {
     try {
       const rates = await apiClient.getExchangeRates()
       setExchangeRates(rates.rates)
+      setWebSocketExchangeRates(rates.rates) // Pass exchange rates to WebSocket hook for real-time price conversions
       setLastUpdated(rates.last_updated)
     } catch (error) {
       console.error('Failed to load exchange rates:', error)
@@ -65,6 +71,8 @@ export default function Home() {
     try {
       const result = await apiClient.refreshExchangeRates()
       setLastUpdated(result.last_updated)
+      // Reload exchange rates
+      await loadExchangeRates()
       // Reload portfolio data with new rates
       fetchPortfolio()
       fetchSummary()
@@ -512,6 +520,7 @@ export default function Home() {
         alert={editingAlert}
         presetSymbol={presetAlertData?.symbol}
         currentPrice={presetAlertData?.currentPrice}
+        selectedCurrency={selectedCurrency}
         portfolioItem={presetAlertData?.portfolioItem}
       />
     </div>

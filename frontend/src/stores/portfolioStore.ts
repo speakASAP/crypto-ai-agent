@@ -18,7 +18,7 @@ interface PortfolioState {
   fetchSummary: () => Promise<void>
   setCurrency: (currency: Currency) => Promise<void>
   clearError: () => void
-  updatePortfolioWithNewPrice: (symbol: string, price: number) => void
+  updatePortfolioWithNewPrice: (symbol: string, price: number, exchangeRates?: Record<string, number>) => void
 }
 
 export const usePortfolioStore = create<PortfolioState>()(
@@ -123,22 +123,28 @@ export const usePortfolioStore = create<PortfolioState>()(
 
       clearError: () => set({ error: null }),
 
-      updatePortfolioWithNewPrice: (symbol: string, price: number) => {
+      updatePortfolioWithNewPrice: (symbol: string, usdPrice: number, exchangeRates?: Record<string, number>) => {
         const state = get()
         const { selectedCurrency } = state
+        
+        // Convert USD price to selected currency if needed
+        let convertedPrice = usdPrice
+        if (selectedCurrency !== 'USD' && exchangeRates && exchangeRates[selectedCurrency]) {
+          convertedPrice = usdPrice * exchangeRates[selectedCurrency]
+        }
         
         // Update items with new price for the specific symbol
         const updatedItems = state.items.map(item => {
           if (item.symbol === symbol) {
-            // Calculate new values based on the updated price
-            const currentValue = item.amount * price
+            // Calculate new values based on the converted price
+            const currentValue = item.amount * convertedPrice
             const totalInvestment = (item.amount * item.price_buy) + item.commission
             const pnl = currentValue - totalInvestment
             const pnlPercent = totalInvestment > 0 ? (pnl / totalInvestment) * 100 : 0
             
             return {
               ...item,
-              current_price: price,
+              current_price: convertedPrice,
               current_value: currentValue,
               pnl: pnl,
               pnl_percent: pnlPercent,
