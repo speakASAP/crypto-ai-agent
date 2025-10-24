@@ -14,20 +14,22 @@ export default function ProfilePage() {
     email: '',
     username: '',
     fullName: '',
-    preferredCurrency: 'USD'
+    preferredCurrency: 'USD',
+    telegramBotToken: '',
+    telegramChatId: ''
   })
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   })
-  const [activeTab, setActiveTab] = useState<'profile' | 'password'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram'>('profile')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [confirmationText, setConfirmationText] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
-  const { user, updateProfile, changePassword, logout, deleteAccount, loading } = useAuthStore()
+  const { user, updateProfile, changePassword, logout, deleteAccount, testTelegramConnection, loading } = useAuthStore()
   const router = useRouter()
 
   useEffect(() => {
@@ -36,7 +38,9 @@ export default function ProfilePage() {
         email: user.email,
         username: user.username,
         fullName: user.full_name || '',
-        preferredCurrency: user.preferred_currency || 'USD'
+        preferredCurrency: user.preferred_currency || 'USD',
+        telegramBotToken: user.telegram_bot_token || '',
+        telegramChatId: user.telegram_chat_id || ''
       })
     }
   }, [user])
@@ -65,7 +69,9 @@ export default function ProfilePage() {
         email: profileData.email,
         username: profileData.username,
         full_name: profileData.fullName || undefined,
-        preferred_currency: profileData.preferredCurrency
+        preferred_currency: profileData.preferredCurrency,
+        telegram_bot_token: profileData.telegramBotToken || undefined,
+        telegram_chat_id: profileData.telegramChatId || undefined
       })
       setSuccess('Profile updated successfully')
     } catch (error: any) {
@@ -146,6 +152,33 @@ export default function ProfilePage() {
     setError('')
   }
 
+  const handleTestTelegram = async () => {
+    setError('')
+    setSuccess('')
+    
+    try {
+      // First, save the current Telegram settings
+      await updateProfile({
+        email: profileData.email,
+        username: profileData.username,
+        full_name: profileData.fullName || undefined,
+        preferred_currency: profileData.preferredCurrency,
+        telegram_bot_token: profileData.telegramBotToken || undefined,
+        telegram_chat_id: profileData.telegramChatId || undefined
+      })
+      
+      // Then test the connection
+      const result = await testTelegramConnection()
+      if (result.success) {
+        setSuccess('Telegram settings saved and test message sent successfully! Check your Telegram chat.')
+      } else {
+        setError(result.message)
+      }
+    } catch (error: any) {
+      setError(error.message || 'Telegram test failed')
+    }
+  }
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -160,8 +193,19 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Profile Settings</h1>
-          <p className="mt-2 text-gray-600">Manage your account settings and preferences</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Profile Settings</h1>
+              <p className="mt-2 text-gray-600">Manage your account settings and preferences</p>
+            </div>
+            <Button
+              onClick={() => router.push('/')}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              ← Return to Dashboard
+            </Button>
+          </div>
         </div>
 
         <div className="mb-6">
@@ -186,6 +230,16 @@ export default function ProfilePage() {
                 }`}
               >
                 Change Password
+              </button>
+              <button
+                onClick={() => setActiveTab('telegram')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'telegram'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Telegram Settings
               </button>
             </nav>
           </div>
@@ -345,6 +399,103 @@ export default function ProfilePage() {
                 <Button type="submit" disabled={loading}>
                   {loading ? 'Changing...' : 'Change Password'}
                 </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === 'telegram' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Telegram Settings</CardTitle>
+              <CardDescription>
+                Configure your personal Telegram bot for price alert notifications
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleProfileSubmit} className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                  <h3 className="text-sm font-medium text-blue-800 mb-2">📱 How to Get Your Telegram Credentials</h3>
+                  <div className="text-sm text-blue-700 space-y-2">
+                    <p><strong>Step 1 - Create a Bot:</strong></p>
+                    <ol className="list-decimal list-inside ml-4 space-y-1">
+                      <li>Open Telegram and search for <code className="bg-blue-100 px-1 rounded">@BotFather</code></li>
+                      <li>Start a chat with @BotFather</li>
+                      <li>Send <code className="bg-blue-100 px-1 rounded">/newbot</code> command</li>
+                      <li>Follow the instructions to create your bot</li>
+                      <li>Copy the bot token (format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz)</li>
+                    </ol>
+                    <p className="mt-3"><strong>Step 2 - Get Your Chat ID:</strong></p>
+                    <ol className="list-decimal list-inside ml-4 space-y-1">
+                      <li>Start a chat with your bot (search for the bot name you created)</li>
+                      <li>Send any message to the bot</li>
+                      <li>Visit: <code className="bg-blue-100 px-1 rounded">https://api.telegram.org/bot&lt;YOUR_BOT_TOKEN&gt;/getUpdates</code></li>
+                      <li>Find your chat ID in the response (look for &quot;chat&quot;:&quot;id&quot;:123456789)</li>
+                      <li>Copy the chat ID number</li>
+                    </ol>
+                    <p className="mt-3 text-xs text-blue-600">
+                      <strong>Note:</strong> These settings are optional. If not configured, the system will use global settings for notifications.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="telegramBotToken">Telegram Bot Token</Label>
+                  <Input
+                    id="telegramBotToken"
+                    name="telegramBotToken"
+                    type="text"
+                    value={profileData.telegramBotToken}
+                    onChange={handleProfileChange}
+                    placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Your personal Telegram bot token from @BotFather
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="telegramChatId">Telegram Chat ID</Label>
+                  <Input
+                    id="telegramChatId"
+                    name="telegramChatId"
+                    type="text"
+                    value={profileData.telegramChatId}
+                    onChange={handleProfileChange}
+                    placeholder="123456789"
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Your personal chat ID with the bot
+                  </p>
+                </div>
+
+                <div className="flex space-x-3">
+                  <Button type="submit" disabled={loading}>
+                    {loading ? 'Saving...' : 'Save Telegram Settings'}
+                  </Button>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={handleTestTelegram}
+                    disabled={loading || (!profileData.telegramBotToken || !profileData.telegramChatId)}
+                  >
+                    {loading ? 'Saving & Testing...' : 'Save & Test Connection'}
+                  </Button>
+                </div>
+
+                {error && (
+                  <div className="text-red-600 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                {success && (
+                  <div className="text-green-600 text-sm">
+                    {success}
+                  </div>
+                )}
               </form>
             </CardContent>
           </Card>

@@ -51,6 +51,7 @@ interface AuthState {
   updateProfile: (updateData: UserProfileUpdate) => Promise<User>
   changePassword: (passwordChange: PasswordChange) => Promise<void>
   deleteAccount: (confirmationText: string) => Promise<void>
+  testTelegramConnection: () => Promise<{ message: string; success: boolean }>
   setUser: (user: User) => void
   clearError: () => void
   setHydrated: (hydrated: boolean) => void
@@ -222,6 +223,21 @@ export const useAuthStore = create<AuthState>()(
         } catch (error: any) {
           set({ 
             error: error.message || 'Account deletion failed', 
+            loading: false 
+          })
+          throw error
+        }
+      },
+
+      testTelegramConnection: async () => {
+        set({ loading: true, error: null })
+        try {
+          const result = await apiClient.testTelegramConnection()
+          set({ loading: false })
+          return result
+        } catch (error: any) {
+          set({ 
+            error: error.message || 'Telegram test failed', 
             loading: false 
           })
           throw error

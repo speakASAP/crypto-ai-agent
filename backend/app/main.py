@@ -274,6 +274,81 @@ async def send_telegram_notification(message: str):
         logger.error(f"Error sending Telegram notification: {e}")
         return False
 
+def get_user_telegram_credentials(user_id: int) -> Optional[dict]:
+    """Get user's personal Telegram credentials from database"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT telegram_bot_token, telegram_chat_id FROM users WHERE id = ?", 
+            (user_id,)
+        )
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result and result[0] and result[1]:
+            return {
+                'bot_token': result[0],
+                'chat_id': result[1]
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error getting user Telegram credentials: {e}")
+        return None
+
+async def send_telegram_notification_with_credentials(message: str, bot_token: str, chat_id: str):
+    """Send notification to Telegram bot using specific credentials"""
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        data = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        
+        # Create SSL context that doesn't verify certificates (for development)
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.post(url, json=data) as response:
+                if response.status == 200:
+                    logger.info(f"Telegram notification sent successfully: {message[:50]}...")
+                    return True
+                else:
+                    response_text = await response.text()
+                    logger.error(f"Failed to send Telegram notification: {response.status} - {response_text}")
+                    return False
+                    
+    except Exception as e:
+        logger.error(f"Error sending Telegram notification: {e}")
+        return False
+
+async def send_user_telegram_notification(user_id: int, message: str):
+    """Send Telegram notification using user-specific credentials with .env fallback"""
+    try:
+        # Try to get user's personal Telegram credentials
+        user_credentials = get_user_telegram_credentials(user_id)
+        
+        if user_credentials and user_credentials['bot_token'] and user_credentials['chat_id']:
+            # Use user's personal settings
+            logger.info(f"Using user-specific Telegram credentials for user {user_id}")
+            return await send_telegram_notification_with_credentials(
+                message, 
+                user_credentials['bot_token'], 
+                user_credentials['chat_id']
+            )
+        else:
+            # Fall back to global .env settings
+            logger.info(f"Using global Telegram credentials for user {user_id} (no user settings)")
+            return await send_telegram_notification(message)  # Uses .env
+            
+    except Exception as e:
+        logger.error(f"Error sending Telegram notification for user {user_id}: {e}")
+        return False
+
 async def check_and_trigger_alerts(current_prices: Dict[str, float]):
     """Check all active alerts against current prices and trigger notifications"""
     try:
@@ -385,7 +460,7 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
         
         # Send Telegram notifications for triggered alerts
         for alert_data in triggered_alerts:
-            await send_telegram_notification(alert_data['notification_message'])
+            await send_user_telegram_notification(user_id, alert_data['notification_message'])
             
             # Broadcast alert triggered via WebSocket
             await manager.send_alert_triggered(alert_data)
@@ -510,6 +585,8 @@ class UserResponse(BaseModel):
     preferred_currency: str
     is_active: bool
     created_at: str
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -535,6 +612,8 @@ class UserProfileUpdate(BaseModel):
     username: Optional[str] = None
     full_name: Optional[str] = None
     preferred_currency: Optional[str] = None
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
 
     @validator('username')
     def validate_username(cls, v):
@@ -548,6 +627,14 @@ class UserProfileUpdate(BaseModel):
         if v is not None:
             if v not in ['USD', 'EUR', 'CZK']:
                 raise ValueError('Preferred currency must be USD, EUR, or CZK')
+        return v
+
+    @validator('telegram_bot_token')
+    def validate_telegram_bot_token(cls, v):
+        if v is not None and v.strip():
+            # Basic validation for Telegram bot token format
+            if not v.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) or ':' not in v:
+                raise ValueError('Invalid Telegram bot token format. Should be like: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz')
         return v
 
 class PasswordChange(BaseModel):
@@ -686,6 +773,22 @@ def init_database():
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN preferred_currency TEXT DEFAULT 'USD'")
         logger.info("✅ Added preferred_currency column to users table")
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
+    # Add telegram_bot_token column to existing users table if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN telegram_bot_token TEXT")
+        logger.info("✅ Added telegram_bot_token column to users table")
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
+    # Add telegram_chat_id column to existing users table if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN telegram_chat_id TEXT")
+        logger.info("✅ Added telegram_chat_id column to users table")
     except sqlite3.OperationalError:
         # Column already exists, ignore
         pass
@@ -1038,7 +1141,9 @@ async def get_current_user_info(current_user: dict = Depends(get_current_active_
         full_name=current_user["full_name"],
         preferred_currency=current_user["preferred_currency"],
         is_active=current_user["is_active"],
-        created_at=current_user["created_at"]
+        created_at=current_user["created_at"],
+        telegram_bot_token=current_user.get("telegram_bot_token"),
+        telegram_chat_id=current_user.get("telegram_chat_id")
     )
 
 @app.put("/api/auth/profile", response_model=UserResponse)
@@ -1073,6 +1178,12 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
     if update_data.preferred_currency is not None:
         update_fields.append("preferred_currency = ?")
         update_values.append(update_data.preferred_currency)
+    if update_data.telegram_bot_token is not None:
+        update_fields.append("telegram_bot_token = ?")
+        update_values.append(update_data.telegram_bot_token)
+    if update_data.telegram_chat_id is not None:
+        update_fields.append("telegram_chat_id = ?")
+        update_values.append(update_data.telegram_chat_id)
     
     if update_fields:
         update_fields.append("updated_at = ?")
@@ -1083,7 +1194,7 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         conn.commit()
     
     # Get updated user
-    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE id = ?", (current_user["id"],))
+    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?", (current_user["id"],))
     user = cursor.fetchone()
     conn.close()
     
@@ -1094,7 +1205,9 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         full_name=user[3],
         preferred_currency=user[4],
         is_active=user[5],
-        created_at=user[6]
+        created_at=user[6],
+        telegram_bot_token=user[7],
+        telegram_chat_id=user[8]
     )
 
 @app.post("/api/auth/change-password")
@@ -1119,6 +1232,23 @@ async def change_password(password_change: PasswordChange, current_user: dict = 
     conn.close()
     
     return {"message": "Password changed successfully"}
+
+@app.post("/api/auth/test-telegram")
+async def test_telegram_connection(current_user: dict = Depends(get_current_active_user)):
+    """Test Telegram connection for current user"""
+    try:
+        test_message = f"🧪 <b>Test Message</b>\n\nHello {current_user['username']}! This is a test message from your Crypto AI Agent.\n\n✅ Your Telegram integration is working correctly!"
+        
+        success = await send_user_telegram_notification(current_user["id"], test_message)
+        
+        if success:
+            return {"message": "Telegram test message sent successfully!", "success": True}
+        else:
+            return {"message": "Failed to send Telegram test message. Please check your credentials.", "success": False}
+            
+    except Exception as e:
+        logger.error(f"Error testing Telegram connection for user {current_user['id']}: {e}")
+        return {"message": f"Error testing Telegram connection: {str(e)}", "success": False}
 
 @app.post("/api/auth/password-reset-request")
 async def request_password_reset(request: PasswordResetRequest):

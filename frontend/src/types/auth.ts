@@ -6,6 +6,8 @@ export interface User {
   preferred_currency: string
   is_active: boolean
   created_at: string
+  telegram_bot_token?: string
+  telegram_chat_id?: string
 }
 
 export interface UserLogin {
@@ -41,6 +43,8 @@ export interface UserProfileUpdate {
   username?: string
   full_name?: string
   preferred_currency?: string
+  telegram_bot_token?: string
+  telegram_chat_id?: string
 }
 
 export interface PasswordChange {
