@@ -70,8 +70,8 @@ export default function ProfilePage() {
         username: profileData.username,
         full_name: profileData.fullName || undefined,
         preferred_currency: profileData.preferredCurrency,
-        telegram_bot_token: profileData.telegramBotToken || undefined,
-        telegram_chat_id: profileData.telegramChatId || undefined
+        telegram_bot_token: profileData.telegramBotToken || '',
+        telegram_chat_id: profileData.telegramChatId || ''
       })
       setSuccess('Profile updated successfully')
     } catch (error: any) {
@@ -163,8 +163,8 @@ export default function ProfilePage() {
         username: profileData.username,
         full_name: profileData.fullName || undefined,
         preferred_currency: profileData.preferredCurrency,
-        telegram_bot_token: profileData.telegramBotToken || undefined,
-        telegram_chat_id: profileData.telegramChatId || undefined
+        telegram_bot_token: profileData.telegramBotToken || '',
+        telegram_chat_id: profileData.telegramChatId || ''
       })
       
       // Then test the connection

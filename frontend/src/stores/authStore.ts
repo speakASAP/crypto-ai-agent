@@ -77,17 +77,27 @@ export const useAuthStore = create<AuthState>()(
         set({ loading: true, error: null })
         try {
           const response = await apiClient.login(credentials)
+          
+          // Set tokens first
           set({
             accessToken: response.access_token,
             refreshToken: response.refresh_token,
             user: response.user,
             isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
+          })
+          
+          // Fetch complete user profile including telegram settings
+          const completeUser = await apiClient.getCurrentUser()
+          
+          set({
+            user: completeUser,
+            isAuthenticated: calculateIsAuthenticated(response.access_token, completeUser),
             loading: false,
           })
           
           // Set user's preferred currency in portfolio store
           const portfolioStore = usePortfolioStore.getState()
-          portfolioStore.setCurrencyFromUserPreference(response.user.preferred_currency as any)
+          portfolioStore.setCurrencyFromUserPreference(completeUser.preferred_currency as any)
         } catch (error: any) {
           set({ 
             error: error.message || 'Login failed', 
@@ -115,6 +125,8 @@ export const useAuthStore = create<AuthState>()(
         }
         try {
           const response = await apiClient.refreshToken(currentRefreshToken)
+          
+          // Set tokens first
           set({
             accessToken: response.access_token,
             refreshToken: response.refresh_token,
@@ -122,9 +134,17 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
           })
           
+          // Fetch complete user profile including telegram settings
+          const completeUser = await apiClient.getCurrentUser()
+          
+          set({
+            user: completeUser,
+            isAuthenticated: calculateIsAuthenticated(response.access_token, completeUser),
+          })
+          
           // Set user's preferred currency in portfolio store
           const portfolioStore = usePortfolioStore.getState()
-          portfolioStore.setCurrencyFromUserPreference(response.user.preferred_currency as any)
+          portfolioStore.setCurrencyFromUserPreference(completeUser.preferred_currency as any)
         } catch (error) {
           get().logout()
           throw error
@@ -135,17 +155,27 @@ export const useAuthStore = create<AuthState>()(
         set({ loading: true, error: null })
         try {
           const response = await apiClient.register(userData)
+          
+          // Set tokens first
           set({
             accessToken: response.access_token,
             refreshToken: response.refresh_token,
             user: response.user,
             isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
+          })
+          
+          // Fetch complete user profile including telegram settings
+          const completeUser = await apiClient.getCurrentUser()
+          
+          set({
+            user: completeUser,
+            isAuthenticated: calculateIsAuthenticated(response.access_token, completeUser),
             loading: false,
           })
           
           // Set user's preferred currency in portfolio store
           const portfolioStore = usePortfolioStore.getState()
-          portfolioStore.setCurrencyFromUserPreference(response.user.preferred_currency as any)
+          portfolioStore.setCurrencyFromUserPreference(completeUser.preferred_currency as any)
         } catch (error: any) {
           set({ 
             error: error.message || 'Registration failed', 

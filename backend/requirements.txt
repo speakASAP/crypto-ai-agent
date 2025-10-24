@@ -24,6 +24,7 @@ pytest-asyncio==0.21.1
 
 # Authentication and security
 passlib[bcrypt]==1.7.4
+bcrypt>=4.0.1
 python-jose[cryptography]==3.3.0
 python-multipart==0.0.6
 email-validator==2.1.0

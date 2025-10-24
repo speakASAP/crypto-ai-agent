@@ -642,7 +642,15 @@ class UserProfileUpdate(BaseModel):
             # Basic validation for Telegram bot token format
             if not v.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) or ':' not in v:
                 raise ValueError('Invalid Telegram bot token format. Should be like: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz')
-        return v
+        return v.strip() if v else ''
+
+    @validator('telegram_chat_id')
+    def validate_telegram_chat_id(cls, v):
+        if v is not None and v.strip():
+            # Basic validation for Telegram chat ID format (should be numeric)
+            if not v.strip().isdigit():
+                raise ValueError('Invalid Telegram chat ID format. Should be a numeric value like: 123456789')
+        return v.strip() if v else ''
 
 class PasswordChange(BaseModel):
     current_password: str
