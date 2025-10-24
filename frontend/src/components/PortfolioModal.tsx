@@ -57,11 +57,13 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         total_investment_text: item.total_investment_text || ''
       })
     } else {
+      // Set today's date as default for new items
+      const today = new Date().toISOString().split('T')[0]
       setFormData({
         symbol: '',
         amount: '',
         price_buy: '',
-        purchase_date: '',
+        purchase_date: today,
         base_currency: selectedCurrency,
         source: '',
         commission: '0',

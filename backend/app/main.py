@@ -33,8 +33,13 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Database file
-DB_FILE = settings.database_file
+# Database file - resolve to absolute path
+import os
+# Get the project root directory (parent of backend directory)
+current_file = os.path.abspath(__file__)  # /path/to/backend/app/main.py
+backend_dir = os.path.dirname(os.path.dirname(current_file))  # /path/to/backend
+project_root = os.path.dirname(backend_dir)  # /path/to/project
+DB_FILE = os.path.join(project_root, settings.database_file)
 
 # Initialize services
 price_service = PriceService()
@@ -249,7 +254,7 @@ async def send_telegram_notification(message: str):
             logger.warning("Telegram credentials not found in environment variables")
             return False
             
-        url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+        url = f"{settings.telegram_api_url}{telegram_token}/sendMessage"
         data = {
             "chat_id": telegram_chat_id,
             "text": message,
@@ -301,7 +306,7 @@ def get_user_telegram_credentials(user_id: int) -> Optional[dict]:
 async def send_telegram_notification_with_credentials(message: str, bot_token: str, chat_id: str):
     """Send notification to Telegram bot using specific credentials"""
     try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        url = f"{settings.telegram_api_url}{bot_token}/sendMessage"
         data = {
             "chat_id": chat_id,
             "text": message,
@@ -988,7 +993,7 @@ app = FastAPI(
 # Add middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://yourdomain.com"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1632,9 +1637,9 @@ async def get_alerts(active_only: bool = False, current_user: dict = Depends(get
     alerts = []
     for row in rows:
         alerts.append(PriceAlert(
-            id=row[0], symbol=row[1], threshold_price=row[2],
-            alert_type=row[3], message=row[4], is_active=bool(row[5]),
-            created_at=row[6]
+            id=row[0], symbol=row[2], threshold_price=row[3],
+            alert_type=row[4], message=row[5], is_active=bool(row[6]),
+            created_at=row[7]
         ))
     
     return alerts
@@ -1715,9 +1720,9 @@ async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dic
     conn.close()
     
     return PriceAlert(
-        id=row[0], symbol=row[1], threshold_price=row[2],
-        alert_type=row[3], message=row[4], is_active=bool(row[5]),
-        created_at=row[6]
+        id=row[0], symbol=row[2], threshold_price=row[3],
+        alert_type=row[4], message=row[5], is_active=bool(row[6]),
+        created_at=row[7]
     )
 
 @app.delete("/api/alerts/{alert_id}")
@@ -1805,8 +1810,49 @@ async def refresh_currency_rates():
     return {
         "message": "Currency rates refreshed successfully",
         "rates_count": len(currency_service.rates),
-        "last_updated": currency_service.last_updated
+        "last_updated": currency_service.last_updated_timestamp.isoformat() + "Z" if currency_service.last_updated_timestamp else currency_service.last_updated
     }
+
+@app.post("/api/crypto/refresh")
+async def refresh_crypto_prices():
+    """Refresh crypto prices for all tracked symbols"""
+    try:
+        # Get all tracked symbols from the database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all unique symbols from portfolio items
+        cursor.execute("SELECT DISTINCT symbol FROM portfolio_items")
+        portfolio_symbols = [row[0] for row in cursor.fetchall()]
+        
+        # Get all active tracked symbols
+        cursor.execute("SELECT symbol FROM tracked_symbols WHERE active = 1")
+        tracked_symbols = [row[0] for row in cursor.fetchall()]
+        
+        # Combine and deduplicate symbols
+        all_symbols = list(set(portfolio_symbols + tracked_symbols))
+        conn.close()
+        
+        if not all_symbols:
+            return {
+                "message": "No symbols to refresh",
+                "symbols_count": 0,
+                "last_updated": datetime.now().isoformat() + "Z"
+            }
+        
+        # Fetch prices for all symbols
+        await fetch_prices_for_symbols(all_symbols)
+        
+        return {
+            "message": "Crypto prices refreshed successfully",
+            "symbols_count": len(all_symbols),
+            "symbols": all_symbols,
+            "last_updated": datetime.now().isoformat() + "Z"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error refreshing crypto prices: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh crypto prices: {str(e)}")
 
 @app.get("/api/currency/rates")
 async def get_currency_rates():
@@ -1829,37 +1875,49 @@ async def get_symbol_last_updated():
     }
 
 # WebSocket endpoint
-@app.websocket("/")
+@app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates"""
     await manager.connect(websocket)
     
     try:
         while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            if message.get("type") == "subscribe":
-                # Subscribe to price updates for specific symbols
-                symbols = message.get("symbols", [])
-                manager.subscribe_to_prices(websocket, symbols)
+            try:
+                # Receive message from client with timeout
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                message = json.loads(data)
                 
-                # Send confirmation
-                await manager.send_personal_message(json.dumps({
-                    "type": "connection_status",
-                    "data": f"Subscribed to {len(symbols)} symbols"
-                }), websocket)
-                
-            elif message.get("type") == "subscribe_alerts":
-                # Subscribe to alert notifications
-                manager.subscribe_to_alerts(websocket)
-                
-                # Send confirmation
-                await manager.send_personal_message(json.dumps({
-                    "type": "connection_status",
-                    "data": "Subscribed to alert notifications"
-                }), websocket)
+                if message.get("type") == "subscribe":
+                    # Subscribe to price updates for specific symbols
+                    symbols = message.get("symbols", [])
+                    manager.subscribe_to_prices(websocket, symbols)
+                    
+                    # Send confirmation
+                    await manager.send_personal_message(json.dumps({
+                        "type": "connection_status",
+                        "data": f"Subscribed to {len(symbols)} symbols"
+                    }), websocket)
+                    
+                elif message.get("type") == "subscribe_alerts":
+                    # Subscribe to alert notifications
+                    manager.subscribe_to_alerts(websocket)
+                    
+                    # Send confirmation
+                    await manager.send_personal_message(json.dumps({
+                        "type": "connection_status",
+                        "data": "Subscribed to alert notifications"
+                    }), websocket)
+                    
+            except asyncio.TimeoutError:
+                # Send a ping to keep connection alive
+                try:
+                    await manager.send_personal_message(json.dumps({
+                        "type": "ping",
+                        "data": "Connection alive"
+                    }), websocket)
+                except:
+                    # Connection is dead, break the loop
+                    break
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -1875,4 +1933,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=settings.api_host, port=settings.api_port)

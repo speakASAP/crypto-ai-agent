@@ -33,6 +33,24 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    # Use source to safely load environment variables
+    set -a  # automatically export all variables
+    source .env
+    set +a  # stop automatically exporting
+    print_status "Environment variables loaded from .env file"
+else
+    print_error ".env file not found!"
+    exit 1
+fi
+
+# Set default values if not provided
+BACKEND_PORT=${BACKEND_PORT:-8000}
+FRONTEND_PORT=${FRONTEND_PORT:-3000}
+LOG_DIR=${LOG_DIR:-logs}
+DATA_DIR=${DATA_DIR:-data}
+
 # Function to check if a port is in use
 port_in_use() {
     lsof -i :$1 >/dev/null 2>&1
@@ -69,13 +87,13 @@ print_status "Stopping Crypto AI Agent services..."
 
 # Stop backend
 print_status "Stopping Backend (FastAPI)..."
-kill_pid "logs/backend.pid"
-kill_port 8000
+kill_pid "$LOG_DIR/backend.pid"
+kill_port $BACKEND_PORT
 
 # Stop frontend
 print_status "Stopping Frontend (Next.js)..."
-kill_pid "logs/frontend.pid"
-kill_port 3000
+kill_pid "$LOG_DIR/frontend.pid"
+kill_port $FRONTEND_PORT
 
 # Kill any remaining processes that might be related
 print_status "Cleaning up any remaining processes..."
@@ -88,7 +106,7 @@ pkill -f "venv/bin/uvicorn" 2>/dev/null || true
 pkill -f "next dev" 2>/dev/null || true
 
 # Kill any node processes running on our ports
-for port in 3000 8000; do
+for port in $FRONTEND_PORT $BACKEND_PORT; do
     if port_in_use $port; then
         print_warning "Port $port still in use, force killing..."
         lsof -ti :$port | xargs kill -9 2>/dev/null || true
@@ -100,7 +118,7 @@ sleep 2
 
 # Verify all ports are free
 all_ports_free=true
-for port in 3000 8000; do
+for port in $FRONTEND_PORT $BACKEND_PORT; do
     if port_in_use $port; then
         print_error "Port $port is still in use"
         all_ports_free=false
@@ -108,8 +126,8 @@ for port in 3000 8000; do
 done
 
 # Update status file
-if [ -f "logs/status.txt" ]; then
-    cat > logs/status.txt << EOF
+if [ -f "$LOG_DIR/status.txt" ]; then
+    cat > $LOG_DIR/status.txt << EOF
 Crypto AI Agent Status
 =====================
 Stopped: $(date)
@@ -123,7 +141,7 @@ if [ "$all_ports_free" = true ]; then
     print_success "🛑 Crypto AI Agent stopped successfully!"
     print_success "=========================================="
     print_success "All services have been stopped"
-    print_success "All ports (3000, 8000) are now free"
+    print_success "All ports ($FRONTEND_PORT, $BACKEND_PORT) are now free"
     print_success "=========================================="
 else
     print_warning "Some processes may still be running"
@@ -135,6 +153,6 @@ read -p "Do you want to clean up log files? (y/N): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     print_status "Cleaning up log files..."
-    rm -f logs/backend.log logs/frontend.log logs/backend_install.log logs/frontend_install.log
+    rm -f $LOG_DIR/backend.log $LOG_DIR/frontend.log $LOG_DIR/backend_install.log $LOG_DIR/frontend_install.log
     print_success "Log files cleaned up"
 fi

@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from decimal import Decimal
 from datetime import datetime, timezone
 from app.core.config import settings
+from app.utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class PriceService:
                 
                 # Process results
                 prices = {}
-                current_time = datetime.now(timezone.utc)
+                current_time = get_current_timestamp()
                 self.last_bulk_update = current_time
                 
                 for i, result in enumerate(results):
@@ -180,22 +181,16 @@ class PriceService:
     def get_formatted_timestamp(self, symbol: str = None) -> str:
         """Get formatted timestamp for display"""
         timestamp = self.get_last_update_timestamp(symbol)
-        if timestamp:
-            return timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
-        else:
-            return "Never updated"
+        return format_timestamp(timestamp)
     
     def get_timestamp_iso(self, symbol: str = None) -> str:
         """Get ISO format timestamp for API responses"""
         timestamp = self.get_last_update_timestamp(symbol)
-        if timestamp:
-            return timestamp.isoformat()
-        else:
-            return datetime.now(timezone.utc).isoformat()
+        return get_iso_timestamp(timestamp)
     
     def get_all_symbol_timestamps(self) -> Dict[str, str]:
         """Get all symbol timestamps in ISO format"""
         return {
-            symbol: timestamp.isoformat() 
+            symbol: get_iso_timestamp(timestamp) 
             for symbol, timestamp in self.last_updated_timestamps.items()
         }

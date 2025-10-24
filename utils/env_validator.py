@@ -158,16 +158,16 @@ class EnvironmentValidator:
             },
             "CURRENCY_FALLBACK_EUR": {
                 "type": float,
-                "min_value": 0.1,
-                "max_value": 2.0,
-                "default": 0.85,
+                "min_value": 0,
+                "max_value": 0,
+                "default": 0,
                 "description": "Fallback EUR to USD exchange rate"
             },
             "CURRENCY_FALLBACK_CZK": {
                 "type": float,
-                "min_value": 10.0,
-                "max_value": 50.0,
-                "default": 23.5,
+                "min_value": 0.0,
+                "max_value": 0.0,
+                "default": 0,
                 "description": "Fallback CZK to USD exchange rate"
             },
             "SSL_VERIFY": {

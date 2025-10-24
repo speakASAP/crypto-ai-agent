@@ -2,13 +2,20 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 import sqlite3
+import os
 from ..core.config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 def get_db_connection():
     """Get database connection with row factory"""
-    conn = sqlite3.connect(settings.database_file)
+    # Resolve database path relative to project root
+    current_file = os.path.abspath(__file__)  # /path/to/backend/app/dependencies/auth.py
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))  # /path/to/backend
+    project_root = os.path.dirname(backend_dir)  # /path/to/project
+    db_path = os.path.join(project_root, settings.database_file)
+    
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 

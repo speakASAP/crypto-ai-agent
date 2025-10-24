@@ -33,6 +33,24 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    # Use source to safely load environment variables
+    set -a  # automatically export all variables
+    source .env
+    set +a  # stop automatically exporting
+    print_status "Environment variables loaded from .env file"
+else
+    print_error ".env file not found!"
+    exit 1
+fi
+
+# Set default values if not provided
+BACKEND_PORT=${BACKEND_PORT:-8000}
+FRONTEND_PORT=${FRONTEND_PORT:-3000}
+LOG_DIR=${LOG_DIR:-logs}
+DATA_DIR=${DATA_DIR:-data}
+
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -86,11 +104,12 @@ fi
 
 # Kill any existing processes on our ports
 print_status "Cleaning up existing processes..."
-kill_port 8000  # Backend port
-kill_port 3000  # Frontend port
+kill_port $BACKEND_PORT  # Backend port
+kill_port $FRONTEND_PORT  # Frontend port
 
-# Create logs directory if it doesn't exist
-mkdir -p logs
+# Create directories if they don't exist
+mkdir -p $LOG_DIR
+mkdir -p $DATA_DIR
 
 # Start Backend
 print_status "Starting Backend (FastAPI)..."
@@ -109,21 +128,21 @@ source venv/bin/activate
 # Install/update dependencies
 print_status "Installing/updating Python dependencies..."
 # Install compatible versions to avoid pydantic-core build issues
-pip install "pydantic>=2.8.0" "pydantic-settings>=2.4.0" "passlib[bcrypt]==1.7.4" "python-jose[cryptography]==3.3.0" python-multipart==0.0.6 email-validator==2.1.0 fastapi uvicorn websockets httpx aiohttp python-dotenv psutil > ../logs/backend_install.log 2>&1
+pip install "pydantic>=2.8.0" "pydantic-settings>=2.4.0" "passlib[bcrypt]==1.7.4" "python-jose[cryptography]==3.3.0" python-multipart==0.0.6 email-validator==2.1.0 fastapi uvicorn websockets httpx aiohttp python-dotenv psutil > ../$LOG_DIR/backend_install.log 2>&1
 
 # Start backend in background using virtual environment
-print_status "Starting FastAPI server on port 8000..."
-nohup venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > ../logs/backend.log 2>&1 &
+print_status "Starting FastAPI server on port $BACKEND_PORT..."
+nohup venv/bin/uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload > ../$LOG_DIR/backend.log 2>&1 &
 BACKEND_PID=$!
-echo $BACKEND_PID > ../logs/backend.pid
+echo $BACKEND_PID > ../$LOG_DIR/backend.pid
 
 # Wait for backend to start
 print_status "Waiting for backend to start..."
 sleep 5
 
 # Check if backend is running
-if ! port_in_use 8000; then
-    print_error "Backend failed to start. Check logs/backend.log for details"
+if ! port_in_use $BACKEND_PORT; then
+    print_error "Backend failed to start. Check $LOG_DIR/backend.log for details"
     exit 1
 fi
 
@@ -138,21 +157,21 @@ cd frontend
 
 # Install/update dependencies
 print_status "Installing/updating Node.js dependencies..."
-npm install > ../logs/frontend_install.log 2>&1
+npm install > ../$LOG_DIR/frontend_install.log 2>&1
 
 # Start frontend in background
-print_status "Starting Next.js server on port 3000..."
-nohup npm run dev > ../logs/frontend.log 2>&1 &
+print_status "Starting Next.js server on port $FRONTEND_PORT..."
+nohup npm run dev > ../$LOG_DIR/frontend.log 2>&1 &
 FRONTEND_PID=$!
-echo $FRONTEND_PID > ../logs/frontend.pid
+echo $FRONTEND_PID > ../$LOG_DIR/frontend.pid
 
 # Wait for frontend to start
 print_status "Waiting for frontend to start..."
 sleep 10
 
 # Check if frontend is running
-if ! port_in_use 3000; then
-    print_error "Frontend failed to start. Check logs/frontend.log for details"
+if ! port_in_use $FRONTEND_PORT; then
+    print_error "Frontend failed to start. Check $LOG_DIR/frontend.log for details"
     exit 1
 fi
 
@@ -162,24 +181,24 @@ print_success "Frontend started successfully (PID: $FRONTEND_PID)"
 cd ..
 
 # Create status file
-cat > logs/status.txt << EOF
+cat > $LOG_DIR/status.txt << EOF
 Crypto AI Agent Status
 =====================
 Started: $(date)
 Backend PID: $BACKEND_PID
 Frontend PID: $FRONTEND_PID
-Backend URL: http://localhost:8000
-Frontend URL: http://localhost:3000
-API Docs: http://localhost:8000/docs
+Backend URL: http://localhost:$BACKEND_PORT
+Frontend URL: http://localhost:$FRONTEND_PORT
+API Docs: http://localhost:$BACKEND_PORT/docs
 EOF
 
 print_success "=========================================="
 print_success "🚀 Crypto AI Agent started successfully!"
 print_success "=========================================="
-print_success "Backend:  http://localhost:8000"
-print_success "Frontend: http://localhost:3000"
-print_success "API Docs: http://localhost:8000/docs"
+print_success "Backend:  http://localhost:$BACKEND_PORT"
+print_success "Frontend: http://localhost:$FRONTEND_PORT"
+print_success "API Docs: http://localhost:$BACKEND_PORT/docs"
 print_success "=========================================="
-print_status "Logs are available in the logs/ directory"
+print_status "Logs are available in the $LOG_DIR/ directory"
 print_status "Use ./stop.sh to stop all services"
 print_status "Use ./status.sh to check service status"

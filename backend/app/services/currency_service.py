@@ -3,6 +3,8 @@ import asyncio
 from typing import Dict, Optional
 import logging
 from datetime import datetime, timezone
+from app.core.config import settings
+from app.utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +20,14 @@ class CurrencyService:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # Using exchangerate-api.com (free tier: 1500 requests/month)
-                response = await client.get("https://api.exchangerate-api.com/v4/latest/USD")
+                response = await client.get(settings.currency_api_url)
                 response.raise_for_status()
                 data = response.json()
                 
                 self.rates = data.get("rates", {})
                 self.last_updated = data.get("date")
                 # Store precise timestamp with timezone
-                self.last_updated_timestamp = datetime.now(timezone.utc)
+                self.last_updated_timestamp = get_current_timestamp()
                 
                 logger.info(f"Updated exchange rates for {len(self.rates)} currencies at {self.last_updated_timestamp}")
                 return self.rates
@@ -38,7 +40,7 @@ class CurrencyService:
     def get_fallback_rates(self) -> Dict[str, float]:
         """Fallback rates if API is unavailable"""
         # Set timestamp for fallback rates too
-        self.last_updated_timestamp = datetime.now(timezone.utc)
+        self.last_updated_timestamp = get_current_timestamp()
         return {
             "USD": 1.0,
             "EUR": 0.85,
@@ -93,7 +95,7 @@ class CurrencyService:
     def get_formatted_timestamp(self) -> str:
         """Get formatted timestamp for display"""
         if self.last_updated_timestamp:
-            return self.last_updated_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+            return format_timestamp(self.last_updated_timestamp)
         elif self.last_updated:
             return f"{self.last_updated} (date only)"
         else:
@@ -101,10 +103,7 @@ class CurrencyService:
     
     def get_timestamp_iso(self) -> str:
         """Get ISO format timestamp for API responses"""
-        if self.last_updated_timestamp:
-            return self.last_updated_timestamp.isoformat()
-        else:
-            return datetime.now(timezone.utc).isoformat()
+        return get_iso_timestamp(self.last_updated_timestamp)
     
     def get_rate(self, currency: str) -> float:
         """Get exchange rate for a currency, with fallback"""

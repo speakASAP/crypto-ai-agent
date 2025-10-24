@@ -12,6 +12,7 @@ import { PortfolioModal } from '@/components/PortfolioModal'
 import { AlertModal } from '@/components/AlertModal'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PriceAlert, PriceAlertCreate, PriceAlertUpdate } from '@/types'
 import { apiClient } from '@/lib/api'
+import { getRelativeTime, getDataFreshness, getFreshnessColorClass, getTimestampDisplay } from '@/lib/timeUtils'
 import Link from 'next/link'
 
 export default function Home() {
@@ -70,7 +71,7 @@ export default function Home() {
       const rates = await apiClient.getExchangeRates()
       setExchangeRates(rates.rates)
       setWebSocketExchangeRates(rates.rates) // Pass exchange rates to WebSocket hook for real-time price conversions
-      setLastUpdated(rates.last_updated)
+      setLastUpdated(rates.last_updated_timestamp || rates.last_updated)
       setLastUpdatedFormatted(rates.last_updated_formatted || rates.last_updated)
     } catch (error) {
       console.error('Failed to load exchange rates:', error)
@@ -91,17 +92,25 @@ export default function Home() {
   const refreshExchangeRates = async () => {
     setRefreshingRates(true)
     try {
-      const result = await apiClient.refreshExchangeRates()
-      setLastUpdated(result.last_updated)
+      // Refresh both currency rates and crypto prices simultaneously
+      const [currencyResult, cryptoResult] = await Promise.all([
+        apiClient.refreshExchangeRates(),
+        apiClient.refreshCryptoPrices()
+      ])
+      
+      setLastUpdated(currencyResult.last_updated)
+      
       // Reload exchange rates
       await loadExchangeRates()
       // Reload crypto timestamps
       await loadCryptoTimestamps()
-      // Reload portfolio data with new rates
+      // Reload portfolio data with new rates and prices
       fetchPortfolio()
       fetchSummary()
+      
+      console.log(`✅ Refreshed ${currencyResult.rates_count} currency rates and ${cryptoResult.symbols_count} crypto prices`)
     } catch (error) {
-      console.error('Failed to refresh exchange rates:', error)
+      console.error('Failed to refresh data:', error)
     } finally {
       setRefreshingRates(false)
     }
@@ -136,11 +145,15 @@ export default function Home() {
     }
   }, [user, isHydrated])
 
-  // Periodic refresh of timestamps every 30 seconds
+  // Periodic refresh of timestamps
   useEffect(() => {
+    const refreshInterval = process.env.NEXT_PUBLIC_FRONTEND_REFRESH_INTERVAL 
+      ? parseInt(process.env.NEXT_PUBLIC_FRONTEND_REFRESH_INTERVAL) 
+      : 30000 // Default 30 seconds
+    
     const interval = setInterval(() => {
       loadCryptoTimestamps()
-    }, 30000) // 30 seconds
+    }, refreshInterval)
 
     return () => clearInterval(interval)
   }, [])
@@ -183,48 +196,6 @@ export default function Home() {
     }).format(amount)
   }
 
-  const getRelativeTime = (timestamp: string) => {
-    if (!timestamp) return 'Unknown'
-    
-    try {
-      const now = new Date()
-      const time = new Date(timestamp)
-      const diffMs = now.getTime() - time.getTime()
-      const diffMinutes = Math.floor(diffMs / (1000 * 60))
-      const diffSeconds = Math.floor(diffMs / 1000)
-      
-      if (diffSeconds < 60) {
-        return `${diffSeconds}s ago`
-      } else if (diffMinutes < 60) {
-        return `${diffMinutes}m ago`
-      } else if (diffMinutes < 1440) {
-        const hours = Math.floor(diffMinutes / 60)
-        return `${hours}h ago`
-      } else {
-        const days = Math.floor(diffMinutes / 1440)
-        return `${days}d ago`
-      }
-    } catch (error) {
-      return 'Invalid time'
-    }
-  }
-
-  const getDataFreshness = (timestamp: string) => {
-    if (!timestamp) return 'stale'
-    
-    try {
-      const now = new Date()
-      const time = new Date(timestamp)
-      const diffMs = now.getTime() - time.getTime()
-      const diffMinutes = Math.floor(diffMs / (1000 * 60))
-      
-      if (diffMinutes < 1) return 'fresh'
-      if (diffMinutes < 5) return 'recent'
-      return 'stale'
-    } catch (error) {
-      return 'stale'
-    }
-  }
 
   const handleCurrencyChange = async (newCurrency: string) => {
     if (currencyChanging || loading) return
@@ -419,10 +390,7 @@ export default function Home() {
             {lastUpdatedFormatted && (
               <div className="text-xs text-muted-foreground">
                 <div className="flex items-center space-x-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${
-                    getDataFreshness(lastUpdated) === 'fresh' ? 'bg-green-500' : 
-                    getDataFreshness(lastUpdated) === 'recent' ? 'bg-yellow-500' : 'bg-red-500'
-                  }`} />
+                  <div className={`w-1.5 h-1.5 rounded-full ${getFreshnessColorClass(getDataFreshness(lastUpdated))}`} />
                   <span>Currency Rates: {lastUpdatedFormatted}</span>
                 </div>
                 <div className="text-xs text-gray-500 ml-2">
@@ -433,10 +401,7 @@ export default function Home() {
             {cryptoLastUpdatedFormatted && (
               <div className="text-xs text-muted-foreground">
                 <div className="flex items-center space-x-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${
-                    getDataFreshness(cryptoLastUpdated) === 'fresh' ? 'bg-green-500' : 
-                    getDataFreshness(cryptoLastUpdated) === 'recent' ? 'bg-yellow-500' : 'bg-red-500'
-                  }`} />
+                  <div className={`w-1.5 h-1.5 rounded-full ${getFreshnessColorClass(getDataFreshness(cryptoLastUpdated))}`} />
                   <span>Crypto Prices: {cryptoLastUpdatedFormatted}</span>
                 </div>
                 <div className="text-xs text-gray-500 ml-2">

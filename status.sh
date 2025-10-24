@@ -31,6 +31,24 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    # Use source to safely load environment variables
+    set -a  # automatically export all variables
+    source .env
+    set +a  # stop automatically exporting
+    print_status "Environment variables loaded from .env file"
+else
+    print_error ".env file not found!"
+    exit 1
+fi
+
+# Set default values if not provided
+BACKEND_PORT=${BACKEND_PORT:-8000}
+FRONTEND_PORT=${FRONTEND_PORT:-3000}
+LOG_DIR=${LOG_DIR:-logs}
+DATA_DIR=${DATA_DIR:-data}
+
 # Function to check if a port is in use
 port_in_use() {
     lsof -i :$1 >/dev/null 2>&1
@@ -73,21 +91,21 @@ print_status "Crypto AI Agent Status Check"
 echo "=================================="
 
 # Check if status file exists
-if [ -f "logs/status.txt" ]; then
+if [ -f "$LOG_DIR/status.txt" ]; then
     echo
     print_status "Last known status:"
-    cat logs/status.txt
+    cat $LOG_DIR/status.txt
     echo
 fi
 
-# Check Backend (Port 8000)
-echo "Backend (FastAPI) - Port 8000:"
-if port_in_use 8000; then
+# Check Backend
+echo "Backend (FastAPI) - Port $BACKEND_PORT:"
+if port_in_use $BACKEND_PORT; then
     print_success "✅ Running"
-    echo "  $(get_process_info 8000)"
+    echo "  $(get_process_info $BACKEND_PORT)"
     
     # Check health
-    if check_service_health "http://localhost:8000/health" "Backend"; then
+    if check_service_health "http://localhost:$BACKEND_PORT/health" "Backend"; then
         echo "  Health: ✅ Healthy"
     else
         echo "  Health: ❌ Unhealthy"
@@ -98,14 +116,14 @@ fi
 
 echo
 
-# Check Frontend (Port 3000)
-echo "Frontend (Next.js) - Port 3000:"
-if port_in_use 3000; then
+# Check Frontend
+echo "Frontend (Next.js) - Port $FRONTEND_PORT:"
+if port_in_use $FRONTEND_PORT; then
     print_success "✅ Running"
-    echo "  $(get_process_info 3000)"
+    echo "  $(get_process_info $FRONTEND_PORT)"
     
     # Check health
-    if check_service_health "http://localhost:3000" "Frontend"; then
+    if check_service_health "http://localhost:$FRONTEND_PORT" "Frontend"; then
         echo "  Health: ✅ Healthy"
     else
         echo "  Health: ❌ Unhealthy"
@@ -118,9 +136,9 @@ echo
 
 # Check Database
 echo "Database (SQLite):"
-if [ -f "data/crypto_portfolio.db" ]; then
+if [ -f "$DATA_DIR/crypto_portfolio.db" ]; then
     print_success "✅ Database file exists"
-    db_size=$(du -h data/crypto_portfolio.db | cut -f1)
+    db_size=$(du -h $DATA_DIR/crypto_portfolio.db | cut -f1)
     echo "  Size: $db_size"
 else
     print_warning "⚠️  Database file not found"
@@ -130,15 +148,15 @@ echo
 
 # Check Log Files
 echo "Log Files:"
-if [ -f "logs/backend.log" ]; then
-    backend_log_size=$(du -h logs/backend.log | cut -f1)
+if [ -f "$LOG_DIR/backend.log" ]; then
+    backend_log_size=$(du -h $LOG_DIR/backend.log | cut -f1)
     echo "  Backend log: ✅ Exists ($backend_log_size)"
 else
     echo "  Backend log: ❌ Not found"
 fi
 
-if [ -f "logs/frontend.log" ]; then
-    frontend_log_size=$(du -h logs/frontend.log | cut -f1)
+if [ -f "$LOG_DIR/frontend.log" ]; then
+    frontend_log_size=$(du -h $LOG_DIR/frontend.log | cut -f1)
     echo "  Frontend log: ✅ Exists ($frontend_log_size)"
 else
     echo "  Frontend log: ❌ Not found"
@@ -187,16 +205,16 @@ echo
 
 # Summary
 echo "Summary:"
-backend_running=$(port_in_use 8000 && echo "true" || echo "false")
-frontend_running=$(port_in_use 3000 && echo "true" || echo "false")
+backend_running=$(port_in_use $BACKEND_PORT && echo "true" || echo "false")
+frontend_running=$(port_in_use $FRONTEND_PORT && echo "true" || echo "false")
 
 if [ "$backend_running" = "true" ] && [ "$frontend_running" = "true" ]; then
     print_success "🎉 All services are running!"
     echo
     echo "Access URLs:"
-    echo "  Frontend: http://localhost:3000"
-    echo "  Backend:  http://localhost:8000"
-    echo "  API Docs: http://localhost:8000/docs"
+    echo "  Frontend: http://localhost:$FRONTEND_PORT"
+    echo "  Backend:  http://localhost:$BACKEND_PORT"
+    echo "  API Docs: http://localhost:$BACKEND_PORT/docs"
 elif [ "$backend_running" = "true" ] || [ "$frontend_running" = "true" ]; then
     print_warning "⚠️  Some services are running, but not all"
     echo "  Use ./start.sh to start all services"

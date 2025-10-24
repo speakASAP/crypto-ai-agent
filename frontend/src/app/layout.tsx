@@ -1,6 +1,7 @@
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
+import { WebSocketWrapper } from '@/components/WebSocketWrapper'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -18,9 +19,11 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <div className="min-h-screen bg-background">
-            {children}
-          </div>
+          <WebSocketWrapper>
+            <div className="min-h-screen bg-background">
+              {children}
+            </div>
+          </WebSocketWrapper>
         </AuthProvider>
       </body>
     </html>

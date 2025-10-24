@@ -6,6 +6,10 @@ issue command cat .env to see the current variables list.
 .env exists in the project and don't recreate it.
 It is forbidden to recreate .env file.
 Add new keys and values to the .env file, check if they were added there and use the variables in codebase instead of hardcoded values.
+Compare .env and .env.example and make sure all variables are in both files.
+.env: Contains actual secrets and real configuration for your environment
+.env.example: Contains safe placeholders that show other developers what variables they need to set up
+Don't Exposed secrets in the example file (security risk)
 
 ## Environment Variable Management Commands
 
@@ -19,10 +23,3 @@ cat .env.example
 # Edit environment variables
 nano .env
 ```
-
-## Status: COMPLETED ✅
-
-- All hardcoded values have been replaced with environment variables
-- README.md updated with environment variable management instructions
-- .env.example contains all necessary configuration variables
-- env_validator.py updated with comprehensive validation rules

@@ -37,7 +37,6 @@
 
 - **🌐 UI Dashboard**: <http://localhost:8501>
 - **📊 Agent Logs**: `logs/agent.log`
-- **🖥️ UI Logs**: `logs/ui.log`
 
 ## Features Available
 
