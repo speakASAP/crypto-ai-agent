@@ -507,6 +507,7 @@ class UserResponse(BaseModel):
     email: str
     username: str
     full_name: Optional[str]
+    preferred_currency: str
     is_active: bool
     created_at: str
 
@@ -533,12 +534,20 @@ class UserProfileUpdate(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = None
     full_name: Optional[str] = None
+    preferred_currency: Optional[str] = None
 
     @validator('username')
     def validate_username(cls, v):
         if v is not None:
             if len(v) < 3:
                 raise ValueError('Username must be at least 3 characters')
+        return v
+
+    @validator('preferred_currency')
+    def validate_preferred_currency(cls, v):
+        if v is not None:
+            if v not in ['USD', 'EUR', 'CZK']:
+                raise ValueError('Preferred currency must be USD, EUR, or CZK')
         return v
 
 class PasswordChange(BaseModel):
@@ -549,6 +558,15 @@ class PasswordChange(BaseModel):
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters')
+        return v
+
+class AccountDeletionConfirm(BaseModel):
+    confirmation_text: str = "DELETE"
+    
+    @validator('confirmation_text')
+    def validate_confirmation(cls, v):
+        if v != "DELETE":
+            raise ValueError('Confirmation text must be exactly "DELETE"')
         return v
 
 def init_database():
@@ -564,6 +582,7 @@ def init_database():
             username TEXT UNIQUE NOT NULL,
             hashed_password TEXT NOT NULL,
             full_name TEXT,
+            preferred_currency TEXT DEFAULT 'USD',
             is_active BOOLEAN DEFAULT 1,
             is_verified BOOLEAN DEFAULT 0,
             created_at TEXT NOT NULL,
@@ -663,6 +682,14 @@ def init_database():
         )
     ''')
 
+    # Add preferred_currency column to existing users table if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN preferred_currency TEXT DEFAULT 'USD'")
+        logger.info("✅ Added preferred_currency column to users table")
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
     conn.commit()
     conn.close()
     logger.info("✅ Database initialized with user management")
@@ -901,6 +928,7 @@ async def register(user_data: UserCreate):
         email=user_data.email,
         username=user_data.username,
         full_name=user_data.full_name,
+        preferred_currency='USD',  # Default for new users
         is_active=True,
         created_at=now
     )
@@ -918,7 +946,7 @@ async def login(credentials: UserLogin):
     cursor = conn.cursor()
     
     # Get user by email
-    cursor.execute("SELECT id, email, username, hashed_password, full_name, is_active, created_at FROM users WHERE email = ?", (credentials.email,))
+    cursor.execute("SELECT id, email, username, hashed_password, full_name, preferred_currency, is_active, created_at FROM users WHERE email = ?", (credentials.email,))
     user = cursor.fetchone()
     conn.close()
     
@@ -929,7 +957,7 @@ async def login(credentials: UserLogin):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    if not user[5]:  # is_active
+    if not user[6]:  # is_active
         raise HTTPException(status_code=400, detail="Inactive user")
     
     # Generate tokens
@@ -942,8 +970,9 @@ async def login(credentials: UserLogin):
         email=user[1],
         username=user[2],
         full_name=user[4],
-        is_active=user[5],
-        created_at=user[6]
+        preferred_currency=user[5],
+        is_active=user[6],
+        created_at=user[7]
     )
     
     return TokenResponse(
@@ -971,11 +1000,11 @@ async def refresh_token(refresh_token: str = None):
     # Get user
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, email, username, full_name, is_active, created_at FROM users WHERE id = ?", (user_id,))
+    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE id = ?", (user_id,))
     user = cursor.fetchone()
     conn.close()
     
-    if not user or not user[4]:  # is_active
+    if not user or not user[5]:  # is_active
         raise HTTPException(status_code=401, detail="User not found or inactive")
     
     # Generate new tokens
@@ -988,8 +1017,9 @@ async def refresh_token(refresh_token: str = None):
         email=user[1],
         username=user[2],
         full_name=user[3],
-        is_active=user[4],
-        created_at=user[5]
+        preferred_currency=user[4],
+        is_active=user[5],
+        created_at=user[6]
     )
     
     return TokenResponse(
@@ -1006,6 +1036,7 @@ async def get_current_user_info(current_user: dict = Depends(get_current_active_
         email=current_user["email"],
         username=current_user["username"],
         full_name=current_user["full_name"],
+        preferred_currency=current_user["preferred_currency"],
         is_active=current_user["is_active"],
         created_at=current_user["created_at"]
     )
@@ -1039,6 +1070,9 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
     if update_data.full_name is not None:
         update_fields.append("full_name = ?")
         update_values.append(update_data.full_name)
+    if update_data.preferred_currency is not None:
+        update_fields.append("preferred_currency = ?")
+        update_values.append(update_data.preferred_currency)
     
     if update_fields:
         update_fields.append("updated_at = ?")
@@ -1049,7 +1083,7 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         conn.commit()
     
     # Get updated user
-    cursor.execute("SELECT id, email, username, full_name, is_active, created_at FROM users WHERE id = ?", (current_user["id"],))
+    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE id = ?", (current_user["id"],))
     user = cursor.fetchone()
     conn.close()
     
@@ -1058,8 +1092,9 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         email=user[1],
         username=user[2],
         full_name=user[3],
-        is_active=user[4],
-        created_at=user[5]
+        preferred_currency=user[4],
+        is_active=user[5],
+        created_at=user[6]
     )
 
 @app.post("/api/auth/change-password")
@@ -1153,6 +1188,51 @@ async def confirm_password_reset(confirm: PasswordResetConfirm):
     conn.close()
     
     return {"message": "Password reset successfully"}
+
+@app.delete("/api/auth/delete-account")
+async def delete_account(confirmation: AccountDeletionConfirm, current_user: dict = Depends(get_current_active_user)):
+    """Delete user account and all associated data"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    user_id = current_user["id"]
+    
+    try:
+        # Delete all user-related data in the correct order to respect foreign key constraints
+        
+        # 1. Delete alert history
+        cursor.execute("DELETE FROM alert_history WHERE user_id = ?", (user_id,))
+        
+        # 2. Delete alerts
+        cursor.execute("DELETE FROM alerts WHERE user_id = ?", (user_id,))
+        
+        # 3. Delete tracked symbols
+        cursor.execute("DELETE FROM tracked_symbols WHERE user_id = ?", (user_id,))
+        
+        # 4. Delete portfolio items
+        cursor.execute("DELETE FROM portfolio_items WHERE user_id = ?", (user_id,))
+        
+        # 5. Delete password reset tokens
+        cursor.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+        
+        # 6. Delete user sessions
+        cursor.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+        
+        # 7. Finally, delete the user account
+        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"User account {user_id} ({current_user['email']}) has been permanently deleted")
+        
+        return {"message": "Account deleted successfully"}
+        
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        logger.error(f"Error deleting account for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete account")
 
 # Portfolio endpoints
 @app.get("/api/portfolio/", response_model=List[PortfolioItem])

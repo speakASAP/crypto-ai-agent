@@ -11,6 +11,7 @@ import {
   PasswordChange
 } from '@/types/auth'
 import { apiClient } from '@/lib/api'
+import { usePortfolioStore } from './portfolioStore'
 
 // Cookie storage for server-side access
 const cookieStorage = {
@@ -49,6 +50,7 @@ interface AuthState {
   confirmPasswordReset: (token: string, newPassword: string) => Promise<void>
   updateProfile: (updateData: UserProfileUpdate) => Promise<User>
   changePassword: (passwordChange: PasswordChange) => Promise<void>
+  deleteAccount: (confirmationText: string) => Promise<void>
   setUser: (user: User) => void
   clearError: () => void
   setHydrated: (hydrated: boolean) => void
@@ -76,6 +78,10 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             loading: false,
           })
+          
+          // Set user's preferred currency in portfolio store
+          const portfolioStore = usePortfolioStore.getState()
+          portfolioStore.setCurrencyFromUserPreference(response.user.preferred_currency as any)
         } catch (error: any) {
           set({ 
             error: error.message || 'Login failed', 
@@ -109,6 +115,10 @@ export const useAuthStore = create<AuthState>()(
             user: response.user,
             isAuthenticated: true,
           })
+          
+          // Set user's preferred currency in portfolio store
+          const portfolioStore = usePortfolioStore.getState()
+          portfolioStore.setCurrencyFromUserPreference(response.user.preferred_currency as any)
         } catch (error) {
           get().logout()
           throw error
@@ -126,6 +136,10 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             loading: false,
           })
+          
+          // Set user's preferred currency in portfolio store
+          const portfolioStore = usePortfolioStore.getState()
+          portfolioStore.setCurrencyFromUserPreference(response.user.preferred_currency as any)
         } catch (error: any) {
           set({ 
             error: error.message || 'Registration failed', 
@@ -192,6 +206,28 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      deleteAccount: async (confirmationText: string) => {
+        set({ loading: true, error: null })
+        try {
+          await apiClient.deleteAccount(confirmationText)
+          // Clear all auth state after successful deletion
+          set({ 
+            accessToken: null, 
+            refreshToken: null, 
+            user: null, 
+            isAuthenticated: false,
+            loading: false,
+            error: null
+          })
+        } catch (error: any) {
+          set({ 
+            error: error.message || 'Account deletion failed', 
+            loading: false 
+          })
+          throw error
+        }
+      },
+
       setUser: (user: User) => {
         set({ user })
       },
@@ -228,8 +264,19 @@ export const useAuthStore = create<AuthState>()(
             }
           })),
           onRehydrateStorage: () => (state) => {
-            state?.setHydrated(true)
+            // Set hydrated to true after store rehydration completes
+            if (state) {
+              // Ensure we have a valid state before setting hydrated
+              state.setHydrated(true)
+            }
           },
+          partialize: (state) => ({
+            accessToken: state.accessToken,
+            refreshToken: state.refreshToken,
+            user: state.user,
+            isAuthenticated: state.isAuthenticated,
+            // Don't persist isHydrated as it should be false on initial load
+          }),
         }
   )
 )

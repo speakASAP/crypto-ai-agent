@@ -3,6 +3,7 @@ export interface User {
   email: string
   username: string
   full_name?: string
+  preferred_currency: string
   is_active: boolean
   created_at: string
 }
@@ -39,6 +40,7 @@ export interface UserProfileUpdate {
   email?: string
   username?: string
   full_name?: string
+  preferred_currency?: string
 }
 
 export interface PasswordChange {

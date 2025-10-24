@@ -12,7 +12,8 @@ export default function ProfilePage() {
   const [profileData, setProfileData] = useState({
     email: '',
     username: '',
-    fullName: ''
+    fullName: '',
+    preferredCurrency: 'USD'
   })
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
@@ -30,12 +31,13 @@ export default function ProfilePage() {
       setProfileData({
         email: user.email,
         username: user.username,
-        fullName: user.full_name || ''
+        fullName: user.full_name || '',
+        preferredCurrency: user.preferred_currency || 'USD'
       })
     }
   }, [user])
 
-  const handleProfileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProfileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setProfileData(prev => ({
       ...prev,
       [e.target.name]: e.target.value
@@ -58,7 +60,8 @@ export default function ProfilePage() {
       await updateProfile({
         email: profileData.email,
         username: profileData.username,
-        full_name: profileData.fullName || undefined
+        full_name: profileData.fullName || undefined,
+        preferred_currency: profileData.preferredCurrency
       })
       setSuccess('Profile updated successfully')
     } catch (error: any) {
@@ -196,6 +199,22 @@ export default function ProfilePage() {
                     autoComplete="name"
                     disabled={loading}
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="preferredCurrency">Preferred Currency</Label>
+                  <select
+                    id="preferredCurrency"
+                    name="preferredCurrency"
+                    value={profileData.preferredCurrency}
+                    onChange={handleProfileChange}
+                    disabled={loading}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                  >
+                    <option value="USD">USD - US Dollar</option>
+                    <option value="EUR">EUR - Euro</option>
+                    <option value="CZK">CZK - Czech Koruna</option>
+                  </select>
                 </div>
 
                 {error && (

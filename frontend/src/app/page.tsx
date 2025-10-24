@@ -18,9 +18,9 @@ export default function Home() {
   const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem } = usePortfolioStore()
   const { alerts, fetchAlerts, createAlert, updateAlert, deleteAlert } = useAlertsStore()
   const { trackedSymbols, fetchTrackedSymbols } = useSymbolsStore()
-  const { user, logout } = useAuthStore()
+  const { user, logout, isHydrated } = useAuthStore()
   const { isConnected, subscribeToPrices, subscribeToAlerts, setExchangeRates: setWebSocketExchangeRates } = useWebSocket()
-
+  
   // Modal states
   const [portfolioModalOpen, setPortfolioModalOpen] = useState(false)
   const [editingPortfolioItem, setEditingPortfolioItem] = useState<PortfolioItem | null>(null)
@@ -223,20 +223,33 @@ export default function Home() {
     }
   }
 
+  // Show loading state until hydrated
+  if (!isHydrated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold">Crypto AI Agent v2.0</h1>
-          {user && (
-            <p className="text-gray-600 mt-1">
-              Welcome back, {user.full_name || user.username}!
-            </p>
-          )}
+          <p className="text-gray-600 mt-1">
+            {user 
+              ? `Welcome back, ${user.full_name || user.username}!`
+              : 'Welcome to Crypto AI Agent!'
+            }
+          </p>
         </div>
         <div className="flex items-center space-x-4">
-          {user && (
+          {user ? (
             <>
               <Link href="/profile">
                 <Button variant="outline">
@@ -247,6 +260,19 @@ export default function Home() {
                 Logout
               </Button>
             </>
+          ) : (
+            <div className="flex items-center space-x-4">
+              <Link href="/login">
+                <Button variant="outline">
+                  Login
+                </Button>
+              </Link>
+              <Link href="/register">
+                <Button variant="outline">
+                  Register
+                </Button>
+              </Link>
+            </div>
           )}
         </div>
         <div className="flex items-center space-x-4">

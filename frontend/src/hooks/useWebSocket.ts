@@ -51,6 +51,7 @@ export const useWebSocket = (): WebSocketHook => {
           handleWebSocketMessage(message)
         } catch (error) {
           console.error('❌ Failed to parse WebSocket message:', error)
+          console.error('❌ Raw message data:', event.data)
         }
       }
 
@@ -71,6 +72,11 @@ export const useWebSocket = (): WebSocketHook => {
         console.error('❌ WebSocket error:', error)
         console.error('WebSocket readyState:', wsRef.current?.readyState)
         console.error('WebSocket URL:', wsUrl)
+        console.error('WebSocket error details:', {
+          type: error.type,
+          target: error.target,
+          currentTarget: error.currentTarget
+        })
         setIsConnected(false)
       }
     } catch (error) {
@@ -129,19 +135,24 @@ export const useWebSocket = (): WebSocketHook => {
   }, [])
 
   const handlePriceUpdate = useCallback((message: PriceUpdateMessage, exchangeRates?: Record<string, number>) => {
-    console.log('📈 Price update:', message.data)
-    
-    // Update symbol prices in store
-    const { symbol, price, timestamp } = message.data
-    useSymbolsStore.getState().symbolPrices[symbol] = {
-      symbol,
-      price,
-      timestamp
+    try {
+      console.log('📈 Price update:', message.data)
+      
+      // Update symbol prices in store
+      const { symbol, price, timestamp } = message.data
+      const symbolsStore = useSymbolsStore.getState()
+      symbolsStore.symbolPrices[symbol] = {
+        symbol,
+        price,
+        timestamp
+      }
+      
+      // Update portfolio values locally without refetching from API
+      // Note: WebSocket prices are always in USD, so we need to convert them
+      usePortfolioStore.getState().updatePortfolioWithNewPrice(symbol, price, exchangeRates)
+    } catch (error) {
+      console.error('❌ Error handling price update:', error)
     }
-    
-    // Update portfolio values locally without refetching from API
-    // Note: WebSocket prices are always in USD, so we need to convert them
-    usePortfolioStore.getState().updatePortfolioWithNewPrice(symbol, price, exchangeRates)
   }, [])
 
   const handleAlertTriggered = useCallback((message: AlertTriggeredMessage) => {

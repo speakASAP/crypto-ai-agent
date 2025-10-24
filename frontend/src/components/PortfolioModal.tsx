@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, Currency } from '@/types'
 
@@ -146,16 +145,16 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
               </div>
               <div className="space-y-2">
                 <Label htmlFor="base_currency">Currency</Label>
-                <Select value={formData.base_currency} onValueChange={(value) => handleChange('base_currency', value)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="USD">USD</SelectItem>
-                    <SelectItem value="EUR">EUR</SelectItem>
-                    <SelectItem value="CZK">CZK</SelectItem>
-                  </SelectContent>
-                </Select>
+                <select
+                  id="base_currency"
+                  value={formData.base_currency}
+                  onChange={(e) => handleChange('base_currency', e.target.value)}
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="CZK">CZK</option>
+                </select>
               </div>
             </div>
 

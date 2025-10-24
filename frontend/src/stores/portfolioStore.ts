@@ -17,6 +17,7 @@ interface PortfolioState {
   deleteItem: (id: number) => Promise<void>
   fetchSummary: () => Promise<void>
   setCurrency: (currency: Currency) => Promise<void>
+  setCurrencyFromUserPreference: (currency: Currency) => void
   clearError: () => void
   updatePortfolioWithNewPrice: (symbol: string, price: number, exchangeRates?: Record<string, number>) => void
 }
@@ -110,6 +111,14 @@ export const usePortfolioStore = create<PortfolioState>()(
 
       setCurrency: async (currency: Currency) => {
         set({ selectedCurrency: currency, loading: true })
+        
+        // Save currency preference to user profile
+        try {
+          await apiClient.updateProfile({ preferred_currency: currency })
+        } catch (error) {
+          console.error('Failed to save currency preference:', error)
+        }
+        
         // Refresh data with new currency
         await Promise.all([
           get().fetchPortfolio(),
@@ -119,6 +128,10 @@ export const usePortfolioStore = create<PortfolioState>()(
         setTimeout(() => {
           set({ loading: false })
         }, 200)
+      },
+
+      setCurrencyFromUserPreference: (currency: Currency) => {
+        set({ selectedCurrency: currency })
       },
 
       clearError: () => set({ error: null }),
