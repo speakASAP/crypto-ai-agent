@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 
 export default function ProfilePage() {
   const [profileData, setProfileData] = useState({
@@ -23,7 +24,10 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<'profile' | 'password'>('profile')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const { user, updateProfile, changePassword, logout, loading } = useAuthStore()
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [confirmationText, setConfirmationText] = useState('')
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const { user, updateProfile, changePassword, logout, deleteAccount, loading } = useAuthStore()
   const router = useRouter()
 
   useEffect(() => {
@@ -103,6 +107,43 @@ export default function ProfilePage() {
   const handleLogout = () => {
     logout()
     router.push('/login')
+  }
+
+  const handleDeleteAccount = async () => {
+    if (confirmationText !== 'DELETE') {
+      setError('Please type "DELETE" to confirm account deletion')
+      return
+    }
+
+    setDeleteLoading(true)
+    setError('')
+    
+    try {
+      await deleteAccount(confirmationText)
+      setSuccess('Account deleted successfully')
+      setShowDeleteConfirm(false)
+      setConfirmationText('')
+      // Redirect to login after a short delay
+      setTimeout(() => {
+        router.push('/login')
+      }, 2000)
+    } catch (error: any) {
+      setError(error.message || 'Account deletion failed')
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  const handleDeleteConfirm = () => {
+    setShowDeleteConfirm(true)
+    setError('')
+    setConfirmationText('')
+  }
+
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false)
+    setConfirmationText('')
+    setError('')
   }
 
   if (!user) {
@@ -318,17 +359,105 @@ export default function ProfilePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button 
-                variant="destructive" 
-                onClick={handleLogout}
-                disabled={loading}
-              >
-                Sign Out
-              </Button>
+              <div className="space-y-4">
+                <div className="text-sm text-gray-600">
+                  <p className="mb-2">This action will permanently delete your account and all associated data including:</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs text-gray-500">
+                    <li>Portfolio items and transaction history</li>
+                    <li>Price alerts and notification settings</li>
+                    <li>Tracked symbols and preferences</li>
+                    <li>All personal information and settings</li>
+                  </ul>
+                  <p className="mt-2 font-medium text-red-600">This action cannot be undone.</p>
+                </div>
+                <Button 
+                  variant="destructive" 
+                  onClick={handleDeleteConfirm}
+                  disabled={loading || deleteLoading}
+                >
+                  Remove my account
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {/* Account Deletion Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={handleDeleteCancel}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Delete Account</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-red-800">
+                      Are you absolutely sure?
+                    </h3>
+                    <div className="mt-2 text-sm text-red-700">
+                      <p>This action will permanently delete your account and all associated data. This cannot be undone.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="confirmation-text">
+                  Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm:
+                </Label>
+                <Input
+                  id="confirmation-text"
+                  type="text"
+                  value={confirmationText}
+                  onChange={(e) => setConfirmationText(e.target.value)}
+                  placeholder="DELETE"
+                  className="font-mono"
+                  disabled={deleteLoading}
+                />
+              </div>
+
+              {error && (
+                <div className="text-red-600 text-sm">
+                  {error}
+                </div>
+              )}
+
+              {success && (
+                <div className="text-green-600 text-sm">
+                  {success}
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={handleDeleteCancel}
+              disabled={deleteLoading}
+            >
+              Cancel
+            </Button>
+            <Button 
+              type="button"
+              variant="destructive" 
+              onClick={handleDeleteAccount}
+              disabled={confirmationText !== 'DELETE' || deleteLoading}
+            >
+              {deleteLoading ? 'Deleting...' : 'Delete Account'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
