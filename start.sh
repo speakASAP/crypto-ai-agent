@@ -2,6 +2,10 @@
 
 # Crypto AI Agent - Start Script
 # This script starts the backend, frontend, and all necessary services
+# There is .env file in root folder. Use ls -la .env and cat .env
+# to see the current variables list.
+# .env is Single Source of Truth for all variables.
+# Update the codebase to use process.env.VARIABLE_NAME (or equivalent) instead of hardcoded values.
 
 set -e  # Exit on any error
 

@@ -332,6 +332,38 @@ export default function ProfilePage() {
           </Card>
         )}
 
+        {activeTab === 'profile' && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle className="text-red-600">Danger Zone</CardTitle>
+              <CardDescription>
+                Irreversible and destructive actions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="text-sm text-gray-600">
+                  <p className="mb-2">This action will permanently delete your account and all associated data including:</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs text-gray-500">
+                    <li>Portfolio items and transaction history</li>
+                    <li>Price alerts and notification settings</li>
+                    <li>Tracked symbols and preferences</li>
+                    <li>All personal information and settings</li>
+                  </ul>
+                  <p className="mt-2 font-medium text-red-600">This action cannot be undone.</p>
+                </div>
+                <Button 
+                  variant="destructive" 
+                  onClick={handleDeleteConfirm}
+                  disabled={loading || deleteLoading}
+                >
+                  Remove my account
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {activeTab === 'password' && (
           <Card>
             <CardHeader>
@@ -501,37 +533,6 @@ export default function ProfilePage() {
           </Card>
         )}
 
-        <div className="mt-8">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-red-600">Danger Zone</CardTitle>
-              <CardDescription>
-                Irreversible and destructive actions
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="text-sm text-gray-600">
-                  <p className="mb-2">This action will permanently delete your account and all associated data including:</p>
-                  <ul className="list-disc list-inside space-y-1 text-xs text-gray-500">
-                    <li>Portfolio items and transaction history</li>
-                    <li>Price alerts and notification settings</li>
-                    <li>Tracked symbols and preferences</li>
-                    <li>All personal information and settings</li>
-                  </ul>
-                  <p className="mt-2 font-medium text-red-600">This action cannot be undone.</p>
-                </div>
-                <Button 
-                  variant="destructive" 
-                  onClick={handleDeleteConfirm}
-                  disabled={loading || deleteLoading}
-                >
-                  Remove my account
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
       </div>
 
       {/* Account Deletion Confirmation Dialog */}

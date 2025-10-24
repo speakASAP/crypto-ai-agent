@@ -5,7 +5,7 @@ import os
 
 class Settings(BaseSettings):
     # Database Configuration (SQLite)
-    database_file: str = "../crypto_portfolio.db"
+    database_file: str = "data/crypto_portfolio.db"
     
     # API Configuration
     secret_key: str = "your-secret-key-here"

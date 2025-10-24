@@ -57,6 +57,11 @@ interface AuthState {
   setHydrated: (hydrated: boolean) => void
 }
 
+// Helper function to calculate authentication state
+const calculateIsAuthenticated = (accessToken: string | null, user: User | null): boolean => {
+  return !!(accessToken && user)
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -76,7 +81,7 @@ export const useAuthStore = create<AuthState>()(
             accessToken: response.access_token,
             refreshToken: response.refresh_token,
             user: response.user,
-            isAuthenticated: true,
+            isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
             loading: false,
           })
           
@@ -114,7 +119,7 @@ export const useAuthStore = create<AuthState>()(
             accessToken: response.access_token,
             refreshToken: response.refresh_token,
             user: response.user,
-            isAuthenticated: true,
+            isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
           })
           
           // Set user's preferred currency in portfolio store
@@ -134,7 +139,7 @@ export const useAuthStore = create<AuthState>()(
             accessToken: response.access_token,
             refreshToken: response.refresh_token,
             user: response.user,
-            isAuthenticated: true,
+            isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
             loading: false,
           })
           
@@ -216,7 +221,6 @@ export const useAuthStore = create<AuthState>()(
             accessToken: null, 
             refreshToken: null, 
             user: null, 
-            isAuthenticated: false,
             loading: false,
             error: null
           })
@@ -282,6 +286,8 @@ export const useAuthStore = create<AuthState>()(
           onRehydrateStorage: () => (state) => {
             // Set hydrated to true after store rehydration completes
             if (state) {
+              // Calculate authentication state based on rehydrated data
+              state.isAuthenticated = calculateIsAuthenticated(state.accessToken, state.user)
               // Ensure we have a valid state before setting hydrated
               state.setHydrated(true)
             }
@@ -290,7 +296,7 @@ export const useAuthStore = create<AuthState>()(
             accessToken: state.accessToken,
             refreshToken: state.refreshToken,
             user: state.user,
-            isAuthenticated: state.isAuthenticated,
+            // Don't persist isAuthenticated as it's computed
             // Don't persist isHydrated as it should be false on initial load
           }),
         }

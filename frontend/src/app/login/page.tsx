@@ -18,11 +18,14 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return // Prevent multiple submissions
+    
     setError('')
     
     try {
       await login({ email, password })
-      router.push('/')
+      // Use window.location.href to ensure full page reload and proper cookie handling
+      window.location.href = '/'
     } catch (error: any) {
       setError(error.message || 'Login failed')
     }

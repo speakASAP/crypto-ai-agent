@@ -429,7 +429,7 @@ tail -f logs/backend.log
 tail -f logs/frontend.log
 
 # Check database
-sqlite3 backend/crypto_portfolio.db ".tables"
+sqlite3 data/crypto_portfolio.db ".tables"
 ```
 
 ## Migration Notes

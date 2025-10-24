@@ -11,7 +11,7 @@ import os
 import asyncio
 import aiohttp
 import ssl
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
 from .services.price_service import PriceService
@@ -80,12 +80,14 @@ class ConnectionManager:
                 self.disconnect(connection)
 
     async def send_price_update(self, symbol: str, price: float):
+        current_time = datetime.now(timezone.utc)
         message = json.dumps({
             "type": "price_update",
             "data": {
                 "symbol": symbol,
                 "price": price,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": current_time.isoformat(),
+                "timestamp_formatted": current_time.strftime("%Y-%m-%d %H:%M:%S UTC")
             }
         })
         
@@ -1379,23 +1381,24 @@ async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_
     items = []
     for row in rows:
         item = {
-            "id": row[0],
-            "symbol": row[1],
-            "amount": row[2],
-            "price_buy": row[3],
-            "purchase_date": row[4],
-            "base_currency": row[5],
-            "purchase_price_eur": row[6],
-            "purchase_price_czk": row[7],
-            "source": row[8],
-            "commission": row[9],
-            "total_investment_text": row[10],
-            "created_at": row[11],
-            "updated_at": row[12],
-            "current_price": row[13],
-            "current_value": row[14],
-            "pnl": row[15],
-            "pnl_percent": row[16]
+            "id": row[0],           # id
+            "user_id": row[1],      # user_id
+            "symbol": row[2],       # symbol
+            "amount": row[3],       # amount
+            "price_buy": row[4],    # price_buy
+            "purchase_date": row[5], # purchase_date
+            "base_currency": row[6], # base_currency
+            "purchase_price_eur": row[7], # purchase_price_eur
+            "purchase_price_czk": row[8],  # purchase_price_czk
+            "source": row[9],              # source
+            "commission": row[10],         # commission
+            "total_investment_text": row[11], # total_investment_text
+            "created_at": row[12],         # created_at
+            "updated_at": row[13],         # updated_at
+            "current_price": row[14],      # current_price
+            "current_value": row[15],      # current_value
+            "pnl": row[16],                # pnl
+            "pnl_percent": row[17]         # pnl_percent
         }
         
         # Convert currency if needed
@@ -1420,12 +1423,12 @@ async def get_portfolio_summary(currency: str = "USD", current_user: dict = Depe
     
     for row in rows:
         item = {
-            "base_currency": row[5],
-            "current_value": row[14],
-            "pnl": row[15],
-            "amount": row[2],
-            "price_buy": row[3],
-            "commission": row[9]
+            "base_currency": row[6],    # base_currency
+            "current_value": row[15],   # current_value
+            "pnl": row[16],             # pnl
+            "amount": row[3],           # amount
+            "price_buy": row[4],        # price_buy
+            "commission": row[10]       # commission
         }
         
         # Convert to target currency
@@ -1450,6 +1453,14 @@ async def get_portfolio_summary(currency: str = "USD", current_user: dict = Depe
 @app.post("/api/portfolio/", response_model=PortfolioItem)
 async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depends(get_current_active_user)):
     """Create a new portfolio item"""
+    # Validate numeric fields to prevent database corruption
+    if not isinstance(item.amount, (int, float)) or item.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be a positive number")
+    if not isinstance(item.price_buy, (int, float)) or item.price_buy <= 0:
+        raise HTTPException(status_code=400, detail="Price must be a positive number")
+    if not isinstance(item.commission, (int, float)) or item.commission < 0:
+        raise HTTPException(status_code=400, detail="Commission must be a non-negative number")
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -1803,7 +1814,18 @@ async def get_currency_rates():
     return {
         "base_currency": currency_service.base_currency,
         "rates": currency_service.rates,
-        "last_updated": currency_service.last_updated
+        "last_updated": currency_service.last_updated,
+        "last_updated_timestamp": currency_service.get_timestamp_iso(),
+        "last_updated_formatted": currency_service.get_formatted_timestamp()
+    }
+
+@app.get("/api/symbols/last-updated")
+async def get_symbol_last_updated():
+    """Get last update timestamps for crypto symbols"""
+    return {
+        "last_bulk_update": price_service.get_timestamp_iso(),
+        "last_bulk_update_formatted": price_service.get_formatted_timestamp(),
+        "symbol_timestamps": price_service.get_all_symbol_timestamps()
     }
 
 # WebSocket endpoint

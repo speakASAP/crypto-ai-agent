@@ -85,7 +85,7 @@ logs/
 Each log entry follows this format:
 
 ```text
-2024-01-15 10:30:45,123 - crypto_ai_agent.agent - INFO - INFO in database_initialization - Database initialized successfully - db_path=data/crypto_history.db
+2024-01-15 10:30:45,123 - crypto_ai_agent.agent - INFO - INFO in database_initialization - Database initialized successfully - db_path=data/crypto_portfolio.db
 ```
 
 Components:

@@ -2,6 +2,10 @@
 
 # Crypto AI Agent - Status Script
 # This script checks the status of backend, frontend, and all services
+# There is .env file in root folder. Use ls -la .env and cat .env
+# to see the current variables list.
+# .env is Single Source of Truth for all variables.
+# Update the codebase to use process.env.VARIABLE_NAME (or equivalent) instead of hardcoded values.
 
 # Colors for output
 RED='\033[0;31m'
@@ -114,9 +118,9 @@ echo
 
 # Check Database
 echo "Database (SQLite):"
-if [ -f "backend/crypto_portfolio.db" ]; then
+if [ -f "data/crypto_portfolio.db" ]; then
     print_success "✅ Database file exists"
-    db_size=$(du -h backend/crypto_portfolio.db | cut -f1)
+    db_size=$(du -h data/crypto_portfolio.db | cut -f1)
     echo "  Size: $db_size"
 else
     print_warning "⚠️  Database file not found"

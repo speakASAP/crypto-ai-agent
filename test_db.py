@@ -4,7 +4,7 @@ import sqlite3
 import os
 
 # Test database initialization
-DB_FILE = "crypto_portfolio.db"
+DB_FILE = "data/crypto_portfolio.db"
 
 def test_init_database():
     """Test database initialization"""

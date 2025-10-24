@@ -139,7 +139,7 @@ export const useWebSocket = (): WebSocketHook => {
       console.log('📈 Price update:', message.data)
       
       // Update symbol prices in store
-      const { symbol, price, timestamp } = message.data
+      const { symbol, price, timestamp, timestamp_formatted } = message.data as any
       const symbolsStore = useSymbolsStore.getState()
       symbolsStore.symbolPrices[symbol] = {
         symbol,
@@ -150,6 +150,11 @@ export const useWebSocket = (): WebSocketHook => {
       // Update portfolio values locally without refetching from API
       // Note: WebSocket prices are always in USD, so we need to convert them
       usePortfolioStore.getState().updatePortfolioWithNewPrice(symbol, price, exchangeRates)
+      
+      // Log the timestamp for debugging
+      if (timestamp_formatted) {
+        console.log(`📅 Price updated for ${symbol} at ${timestamp_formatted}`)
+      }
     } catch (error) {
       console.error('❌ Error handling price update:', error)
     }

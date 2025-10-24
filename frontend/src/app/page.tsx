@@ -18,7 +18,7 @@ export default function Home() {
   const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem } = usePortfolioStore()
   const { alerts, fetchAlerts, createAlert, updateAlert, deleteAlert } = useAlertsStore()
   const { trackedSymbols, fetchTrackedSymbols } = useSymbolsStore()
-  const { user, logout, isHydrated } = useAuthStore()
+  const { user, logout, isHydrated, isAuthenticated } = useAuthStore()
   const { isConnected, subscribeToPrices, subscribeToAlerts, setExchangeRates: setWebSocketExchangeRates } = useWebSocket()
   
   // Modal states
@@ -41,8 +41,14 @@ export default function Home() {
   // Currency states
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
   const [lastUpdated, setLastUpdated] = useState<string>('')
+  const [lastUpdatedFormatted, setLastUpdatedFormatted] = useState<string>('')
   const [refreshingRates, setRefreshingRates] = useState(false)
   const [currencyChanging, setCurrencyChanging] = useState(false)
+  
+  // Crypto symbol states
+  const [cryptoLastUpdated, setCryptoLastUpdated] = useState<string>('')
+  const [cryptoLastUpdatedFormatted, setCryptoLastUpdatedFormatted] = useState<string>('')
+  const [symbolTimestamps, setSymbolTimestamps] = useState<Record<string, string>>({})
 
   useEffect(() => {
     // Fetch initial data
@@ -51,6 +57,7 @@ export default function Home() {
     fetchAlerts()
     fetchTrackedSymbols()
     loadExchangeRates()
+    loadCryptoTimestamps()
   }, [fetchPortfolio, fetchSummary, fetchAlerts, fetchTrackedSymbols])
 
   useEffect(() => {
@@ -64,8 +71,20 @@ export default function Home() {
       setExchangeRates(rates.rates)
       setWebSocketExchangeRates(rates.rates) // Pass exchange rates to WebSocket hook for real-time price conversions
       setLastUpdated(rates.last_updated)
+      setLastUpdatedFormatted(rates.last_updated_formatted || rates.last_updated)
     } catch (error) {
       console.error('Failed to load exchange rates:', error)
+    }
+  }
+
+  const loadCryptoTimestamps = async () => {
+    try {
+      const timestamps = await apiClient.getSymbolLastUpdated()
+      setCryptoLastUpdated(timestamps.last_bulk_update)
+      setCryptoLastUpdatedFormatted(timestamps.last_bulk_update_formatted)
+      setSymbolTimestamps(timestamps.symbol_timestamps)
+    } catch (error) {
+      console.error('Failed to load crypto timestamps:', error)
     }
   }
 
@@ -76,6 +95,8 @@ export default function Home() {
       setLastUpdated(result.last_updated)
       // Reload exchange rates
       await loadExchangeRates()
+      // Reload crypto timestamps
+      await loadCryptoTimestamps()
       // Reload portfolio data with new rates
       fetchPortfolio()
       fetchSummary()
@@ -106,6 +127,23 @@ export default function Home() {
       }
     }
   }, [isConnected, items, trackedSymbols, subscribeToPrices, subscribeToAlerts])
+
+  // Sync portfolio currency with user's preferred currency when user is available
+  useEffect(() => {
+    if (user && isHydrated && user.preferred_currency) {
+      const { setCurrencyFromUserPreference } = usePortfolioStore.getState()
+      setCurrencyFromUserPreference(user.preferred_currency as any)
+    }
+  }, [user, isHydrated])
+
+  // Periodic refresh of timestamps every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadCryptoTimestamps()
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [])
 
   // Currency to locale mapping for proper symbol display
   const currencyToLocale: Record<string, string> = {
@@ -143,6 +181,49 @@ export default function Home() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(amount)
+  }
+
+  const getRelativeTime = (timestamp: string) => {
+    if (!timestamp) return 'Unknown'
+    
+    try {
+      const now = new Date()
+      const time = new Date(timestamp)
+      const diffMs = now.getTime() - time.getTime()
+      const diffMinutes = Math.floor(diffMs / (1000 * 60))
+      const diffSeconds = Math.floor(diffMs / 1000)
+      
+      if (diffSeconds < 60) {
+        return `${diffSeconds}s ago`
+      } else if (diffMinutes < 60) {
+        return `${diffMinutes}m ago`
+      } else if (diffMinutes < 1440) {
+        const hours = Math.floor(diffMinutes / 60)
+        return `${hours}h ago`
+      } else {
+        const days = Math.floor(diffMinutes / 1440)
+        return `${days}d ago`
+      }
+    } catch (error) {
+      return 'Invalid time'
+    }
+  }
+
+  const getDataFreshness = (timestamp: string) => {
+    if (!timestamp) return 'stale'
+    
+    try {
+      const now = new Date()
+      const time = new Date(timestamp)
+      const diffMs = now.getTime() - time.getTime()
+      const diffMinutes = Math.floor(diffMs / (1000 * 60))
+      
+      if (diffMinutes < 1) return 'fresh'
+      if (diffMinutes < 5) return 'recent'
+      return 'stale'
+    } catch (error) {
+      return 'stale'
+    }
   }
 
   const handleCurrencyChange = async (newCurrency: string) => {
@@ -223,6 +304,14 @@ export default function Home() {
     }
   }
 
+  // Debug authentication state
+  console.log('🏠 Main page auth state:', {
+    isHydrated,
+    isAuthenticated,
+    hasUser: !!user,
+    hasAccessToken: !!useAuthStore.getState().accessToken
+  })
+
   // Show loading state until hydrated
   if (!isHydrated) {
     return (
@@ -230,6 +319,22 @@ export default function Home() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-2 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    console.log('🚫 Main page: User not authenticated, showing login redirect')
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Authentication Required</h1>
+          <p className="text-gray-600 mb-6">Please log in to access your portfolio.</p>
+          <Link href="/login">
+            <Button>Go to Login</Button>
+          </Link>
         </div>
       </div>
     )
@@ -310,11 +415,36 @@ export default function Home() {
               {isConnected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
-          {lastUpdated && (
-            <div className="text-xs text-muted-foreground">
-              Rates: {lastUpdated}
-            </div>
-          )}
+          <div className="flex flex-col space-y-1">
+            {lastUpdatedFormatted && (
+              <div className="text-xs text-muted-foreground">
+                <div className="flex items-center space-x-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${
+                    getDataFreshness(lastUpdated) === 'fresh' ? 'bg-green-500' : 
+                    getDataFreshness(lastUpdated) === 'recent' ? 'bg-yellow-500' : 'bg-red-500'
+                  }`} />
+                  <span>Currency Rates: {lastUpdatedFormatted}</span>
+                </div>
+                <div className="text-xs text-gray-500 ml-2">
+                  {getRelativeTime(lastUpdated)}
+                </div>
+              </div>
+            )}
+            {cryptoLastUpdatedFormatted && (
+              <div className="text-xs text-muted-foreground">
+                <div className="flex items-center space-x-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${
+                    getDataFreshness(cryptoLastUpdated) === 'fresh' ? 'bg-green-500' : 
+                    getDataFreshness(cryptoLastUpdated) === 'recent' ? 'bg-yellow-500' : 'bg-red-500'
+                  }`} />
+                  <span>Crypto Prices: {cryptoLastUpdatedFormatted}</span>
+                </div>
+                <div className="text-xs text-gray-500 ml-2">
+                  {getRelativeTime(cryptoLastUpdated)}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

@@ -108,7 +108,7 @@ class EnvironmentValidator:
             },
             "DB_PATH": {
                 "type": str,
-                "default": "data/crypto_history.db",
+                "default": "data/crypto_portfolio.db",
                 "description": "Path to SQLite database file"
             },
             "UI_PORT": {
@@ -314,7 +314,7 @@ class EnvironmentValidator:
     def _validate_paths(self):
         """Validate file and directory paths"""
         # Validate database path
-        db_path = self.validated_vars.get("DB_PATH", "data/crypto_history.db")
+        db_path = self.validated_vars.get("DB_PATH", "data/crypto_portfolio.db")
         db_dir = os.path.dirname(db_path)
         
         if db_dir and not os.path.exists(db_dir):

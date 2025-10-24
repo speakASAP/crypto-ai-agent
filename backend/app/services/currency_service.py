@@ -2,6 +2,7 @@ import httpx
 import asyncio
 from typing import Dict, Optional
 import logging
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +11,7 @@ class CurrencyService:
         self.rates: Dict[str, float] = {}
         self.base_currency = "USD"
         self.last_updated = None
+        self.last_updated_timestamp = None
         
     async def get_exchange_rates(self) -> Dict[str, float]:
         """Fetch current exchange rates from a free API"""
@@ -22,8 +24,10 @@ class CurrencyService:
                 
                 self.rates = data.get("rates", {})
                 self.last_updated = data.get("date")
+                # Store precise timestamp with timezone
+                self.last_updated_timestamp = datetime.now(timezone.utc)
                 
-                logger.info(f"Updated exchange rates for {len(self.rates)} currencies")
+                logger.info(f"Updated exchange rates for {len(self.rates)} currencies at {self.last_updated_timestamp}")
                 return self.rates
                 
         except Exception as e:
@@ -33,6 +37,8 @@ class CurrencyService:
     
     def get_fallback_rates(self) -> Dict[str, float]:
         """Fallback rates if API is unavailable"""
+        # Set timestamp for fallback rates too
+        self.last_updated_timestamp = datetime.now(timezone.utc)
         return {
             "USD": 1.0,
             "EUR": 0.85,
@@ -83,6 +89,22 @@ class CurrencyService:
             logger.info("Initializing currency rates with fallback values")
             self.rates = self.get_fallback_rates()
         return self.rates
+    
+    def get_formatted_timestamp(self) -> str:
+        """Get formatted timestamp for display"""
+        if self.last_updated_timestamp:
+            return self.last_updated_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+        elif self.last_updated:
+            return f"{self.last_updated} (date only)"
+        else:
+            return "Never updated"
+    
+    def get_timestamp_iso(self) -> str:
+        """Get ISO format timestamp for API responses"""
+        if self.last_updated_timestamp:
+            return self.last_updated_timestamp.isoformat()
+        else:
+            return datetime.now(timezone.utc).isoformat()
     
     def get_rate(self, currency: str) -> float:
         """Get exchange rate for a currency, with fallback"""

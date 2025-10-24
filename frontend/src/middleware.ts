@@ -8,9 +8,11 @@ export function middleware(request: NextRequest) {
   if (authStorage) {
     try {
       const parsed = JSON.parse(authStorage)
-      isAuthenticated = parsed.state?.isAuthenticated || false
+      // Calculate isAuthenticated based on presence of accessToken and user
+      isAuthenticated = !!(parsed.state?.accessToken && parsed.state?.user)
+      
     } catch (e) {
-      // Invalid auth storage
+      console.log('❌ Middleware: Invalid auth storage', e)
     }
   }
 

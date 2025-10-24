@@ -5,6 +5,7 @@ import logging
 import ssl
 from typing import Dict, List, Optional
 from decimal import Decimal
+from datetime import datetime, timezone
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ class PriceService:
         if api_url.endswith('/ticker/price'):
             api_url = api_url.replace('/ticker/price', '')
         self.api_url = api_url
+        self.last_updated_timestamps: Dict[str, datetime] = {}
+        self.last_bulk_update = None
     
     async def get_current_prices(self, symbols: List[str]) -> Dict[str, float]:
         """Get current prices for multiple symbols in parallel"""
@@ -45,6 +48,9 @@ class PriceService:
                 
                 # Process results
                 prices = {}
+                current_time = datetime.now(timezone.utc)
+                self.last_bulk_update = current_time
+                
                 for i, result in enumerate(results):
                     if isinstance(result, Exception):
                         logger.warning(f"Failed to fetch price for {symbol_list[i]}: {result}")
@@ -52,8 +58,10 @@ class PriceService:
                     if result:
                         base_symbol = symbol_list[i].replace('USDT', '')
                         prices[base_symbol] = result
+                        # Track individual symbol update time
+                        self.last_updated_timestamps[base_symbol] = current_time
                 
-                logger.info(f"Fetched prices for {len(prices)} symbols")
+                logger.info(f"Fetched prices for {len(prices)} symbols at {current_time}")
                 
                 return prices
                 
@@ -162,3 +170,32 @@ class PriceService:
         except Exception as e:
             logger.error(f"Error fetching 24h stats: {e}")
             return {}
+    
+    def get_last_update_timestamp(self, symbol: str = None) -> Optional[datetime]:
+        """Get last update timestamp for a specific symbol or bulk update"""
+        if symbol:
+            return self.last_updated_timestamps.get(symbol)
+        return self.last_bulk_update
+    
+    def get_formatted_timestamp(self, symbol: str = None) -> str:
+        """Get formatted timestamp for display"""
+        timestamp = self.get_last_update_timestamp(symbol)
+        if timestamp:
+            return timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+        else:
+            return "Never updated"
+    
+    def get_timestamp_iso(self, symbol: str = None) -> str:
+        """Get ISO format timestamp for API responses"""
+        timestamp = self.get_last_update_timestamp(symbol)
+        if timestamp:
+            return timestamp.isoformat()
+        else:
+            return datetime.now(timezone.utc).isoformat()
+    
+    def get_all_symbol_timestamps(self) -> Dict[str, str]:
+        """Get all symbol timestamps in ISO format"""
+        return {
+            symbol: timestamp.isoformat() 
+            for symbol, timestamp in self.last_updated_timestamps.items()
+        }
