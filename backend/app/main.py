@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Set
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, validator
 import logging
 import sqlite3
 import json
@@ -11,10 +11,13 @@ import os
 import asyncio
 import aiohttp
 import ssl
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
 from .services.price_service import PriceService
+from .dependencies.auth import get_current_active_user, get_db_connection
+from .utils.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, generate_reset_token
+from .core.config import settings
 
 # Load environment variables
 load_dotenv()
@@ -31,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Database file
-DB_FILE = "crypto_portfolio.db"
+DB_FILE = settings.database_file
 
 # Initialize services
 price_service = PriceService()
@@ -284,7 +287,7 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
         triggered_alerts = []
         
         for alert in alerts:
-            alert_id, symbol, threshold_price, alert_type, message, is_active, created_at = alert
+            alert_id, user_id, symbol, threshold_price, alert_type, message, is_active, created_at = alert
             
             if symbol not in current_prices:
                 continue
@@ -337,9 +340,9 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 # Log alert history
                 cursor.execute('''
                     INSERT INTO alert_history 
-                    (alert_id, symbol, triggered_price, threshold_price, alert_type, message, triggered_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (alert_id, symbol, current_price, threshold_price, alert_type, message, datetime.now().isoformat() + "Z"))
+                    (alert_id, user_id, triggered_price, triggered_at)
+                    VALUES (?, ?, ?, ?)
+                ''', (alert_id, user_id, current_price, datetime.now().isoformat() + "Z"))
                 
                 # Deactivate the alert
                 cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
@@ -476,15 +479,128 @@ class TrackedSymbol(BaseModel):
     active: bool = True
     last_updated: str
 
+# Authentication Models
+class UserCreate(BaseModel):
+    email: EmailStr
+    username: str
+    password: str
+    full_name: Optional[str] = None
+
+    @validator('password')
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        return v
+
+    @validator('username')
+    def validate_username(cls, v):
+        if len(v) < 3:
+            raise ValueError('Username must be at least 3 characters')
+        return v
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    username: str
+    full_name: Optional[str]
+    is_active: bool
+    created_at: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
+
+    @validator('new_password')
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        return v
+
+class UserProfileUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+
+    @validator('username')
+    def validate_username(cls, v):
+        if v is not None:
+            if len(v) < 3:
+                raise ValueError('Username must be at least 3 characters')
+        return v
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+    @validator('new_password')
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        return v
+
 def init_database():
-    """Initialize SQLite database with tables"""
+    """Initialize SQLite database with user management tables"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    
-    # Create portfolio table
+
+    # Create users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            hashed_password TEXT NOT NULL,
+            full_name TEXT,
+            is_active BOOLEAN DEFAULT 1,
+            is_verified BOOLEAN DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    ''')
+
+    # Create password reset tokens table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            expires_at TEXT NOT NULL,
+            used BOOLEAN DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+
+    # Create user sessions table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+
+    # Create portfolio table with user_id
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS portfolio_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             symbol TEXT NOT NULL,
             amount REAL NOT NULL,
             price_buy REAL NOT NULL,
@@ -500,51 +616,56 @@ def init_database():
             current_price REAL,
             current_value REAL,
             pnl REAL,
-            pnl_percent REAL
+            pnl_percent REAL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
-    # Create alerts table
+
+    # Create alerts table with user_id
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             symbol TEXT NOT NULL,
             threshold_price REAL NOT NULL,
             alert_type TEXT NOT NULL,
             message TEXT,
             is_active BOOLEAN DEFAULT 1,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
-    # Create tracked_symbols table
+
+    # Create tracked_symbols table with user_id
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tracked_symbols (
-            symbol TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
             name TEXT NOT NULL,
             active BOOLEAN DEFAULT 1,
-            last_updated TEXT NOT NULL
+            last_updated TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            UNIQUE(user_id, symbol)
         )
     ''')
-    
+
     # Create alert_history table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alert_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             alert_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
             triggered_price REAL NOT NULL,
-            threshold_price REAL NOT NULL,
-            alert_type TEXT NOT NULL,
-            message TEXT,
             triggered_at TEXT NOT NULL,
-            FOREIGN KEY (alert_id) REFERENCES alerts (id)
+            FOREIGN KEY (alert_id) REFERENCES alerts (id),
+            FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
+
     conn.commit()
     conn.close()
-    logger.info("✅ Database initialized")
+    logger.info("✅ Database initialized with user management")
 
 def load_migration_data():
     """Load data from migration file if it exists"""
@@ -743,14 +864,304 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# Authentication endpoints
+@app.post("/api/auth/register", response_model=TokenResponse)
+async def register(user_data: UserCreate):
+    """Register a new user"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if email or username already exists
+    cursor.execute("SELECT id FROM users WHERE email = ? OR username = ?", (user_data.email, user_data.username))
+    if cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=400, detail="Email or username already registered")
+    
+    # Hash password
+    hashed_password = get_password_hash(user_data.password)
+    
+    # Create user
+    now = datetime.now().isoformat() + "Z"
+    cursor.execute('''
+        INSERT INTO users (email, username, hashed_password, full_name, is_active, is_verified, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (user_data.email, user_data.username, hashed_password, user_data.full_name, True, False, now, now))
+    
+    user_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    
+    # Generate tokens
+    access_token = create_access_token(data={"sub": str(user_id)})
+    refresh_token = create_refresh_token(data={"sub": str(user_id)})
+    
+    # Return user data and tokens
+    user_response = UserResponse(
+        id=user_id,
+        email=user_data.email,
+        username=user_data.username,
+        full_name=user_data.full_name,
+        is_active=True,
+        created_at=now
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=user_response
+    )
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+async def login(credentials: UserLogin):
+    """Login user with email and password"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Get user by email
+    cursor.execute("SELECT id, email, username, hashed_password, full_name, is_active, created_at FROM users WHERE email = ?", (credentials.email,))
+    user = cursor.fetchone()
+    conn.close()
+    
+    if not user or not verify_password(credentials.password, user[3]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if not user[5]:  # is_active
+        raise HTTPException(status_code=400, detail="Inactive user")
+    
+    # Generate tokens
+    access_token = create_access_token(data={"sub": str(user[0])})
+    refresh_token = create_refresh_token(data={"sub": str(user[0])})
+    
+    # Return user data and tokens
+    user_response = UserResponse(
+        id=user[0],
+        email=user[1],
+        username=user[2],
+        full_name=user[4],
+        is_active=user[5],
+        created_at=user[6]
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=user_response
+    )
+
+@app.post("/api/auth/refresh", response_model=TokenResponse)
+async def refresh_token(refresh_token: str = None):
+    """Refresh access token using refresh token"""
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Refresh token required")
+    
+    # Decode refresh token
+    from backend.app.utils.auth import decode_token
+    payload = decode_token(refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    
+    # Get user
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email, username, full_name, is_active, created_at FROM users WHERE id = ?", (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    
+    if not user or not user[4]:  # is_active
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    
+    # Generate new tokens
+    access_token = create_access_token(data={"sub": str(user_id)})
+    new_refresh_token = create_refresh_token(data={"sub": str(user_id)})
+    
+    # Return user data and tokens
+    user_response = UserResponse(
+        id=user[0],
+        email=user[1],
+        username=user[2],
+        full_name=user[3],
+        is_active=user[4],
+        created_at=user[5]
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=new_refresh_token,
+        user=user_response
+    )
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: dict = Depends(get_current_active_user)):
+    """Get current user information"""
+    return UserResponse(
+        id=current_user["id"],
+        email=current_user["email"],
+        username=current_user["username"],
+        full_name=current_user["full_name"],
+        is_active=current_user["is_active"],
+        created_at=current_user["created_at"]
+    )
+
+@app.put("/api/auth/profile", response_model=UserResponse)
+async def update_profile(update_data: UserProfileUpdate, current_user: dict = Depends(get_current_active_user)):
+    """Update user profile"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if email or username already exists (excluding current user)
+    if update_data.email or update_data.username:
+        email_check = update_data.email or current_user["email"]
+        username_check = update_data.username or current_user["username"]
+        cursor.execute("SELECT id FROM users WHERE (email = ? OR username = ?) AND id != ?", 
+                      (email_check, username_check, current_user["id"]))
+        if cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=400, detail="Email or username already in use")
+    
+    # Update fields
+    update_fields = []
+    update_values = []
+    
+    if update_data.email is not None:
+        update_fields.append("email = ?")
+        update_values.append(update_data.email)
+    if update_data.username is not None:
+        update_fields.append("username = ?")
+        update_values.append(update_data.username)
+    if update_data.full_name is not None:
+        update_fields.append("full_name = ?")
+        update_values.append(update_data.full_name)
+    
+    if update_fields:
+        update_fields.append("updated_at = ?")
+        update_values.append(datetime.now().isoformat() + "Z")
+        update_values.append(current_user["id"])
+        
+        cursor.execute(f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?", update_values)
+        conn.commit()
+    
+    # Get updated user
+    cursor.execute("SELECT id, email, username, full_name, is_active, created_at FROM users WHERE id = ?", (current_user["id"],))
+    user = cursor.fetchone()
+    conn.close()
+    
+    return UserResponse(
+        id=user[0],
+        email=user[1],
+        username=user[2],
+        full_name=user[3],
+        is_active=user[4],
+        created_at=user[5]
+    )
+
+@app.post("/api/auth/change-password")
+async def change_password(password_change: PasswordChange, current_user: dict = Depends(get_current_active_user)):
+    """Change user password"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Get current password hash
+    cursor.execute("SELECT hashed_password FROM users WHERE id = ?", (current_user["id"],))
+    user = cursor.fetchone()
+    
+    if not user or not verify_password(password_change.current_password, user[0]):
+        conn.close()
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    
+    # Update password
+    new_hashed_password = get_password_hash(password_change.new_password)
+    cursor.execute("UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?", 
+                  (new_hashed_password, datetime.now().isoformat() + "Z", current_user["id"]))
+    conn.commit()
+    conn.close()
+    
+    return {"message": "Password changed successfully"}
+
+@app.post("/api/auth/password-reset-request")
+async def request_password_reset(request: PasswordResetRequest):
+    """Request password reset (logs token to console)"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Get user by email
+    cursor.execute("SELECT id FROM users WHERE email = ?", (request.email,))
+    user = cursor.fetchone()
+    
+    if user:
+        # Generate reset token
+        reset_token = generate_reset_token()
+        expires_at = (datetime.now() + timedelta(hours=1)).isoformat() + "Z"
+        now = datetime.now().isoformat() + "Z"
+        
+        # Store reset token
+        cursor.execute('''
+            INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user[0], reset_token, expires_at, False, now))
+        conn.commit()
+        
+        # Log token to console (for development)
+        logger.info(f"Password reset token for {request.email}: {reset_token}")
+        logger.info(f"Token expires at: {expires_at}")
+    
+    conn.close()
+    
+    # Always return success to prevent email enumeration
+    return {"message": "If the email exists, a password reset token has been generated. Check the server logs for the token."}
+
+@app.post("/api/auth/password-reset-confirm")
+async def confirm_password_reset(confirm: PasswordResetConfirm):
+    """Confirm password reset with token"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Get reset token
+    cursor.execute('''
+        SELECT user_id, expires_at, used FROM password_reset_tokens 
+        WHERE token = ? AND used = 0
+    ''', (confirm.token,))
+    token_data = cursor.fetchone()
+    
+    if not token_data:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    user_id, expires_at, used = token_data
+    
+    # Check if token is expired
+    if datetime.now() > datetime.fromisoformat(expires_at.replace('Z', '+00:00')):
+        conn.close()
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+    
+    # Update password
+    new_hashed_password = get_password_hash(confirm.new_password)
+    cursor.execute("UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?", 
+                  (new_hashed_password, datetime.now().isoformat() + "Z", user_id))
+    
+    # Mark token as used
+    cursor.execute("UPDATE password_reset_tokens SET used = 1 WHERE token = ?", (confirm.token,))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"message": "Password reset successfully"}
+
 # Portfolio endpoints
 @app.get("/api/portfolio/", response_model=List[PortfolioItem])
-async def get_portfolio(currency: str = "USD"):
+async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
     """Get all portfolio items converted to target currency"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM portfolio_items ORDER BY created_at DESC")
+    cursor.execute("SELECT * FROM portfolio_items WHERE user_id = ? ORDER BY created_at DESC", (current_user["id"],))
     rows = cursor.fetchall()
     conn.close()
     
@@ -784,12 +1195,12 @@ async def get_portfolio(currency: str = "USD"):
     return items
 
 @app.get("/api/portfolio/summary")
-async def get_portfolio_summary(currency: str = "USD"):
+async def get_portfolio_summary(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
     """Get portfolio summary converted to target currency"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM portfolio_items")
+    cursor.execute("SELECT * FROM portfolio_items WHERE user_id = ?", (current_user["id"],))
     rows = cursor.fetchall()
     conn.close()
     
@@ -827,7 +1238,7 @@ async def get_portfolio_summary(currency: str = "USD"):
     }
 
 @app.post("/api/portfolio/", response_model=PortfolioItem)
-async def create_portfolio_item(item: PortfolioCreate):
+async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depends(get_current_active_user)):
     """Create a new portfolio item"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -842,11 +1253,11 @@ async def create_portfolio_item(item: PortfolioCreate):
     
     cursor.execute('''
         INSERT INTO portfolio_items 
-        (symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
+        (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
          total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        item.symbol, item.amount, item.price_buy, item.purchase_date, item.base_currency,
+        current_user["id"], item.symbol, item.amount, item.price_buy, item.purchase_date, item.base_currency,
         item.source, item.commission, formatted_total_investment, now, now,
         round(item.price_buy, 8), round(item.amount * item.price_buy, 8), 0.0, 0.0
     ))
@@ -875,13 +1286,13 @@ async def create_portfolio_item(item: PortfolioCreate):
     )
 
 @app.put("/api/portfolio/{item_id}", response_model=PortfolioItem)
-async def update_portfolio_item(item_id: int, item: PortfolioUpdate):
+async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_user: dict = Depends(get_current_active_user)):
     """Update a portfolio item"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get existing item
-    cursor.execute("SELECT * FROM portfolio_items WHERE id = ?", (item_id,))
+    # Get existing item and verify ownership
+    cursor.execute("SELECT * FROM portfolio_items WHERE id = ? AND user_id = ?", (item_id, current_user["id"]))
     row = cursor.fetchone()
     
     if not row:
@@ -967,12 +1378,12 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate):
     )
 
 @app.delete("/api/portfolio/{item_id}")
-async def delete_portfolio_item(item_id: int):
+async def delete_portfolio_item(item_id: int, current_user: dict = Depends(get_current_active_user)):
     """Delete a portfolio item"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("DELETE FROM portfolio_items WHERE id = ?", (item_id,))
+    cursor.execute("DELETE FROM portfolio_items WHERE id = ? AND user_id = ?", (item_id, current_user["id"]))
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
@@ -984,15 +1395,15 @@ async def delete_portfolio_item(item_id: int):
 
 # Alerts endpoints
 @app.get("/api/alerts/", response_model=List[PriceAlert])
-async def get_alerts(active_only: bool = False):
+async def get_alerts(active_only: bool = False, current_user: dict = Depends(get_current_active_user)):
     """Get all alerts"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     if active_only:
-        cursor.execute("SELECT * FROM alerts WHERE is_active = 1 ORDER BY created_at DESC")
+        cursor.execute("SELECT * FROM alerts WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC", (current_user["id"],))
     else:
-        cursor.execute("SELECT * FROM alerts ORDER BY created_at DESC")
+        cursor.execute("SELECT * FROM alerts WHERE user_id = ? ORDER BY created_at DESC", (current_user["id"],))
     
     rows = cursor.fetchall()
     conn.close()
@@ -1008,7 +1419,7 @@ async def get_alerts(active_only: bool = False):
     return alerts
 
 @app.post("/api/alerts/", response_model=PriceAlert)
-async def create_alert(alert: PriceAlertCreate):
+async def create_alert(alert: PriceAlertCreate, current_user: dict = Depends(get_current_active_user)):
     """Create a new alert"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1016,9 +1427,9 @@ async def create_alert(alert: PriceAlertCreate):
     now = datetime.now().isoformat() + "Z"
     
     cursor.execute('''
-        INSERT INTO alerts (symbol, threshold_price, alert_type, message, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (alert.symbol, alert.threshold_price, alert.alert_type, alert.message, True, now))
+        INSERT INTO alerts (user_id, symbol, threshold_price, alert_type, message, is_active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (current_user["id"], alert.symbol, alert.threshold_price, alert.alert_type, alert.message, True, now))
     
     alert_id = cursor.lastrowid
     conn.commit()
@@ -1031,13 +1442,13 @@ async def create_alert(alert: PriceAlertCreate):
     )
 
 @app.put("/api/alerts/{alert_id}", response_model=PriceAlert)
-async def update_alert(alert_id: int, alert: PriceAlertUpdate):
+async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dict = Depends(get_current_active_user)):
     """Update an alert"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get existing alert
-    cursor.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,))
+    # Get existing alert and verify ownership
+    cursor.execute("SELECT * FROM alerts WHERE id = ? AND user_id = ?", (alert_id, current_user["id"]))
     row = cursor.fetchone()
     
     if not row:
@@ -1089,12 +1500,12 @@ async def update_alert(alert_id: int, alert: PriceAlertUpdate):
     )
 
 @app.delete("/api/alerts/{alert_id}")
-async def delete_alert(alert_id: int):
+async def delete_alert(alert_id: int, current_user: dict = Depends(get_current_active_user)):
     """Delete an alert"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
+    cursor.execute("DELETE FROM alerts WHERE id = ? AND user_id = ?", (alert_id, current_user["id"]))
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
@@ -1105,7 +1516,7 @@ async def delete_alert(alert_id: int):
     return {"message": "Alert deleted successfully"}
 
 @app.get("/api/alerts/history")
-async def get_alert_history(limit: int = 100):
+async def get_alert_history(limit: int = 100, current_user: dict = Depends(get_current_active_user)):
     """Get alert history"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1117,14 +1528,12 @@ async def get_alert_history(limit: int = 100):
                 ah.alert_id,
                 ah.symbol,
                 ah.triggered_price,
-                ah.threshold_price,
-                ah.alert_type,
-                ah.message,
                 ah.triggered_at
             FROM alert_history ah
+            WHERE ah.user_id = ?
             ORDER BY ah.triggered_at DESC
             LIMIT ?
-        """, (limit,))
+        """, (current_user["id"], limit))
         
         history = []
         for row in cursor.fetchall():
@@ -1133,10 +1542,7 @@ async def get_alert_history(limit: int = 100):
                 "alert_id": row[1],
                 "symbol": row[2],
                 "triggered_price": row[3],
-                "threshold_price": row[4],
-                "alert_type": row[5],
-                "message": row[6],
-                "triggered_at": row[7]
+                "triggered_at": row[4]
             })
         
         return history
@@ -1149,15 +1555,15 @@ async def get_alert_history(limit: int = 100):
 
 # Tracked symbols endpoints
 @app.get("/api/symbols/tracked", response_model=List[TrackedSymbol])
-async def get_tracked_symbols(active_only: bool = False):
+async def get_tracked_symbols(active_only: bool = False, current_user: dict = Depends(get_current_active_user)):
     """Get all tracked symbols"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     if active_only:
-        cursor.execute("SELECT * FROM tracked_symbols WHERE active = 1 ORDER BY symbol")
+        cursor.execute("SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = ? AND active = 1 ORDER BY symbol", (current_user["id"],))
     else:
-        cursor.execute("SELECT * FROM tracked_symbols ORDER BY symbol")
+        cursor.execute("SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = ? ORDER BY symbol", (current_user["id"],))
     
     rows = cursor.fetchall()
     conn.close()

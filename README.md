@@ -29,6 +29,27 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 - **Backup**: Simple file copy
 - **Zero Configuration**: No database server needed
 
+## Features
+
+### 🔐 Multi-User Authentication
+- **User Registration & Login**: Secure JWT-based authentication
+- **Password Security**: bcrypt hashing with configurable rounds
+- **Data Isolation**: Each user has their own portfolio and alerts
+- **Password Reset**: Secure token-based password reset
+- **Profile Management**: Update user information and change passwords
+
+### 📊 Portfolio Management
+- **Multi-Currency Support**: USD, EUR, CZK, GBP, JPY
+- **Real-time Updates**: Live price tracking via WebSocket
+- **P&L Tracking**: Automatic profit/loss calculations
+- **Portfolio Summary**: Total value and performance metrics
+
+### 🚨 Price Alerts
+- **Custom Alerts**: Set price thresholds for any cryptocurrency
+- **Real-time Notifications**: Instant alerts when prices hit targets
+- **Alert History**: Track all triggered alerts
+- **Telegram Integration**: Optional Telegram notifications
+
 ## Quick Start
 
 ### Prerequisites

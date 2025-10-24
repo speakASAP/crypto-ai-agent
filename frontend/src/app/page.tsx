@@ -6,16 +6,19 @@ import { Button } from '@/components/ui/button'
 import { usePortfolioStore } from '@/stores/portfolioStore'
 import { useAlertsStore } from '@/stores/alertsStore'
 import { useSymbolsStore } from '@/stores/symbolsStore'
+import { useAuthStore } from '@/stores/authStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { PortfolioModal } from '@/components/PortfolioModal'
 import { AlertModal } from '@/components/AlertModal'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PriceAlert, PriceAlertCreate, PriceAlertUpdate } from '@/types'
 import { apiClient } from '@/lib/api'
+import Link from 'next/link'
 
 export default function Home() {
   const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem } = usePortfolioStore()
   const { alerts, fetchAlerts, createAlert, updateAlert, deleteAlert } = useAlertsStore()
   const { trackedSymbols, fetchTrackedSymbols } = useSymbolsStore()
+  const { user, logout } = useAuthStore()
   const { isConnected, subscribeToPrices, subscribeToAlerts, setExchangeRates: setWebSocketExchangeRates } = useWebSocket()
 
   // Modal states
@@ -226,7 +229,25 @@ export default function Home() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold">Crypto AI Agent v2.0</h1>
-          <p className="text-muted-foreground">Next.js + FastAPI + Telegram + AI</p>
+          {user && (
+            <p className="text-gray-600 mt-1">
+              Welcome back, {user.full_name || user.username}!
+            </p>
+          )}
+        </div>
+        <div className="flex items-center space-x-4">
+          {user && (
+            <>
+              <Link href="/profile">
+                <Button variant="outline">
+                  Profile
+                </Button>
+              </Link>
+              <Button variant="outline" onClick={logout}>
+                Logout
+              </Button>
+            </>
+          )}
         </div>
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
