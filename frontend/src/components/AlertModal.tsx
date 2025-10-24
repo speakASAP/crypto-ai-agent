@@ -19,6 +19,8 @@ interface AlertModalProps {
   portfolioItem?: {
     amount: number
     price_buy: number
+    commission?: number
+    total_investment_text?: string
     current_value?: number
     pnl?: number
     pnl_percent?: number
@@ -114,6 +116,16 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
     }).format(amount)
   }
 
+  const formatCurrencyRounded = (amount: number) => {
+    const locale = currencyToLocale[selectedCurrency] || 'en-US'
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: selectedCurrency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(Math.round(amount))
+  }
+
   const calculatePercentageChange = (threshold: number, current: number) => {
     if (current === 0) return 0
     return ((threshold - current) / current) * 100
@@ -159,11 +171,76 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
     }
   }
 
+  const calculateInvestmentBasedPnL = () => {
+    if (!portfolioItem || !thresholdPrice) return null
+    
+    const { amount, price_buy, commission, total_investment_text, current_value, pnl, pnl_percent } = portfolioItem
+    
+    // Use the same logic as the main dashboard - use total_investment_text if available
+    let totalInvestment: number
+    if (total_investment_text) {
+      // Parse the total_investment_text to extract the numeric value
+      const match = total_investment_text.match(/[\d,.\s]+/)
+      if (match) {
+        totalInvestment = parseFloat(match[0].replace(/[,\s]/g, ''))
+      } else {
+        totalInvestment = (amount * price_buy) + (commission || 0)
+      }
+    } else {
+      totalInvestment = (amount * price_buy) + (commission || 0)
+    }
+    
+    const thresholdValue = amount * thresholdPrice
+    
+    // Use the same current value that the main dashboard uses
+    const currentValue = current_value || (amount * (currentPrice || 0))
+    
+    // If we have the exact P&L from the main dashboard, use that as base
+    // and calculate the difference from threshold price
+    if (pnl !== undefined && pnl_percent !== undefined) {
+      // Calculate what the P&L would be at the threshold price
+      const currentPriceFromPnl = currentValue / amount
+      const priceChange = thresholdPrice - currentPriceFromPnl
+      const investmentChange = pnl + (priceChange * amount)
+      const investmentPercentageChange = totalInvestment > 0 ? (investmentChange / totalInvestment) * 100 : 0
+      
+      return {
+        investmentChange,
+        investmentPercentageChange,
+        isProfit: investmentChange > 0
+      }
+    }
+    
+    // Fallback to direct calculation
+    const investmentChange = thresholdValue - currentValue
+    const investmentPercentageChange = currentValue > 0 ? (investmentChange / currentValue) * 100 : 0
+    
+    return {
+      investmentChange,
+      investmentPercentageChange,
+      isProfit: investmentChange > 0
+    }
+  }
+
   const calculateInvestmentPnL = () => {
     if (!portfolioItem || !currentPrice) return null
     
-    const { amount, price_buy, current_value, pnl, pnl_percent } = portfolioItem
-    const totalInvestment = amount * price_buy
+    const { amount, price_buy, commission, total_investment_text, current_value, pnl, pnl_percent } = portfolioItem
+    
+    // Use the same logic as the main dashboard - use total_investment_text if available
+    let totalInvestment: number
+    if (total_investment_text) {
+      // Parse the total_investment_text to extract the numeric value
+      const match = total_investment_text.match(/[\d,.\s]+/)
+      if (match) {
+        totalInvestment = parseFloat(match[0].replace(/[,\s]/g, ''))
+      } else {
+        totalInvestment = (amount * price_buy) + (commission || 0)
+      }
+    } else {
+      totalInvestment = (amount * price_buy) + (commission || 0)
+    }
+    
     const currentValue = current_value || (amount * currentPrice)
     const currentPnL = pnl || (currentValue - totalInvestment)
     const currentPnLPercent = pnl_percent || ((currentPnL / totalInvestment) * 100)
@@ -199,11 +276,11 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                     <div className="flex space-x-4">
                       <div>
                         <span className="text-gray-500">Invested:</span>
-                        <div className="font-medium">{formatCurrency(investment.totalInvestment)}</div>
+                        <div className="font-medium">{formatCurrencyRounded(investment.totalInvestment)}</div>
                       </div>
                       <div>
                         <span className="text-gray-500">Current:</span>
-                        <div className="font-medium">{formatCurrency(investment.currentValue)}</div>
+                        <div className="font-medium">{formatCurrencyRounded(investment.currentValue)}</div>
                       </div>
                       <div>
                         <span className="text-gray-500">Buy:</span>
@@ -217,7 +294,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                     <div className={`px-3 py-1 rounded text-xs font-medium ${
                       investment.isProfit ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
-                      {investment.isProfit ? '📈' : '📉'} {formatCurrency(Math.abs(investment.currentPnL))} ({investment.currentPnLPercent.toFixed(1)}%)
+                      {investment.isProfit ? '📈' : '📉'} {formatCurrencyRounded(Math.abs(investment.currentPnL))} ({investment.currentPnLPercent.toFixed(1)}%)
                     </div>
                   </div>
                 </div>
@@ -247,11 +324,22 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                     onChange={(e) => handleSliderChange(parseFloat(e.target.value))}
                     className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
                       style={{
-                        background: `linear-gradient(to right, 
-                          ${formData.alert_type === 'ABOVE' ? '#10b981' : '#ef4444'} 0%, 
-                          ${formData.alert_type === 'ABOVE' ? '#10b981' : '#ef4444'} ${getSliderPosition()}%, 
-                          #e5e7eb ${getSliderPosition()}%, 
-                          #e5e7eb 100%)`
+                        background: (() => {
+                          const investmentPnL = calculateInvestmentBasedPnL()
+                          if (!investmentPnL) {
+                            return `linear-gradient(to right, 
+                              ${formData.alert_type === 'ABOVE' ? '#10b981' : '#ef4444'} 0%, 
+                              ${formData.alert_type === 'ABOVE' ? '#10b981' : '#ef4444'} ${getSliderPosition()}%, 
+                              #e5e7eb ${getSliderPosition()}%, 
+                              #e5e7eb 100%)`
+                          }
+                          const color = investmentPnL.isProfit ? '#10b981' : '#ef4444'
+                          return `linear-gradient(to right, 
+                            ${color} 0%, 
+                            ${color} ${getSliderPosition()}%, 
+                            #e5e7eb ${getSliderPosition()}%, 
+                            #e5e7eb 100%)`
+                        })()
                       }}
                     />
                     {/* Current price marker */}
@@ -264,23 +352,44 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                   {/* Selected threshold display */}
                   <div className="text-center">
                     <div className={`inline-block px-3 py-1 rounded text-sm font-medium ${
-                      formData.alert_type === 'ABOVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      (() => {
+                        const investmentPnL = calculateInvestmentBasedPnL()
+                        if (!investmentPnL) {
+                          return formData.alert_type === 'ABOVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }
+                        return investmentPnL.isProfit ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      })()
                     }`}>
-                      {formatCurrency(thresholdPrice)}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {calculatePercentageChange(thresholdPrice, currentPrice).toFixed(2)}% from current
+                      <input
+                        type="number"
+                        value={thresholdPrice}
+                        onChange={(e) => {
+                          const value = parseFloat(e.target.value)
+                          if (!isNaN(value)) {
+                            setThresholdPrice(value)
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              threshold_price: value.toString() 
+                            }))
+                          }
+                        }}
+                        className="bg-transparent border-none outline-none text-center font-medium w-32"
+                        style={{
+                          color: 'inherit'
+                        }}
+                        step={currentPrice ? (priceRange.max - priceRange.min) / 10000 : 0.0001}
+                      />
                     </div>
                     {/* P&L Calculation */}
                     {(() => {
-                      const pnl = calculatePotentialPnL()
-                      if (!pnl) return null
+                      const investmentPnL = calculateInvestmentBasedPnL()
+                      if (!investmentPnL) return null
                       
                       return (
                         <div className={`text-xs mt-2 px-2 py-1 rounded ${
-                          pnl.isProfit ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                          investmentPnL.isProfit ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
                         }`}>
-                          {pnl.isProfit ? '📈' : '📉'} {pnl.isProfit ? 'Gain' : 'Loss'}: {formatCurrency(Math.abs(pnl.priceChange))} ({pnl.percentageChange.toFixed(1)}%)
+                          {investmentPnL.isProfit ? '📈' : '📉'} {investmentPnL.isProfit ? 'Gain' : 'Loss'}: {formatCurrency(Math.abs(investmentPnL.investmentChange))} ({investmentPnL.investmentPercentageChange.toFixed(1)}%) from invested amount
                         </div>
                       )
                     })()}
@@ -289,10 +398,15 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
               </div>
             )}
 
+
             {/* Alert Type Selection */}
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <label className="flex items-center justify-center space-x-2 p-2 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <label className={`flex items-center justify-center space-x-2 p-2 border rounded-lg cursor-pointer transition-colors ${
+                  formData.alert_type === 'BELOW' 
+                    ? 'bg-red-100 border-red-300 hover:bg-red-200' 
+                    : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
+                }`}>
                   <input
                     type="radio"
                     value="BELOW"
@@ -300,11 +414,17 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                     onChange={(e) => handleChange('alert_type', e.target.value)}
                     className="text-red-500"
                   />
-                  <span className={`px-3 py-2 rounded text-sm font-medium ${formData.alert_type === 'BELOW' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`text-sm font-medium ${
+                    formData.alert_type === 'BELOW' ? 'text-red-800' : 'text-gray-600'
+                  }`}>
                     Below
                   </span>
                 </label>
-                <label className="flex items-center justify-center space-x-2 p-2 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <label className={`flex items-center justify-center space-x-2 p-2 border rounded-lg cursor-pointer transition-colors ${
+                  formData.alert_type === 'ABOVE' 
+                    ? 'bg-green-100 border-green-300 hover:bg-green-200' 
+                    : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
+                }`}>
                   <input
                     type="radio"
                     value="ABOVE"
@@ -312,31 +432,15 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                     onChange={(e) => handleChange('alert_type', e.target.value)}
                     className="text-green-500"
                   />
-                  <span className={`px-3 py-2 rounded text-sm font-medium ${formData.alert_type === 'ABOVE' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`text-sm font-medium ${
+                    formData.alert_type === 'ABOVE' ? 'text-green-800' : 'text-gray-600'
+                  }`}>
                     Above
                   </span>
                 </label>
               </div>
             </div>
 
-            {/* Manual Price Input */}
-            <div className="space-y-2">
-              <Input
-                id="threshold_price"
-                type="number"
-                step={currentPrice ? (priceRange.max - priceRange.min) / 10000 : 0.0001}
-                value={formData.threshold_price}
-                onChange={(e) => {
-                  const value = parseFloat(e.target.value)
-                  if (!isNaN(value)) {
-                    setThresholdPrice(value)
-                  }
-                  handleChange('threshold_price', e.target.value)
-                }}
-                placeholder="50000"
-                required
-              />
-            </div>
 
             {/* Message Input */}
             <div className="space-y-2">

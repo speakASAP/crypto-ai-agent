@@ -34,6 +34,8 @@ export default function Home() {
     portfolioItem?: {
       amount: number;
       price_buy: number;
+      commission?: number;
+      total_investment_text?: string;
       current_value?: number;
       pnl?: number;
       pnl_percent?: number;
@@ -245,6 +247,8 @@ export default function Home() {
       portfolioItem: {
         amount: item.amount,
         price_buy: item.price_buy,
+        commission: item.commission || 0,
+        total_investment_text: item.total_investment_text,
         current_value: item.current_value,
         pnl: item.pnl,
         pnl_percent: item.pnl_percent
