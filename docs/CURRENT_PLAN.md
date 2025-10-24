@@ -171,7 +171,6 @@
 
 - **portfolio**: Multi-currency portfolio tracking with source field
 - **currency_rates**: Exchange rate storage and caching
-- **candles**: Price history data
 - **price_alerts**: User-defined price alerts
 - **tracked_symbols**: Active symbol management
 

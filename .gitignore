@@ -15,7 +15,6 @@ api_keys.txt
 *.sqlite
 *.sqlite3
 data/
-crypto_history.db
 
 # Python
 __pycache__/

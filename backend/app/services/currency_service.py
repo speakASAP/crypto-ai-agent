@@ -2,6 +2,8 @@ import httpx
 import asyncio
 from typing import Dict, Optional
 import logging
+import sqlite3
+import os
 from datetime import datetime, timezone
 from app.core.config import settings
 from app.utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
@@ -14,6 +16,69 @@ class CurrencyService:
         self.base_currency = "USD"
         self.last_updated = None
         self.last_updated_timestamp = None
+        self._db_path = self._get_db_path()
+        
+    def _get_db_path(self) -> str:
+        """Get database path relative to project root"""
+        current_file = os.path.abspath(__file__)  # /path/to/backend/app/services/currency_service.py
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))  # /path/to/backend
+        project_root = os.path.dirname(backend_dir)  # /path/to/project
+        return os.path.join(project_root, settings.database_file)
+    
+    def _save_rates_to_db(self, rates: Dict[str, float], timestamp: str):
+        """Save exchange rates to database"""
+        try:
+            conn = sqlite3.connect(self._db_path)
+            cursor = conn.cursor()
+            
+            # Clear old rates
+            cursor.execute("DELETE FROM currency_rates")
+            
+            # Insert new rates
+            for currency, rate in rates.items():
+                cursor.execute("""
+                    INSERT INTO currency_rates (from_currency, to_currency, rate, timestamp)
+                    VALUES (?, ?, ?, ?)
+                """, ("USD", currency, rate, timestamp))
+            
+            conn.commit()
+            conn.close()
+            logger.info(f"Saved {len(rates)} currency rates to database")
+            
+        except Exception as e:
+            logger.error(f"Failed to save rates to database: {e}")
+    
+    def _load_rates_from_db(self) -> Dict[str, float]:
+        """Load exchange rates from database"""
+        try:
+            conn = sqlite3.connect(self._db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT to_currency, rate, timestamp 
+                FROM currency_rates 
+                WHERE from_currency = 'USD'
+                ORDER BY created_at DESC
+            """)
+            
+            rates = {}
+            rows = cursor.fetchall()
+            for currency, rate, timestamp in rows:
+                rates[currency] = rate
+                if not self.last_updated:
+                    self.last_updated = timestamp
+            
+            conn.close()
+            
+            if rates:
+                logger.info(f"Loaded {len(rates)} currency rates from database")
+                self.last_updated_timestamp = get_current_timestamp()
+            
+            return rates
+            
+        except Exception as e:
+            logger.error(f"Failed to load rates from database: {e}")
+            return {}
         
     async def get_exchange_rates(self) -> Dict[str, float]:
         """Fetch current exchange rates from a free API"""
@@ -29,12 +94,19 @@ class CurrencyService:
                 # Store precise timestamp with timezone
                 self.last_updated_timestamp = get_current_timestamp()
                 
+                # Save rates to database
+                self._save_rates_to_db(self.rates, self.last_updated)
+                
                 logger.info(f"Updated exchange rates for {len(self.rates)} currencies at {self.last_updated_timestamp}")
                 return self.rates
                 
         except Exception as e:
             logger.error(f"Failed to fetch exchange rates: {e}")
-            # Fallback to static rates if API fails
+            # Try to load from database first, then fallback to static rates
+            db_rates = self._load_rates_from_db()
+            if db_rates:
+                self.rates = db_rates
+                return db_rates
             return self.get_fallback_rates()
     
     def get_fallback_rates(self) -> Dict[str, float]:
@@ -56,8 +128,13 @@ class CurrencyService:
             
         # Ensure we have rates before conversion
         if not self.rates:
-            logger.warning("No exchange rates available, initializing with fallback rates")
-            self.rates = self.get_fallback_rates()
+            logger.warning("No exchange rates available, loading from database")
+            db_rates = self._load_rates_from_db()
+            if db_rates:
+                self.rates = db_rates
+            else:
+                logger.warning("No rates in database, using fallback rates")
+                self.rates = self.get_fallback_rates()
         
         # Validate that we have the required currency rates
         if from_currency != "USD" and from_currency not in self.rates:
@@ -86,10 +163,16 @@ class CurrencyService:
         await self.get_exchange_rates()
     
     def ensure_rates_initialized(self):
-        """Ensure rates are initialized, using fallback if needed"""
+        """Ensure rates are initialized, loading from database first, then fallback if needed"""
         if not self.rates:
-            logger.info("Initializing currency rates with fallback values")
-            self.rates = self.get_fallback_rates()
+            logger.info("Initializing currency rates from database")
+            db_rates = self._load_rates_from_db()
+            if db_rates:
+                self.rates = db_rates
+                logger.info("Loaded currency rates from database")
+            else:
+                logger.info("No rates in database, using fallback values")
+                self.rates = self.get_fallback_rates()
         return self.rates
     
     def get_formatted_timestamp(self) -> str:

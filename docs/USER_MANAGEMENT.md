@@ -21,7 +21,7 @@ The Crypto AI Agent now includes a comprehensive multi-user authentication syste
 
 ### Backend Architecture
 
-```
+```text
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   FastAPI App   │    │  Auth Utils     │    │   Database      │
 │                 │    │                 │    │                 │
@@ -33,7 +33,7 @@ The Crypto AI Agent now includes a comprehensive multi-user authentication syste
 
 ### Frontend Architecture
 
-```
+```text
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Next.js App   │    │  Auth Store     │    │   API Client    │
 │                 │    │                 │    │                 │
@@ -320,7 +320,7 @@ JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 SECRET_KEY=your-secret-key-here
 
 # Database
-DB_PATH=data/crypto_history.db
+DATABASE_FILE=data/crypto_portfolio.db
 
 # CORS
 CORS_ORIGINS=http://localhost:3000,https://yourdomain.com
