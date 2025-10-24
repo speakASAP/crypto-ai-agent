@@ -317,7 +317,7 @@ export function middleware(request: NextRequest) {
 ```bash
 # JWT Configuration
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-SECRET_KEY=your-secret-key-here
+JWT_SECRET_KEY=your-secret-key-here
 
 # Database
 DATABASE_FILE=data/crypto_portfolio.db

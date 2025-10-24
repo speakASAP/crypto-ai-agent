@@ -184,7 +184,7 @@ The system uses the following environment variables:
 ```bash
 # JWT Configuration
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-SECRET_KEY=your-secret-key-here
+JWT_SECRET_KEY=your-secret-key-here
 ```
 
 **Important**: Change the JWT_SECRET in production for security.

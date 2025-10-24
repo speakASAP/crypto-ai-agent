@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     secret_key: str = "your-secret-key-here"
     jwt_secret: str = "your-jwt-secret-here"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
+    jwt_access_token_expire_minutes: int = 360
     jwt_refresh_token_expire_days: int = 7
     cors_origins: str = "http://localhost:3000,https://yourdomain.com"
     api_host: str = "0.0.0.0"

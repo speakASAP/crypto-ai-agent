@@ -1115,7 +1115,7 @@ async def refresh_token(refresh_token: str = None):
         raise HTTPException(status_code=400, detail="Refresh token required")
     
     # Decode refresh token
-    from backend.app.utils.auth import decode_token
+    from .utils.auth import decode_token
     payload = decode_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
