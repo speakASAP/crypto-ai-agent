@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PortfolioSummary, Currency } from '@/types'
 import { apiClient } from '@/lib/api'
+import { refreshCryptoPrices } from '@/lib/refreshUtils'
 
 interface PortfolioState {
   items: PortfolioItem[]
@@ -53,8 +54,18 @@ export const usePortfolioStore = create<PortfolioState>()(
             items: [...state.items, newItem], 
             loading: false 
           }))
-          // Refresh summary
-          get().fetchSummary()
+          
+          // Trigger the same refresh action as the refresh button
+          try {
+            await refreshCryptoPrices()
+            // Reload portfolio data with new prices (same as refresh button)
+            get().fetchPortfolio()
+            get().fetchSummary()
+          } catch (refreshError) {
+            console.warn('Price refresh failed, but portfolio item was created:', refreshError)
+            // Still refresh summary even if price refresh fails
+            get().fetchSummary()
+          }
         } catch (error: any) {
           set({ 
             error: error.message || 'Failed to create portfolio item', 

@@ -13,6 +13,7 @@ import { AlertModal } from '@/components/AlertModal'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PriceAlert, PriceAlertCreate, PriceAlertUpdate } from '@/types'
 import { apiClient } from '@/lib/api'
 import { getRelativeTime, getDataFreshness, getFreshnessColorClass, getTimestampDisplay } from '@/lib/timeUtils'
+import { refreshAllData } from '@/lib/refreshUtils'
 import Link from 'next/link'
 
 export default function Home() {
@@ -92,11 +93,8 @@ export default function Home() {
   const refreshExchangeRates = async () => {
     setRefreshingRates(true)
     try {
-      // Refresh both currency rates and crypto prices simultaneously
-      const [currencyResult, cryptoResult] = await Promise.all([
-        apiClient.refreshExchangeRates(),
-        apiClient.refreshCryptoPrices()
-      ])
+      // Use shared refresh utility
+      const { currencyResult, cryptoResult } = await refreshAllData()
       
       setLastUpdated(currencyResult.last_updated)
       
@@ -107,8 +105,6 @@ export default function Home() {
       // Reload portfolio data with new rates and prices
       fetchPortfolio()
       fetchSummary()
-      
-      console.log(`✅ Refreshed ${currencyResult.rates_count} currency rates and ${cryptoResult.symbols_count} crypto prices`)
     } catch (error) {
       console.error('Failed to refresh data:', error)
     } finally {

@@ -422,9 +422,9 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 # Log alert history
                 cursor.execute('''
                     INSERT INTO alert_history 
-                    (alert_id, user_id, triggered_price, triggered_at)
-                    VALUES (?, ?, ?, ?)
-                ''', (alert_id, user_id, current_price, datetime.now().isoformat() + "Z"))
+                    (alert_id, user_id, symbol, triggered_price, triggered_at)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (alert_id, user_id, symbol, current_price, datetime.now().isoformat() + "Z"))
                 
                 # Deactivate the alert
                 cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
@@ -777,6 +777,7 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             alert_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
             triggered_price REAL NOT NULL,
             triggered_at TEXT NOT NULL,
             FOREIGN KEY (alert_id) REFERENCES alerts (id),
@@ -804,6 +805,14 @@ def init_database():
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN telegram_chat_id TEXT")
         logger.info("✅ Added telegram_chat_id column to users table")
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
+    # Add symbol column to existing alert_history table if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE alert_history ADD COLUMN symbol TEXT")
+        logger.info("✅ Added symbol column to alert_history table")
     except sqlite3.OperationalError:
         # Column already exists, ignore
         pass
@@ -1500,7 +1509,7 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
     conn.commit()
     conn.close()
     
-    # Return the created item
+    # Return the created item - frontend will handle price refresh
     return PortfolioItem(
         id=item_id,
         symbol=item.symbol,
