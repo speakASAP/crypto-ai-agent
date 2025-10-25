@@ -9,6 +9,10 @@ export interface PriceAlert {
   is_active: boolean
   created_at: string
   updated_at: string
+  // New USD-based fields for calculations
+  threshold_price_usd?: number
+  base_currency?: string
+  exchange_rate_at_creation?: number
 }
 
 export interface PriceAlertCreate {
@@ -17,6 +21,7 @@ export interface PriceAlertCreate {
   threshold_price: number
   message?: string
   is_active?: boolean
+  base_currency?: string
 }
 
 export interface PriceAlertUpdate {

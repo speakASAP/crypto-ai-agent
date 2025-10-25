@@ -16,6 +16,14 @@ export interface PortfolioItem {
   current_value?: number
   pnl?: number
   pnl_percent?: number
+  // New USD-based fields for calculations
+  price_buy_usd?: number
+  commission_usd?: number
+  current_price_usd?: number
+  current_value_usd?: number
+  pnl_usd?: number
+  pnl_percent_usd?: number
+  exchange_rate_at_purchase?: number
 }
 
 export interface PortfolioCreate {

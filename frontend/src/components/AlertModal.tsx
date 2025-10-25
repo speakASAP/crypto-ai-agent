@@ -187,7 +187,8 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
         symbol: presetSymbol || selectedSymbol || formData.symbol,
         threshold_price: parseFloat(formData.threshold_price),
         alert_type: formData.alert_type as 'ABOVE' | 'BELOW',
-        message: formData.message
+        message: formData.message,
+        base_currency: selectedCurrency
       }
 
       await onSave(data)

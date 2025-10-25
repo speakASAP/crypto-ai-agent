@@ -14,6 +14,7 @@ import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PriceAlert, PriceAlert
 import { apiClient } from '@/lib/api'
 import { getRelativeTime, getDataFreshness, getFreshnessColorClass, getTimestampDisplay } from '@/lib/timeUtils'
 import { refreshAllData } from '@/lib/refreshUtils'
+import { formatCurrency, formatCurrencyWhole, formatPercent, formatCryptoAmount, formatInvestmentText, Currency } from '@/lib/currencyUtils'
 import Link from 'next/link'
 
 export default function Home() {
@@ -214,43 +215,12 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [])
 
-  // Currency to locale mapping for proper symbol display
-  const currencyToLocale: Record<string, string> = {
-    'USD': 'en-US',
-    'EUR': 'de-DE', 
-    'CZK': 'cs-CZ'
-  }
-
-  const formatCurrency = (amount: number) => {
-    const locale = currencyToLocale[selectedCurrency] || 'en-US'
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: selectedCurrency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount)
-  }
-
-  const formatCurrencyWhole = (amount: number) => {
-    const locale = currencyToLocale[selectedCurrency] || 'en-US'
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: selectedCurrency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount)
-  }
-
-  const formatPercent = (percent: number) => {
-    return `${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%`
-  }
-
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount)
-  }
+  // Use unified currency formatting functions
+  const formatCurrencyAmount = (amount: number) => formatCurrency(amount, selectedCurrency as Currency)
+  const formatCurrencyWholeAmount = (amount: number) => formatCurrencyWhole(amount, selectedCurrency as Currency)
+  const formatPercentAmount = (percent: number) => formatPercent(percent)
+  const formatCryptoAmountValue = (amount: number, symbol: string) => formatCryptoAmount(amount, symbol)
+  const formatInvestmentAmount = (amount: number) => formatInvestmentText(amount, selectedCurrency as Currency)
 
 
   const handleCurrencyChange = async (newCurrency: string) => {
@@ -276,7 +246,7 @@ export default function Home() {
   }
 
   const handleDeletePortfolioItem = async (id: number) => {
-    if (confirm('Are you sure you want to delete this portfolio item?')) {
+    if (window.confirm('Are you sure you want to delete this portfolio item?')) {
       await deleteItem(id)
     }
   }
@@ -321,7 +291,7 @@ export default function Home() {
   }
 
   const handleDeleteAlert = async (id: number) => {
-    if (confirm('Are you sure you want to delete this alert?')) {
+    if (window.confirm('Are you sure you want to delete this alert?')) {
       await deleteAlert(id)
     }
   }
@@ -483,12 +453,12 @@ export default function Home() {
               <div className="text-2xl font-bold transition-all duration-300 ease-in-out">
                 {(loading || currencyChanging) ? (
                   <span className="animate-pulse">Loading...</span>
-                ) : summary ? formatCurrencyWhole(summary.total_value) : 'Loading...'}
+                ) : summary ? formatCurrencyWholeAmount(summary.total_value) : 'Loading...'}
               </div>
               <div className="text-lg text-blue-600 font-medium transition-all duration-300 ease-in-out">
                 {(loading || currencyChanging) ? (
                   <span className="animate-pulse">Loading...</span>
-                ) : summary ? formatCurrencyWhole(summary.total_invested) : 'Loading...'}
+                ) : summary ? formatCurrencyWholeAmount(summary.total_invested) : 'Loading...'}
               </div>
             </div>
           </CardContent>
@@ -502,7 +472,7 @@ export default function Home() {
             <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${summary && summary.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
               {(loading || currencyChanging) ? (
                 <span className="animate-pulse">Loading...</span>
-              ) : summary ? formatCurrencyWhole(summary.total_pnl) : 'Loading...'}
+              ) : summary ? formatCurrencyWholeAmount(summary.total_pnl) : 'Loading...'}
             </div>
           </CardContent>
         </Card>
@@ -515,7 +485,7 @@ export default function Home() {
             <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${summary && summary.total_pnl_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
               {(loading || currencyChanging) ? (
                 <span className="animate-pulse">Loading...</span>
-              ) : summary ? formatPercent(summary.total_pnl_percent) : 'Loading...'}
+              ) : summary ? formatPercentAmount(summary.total_pnl_percent) : 'Loading...'}
             </div>
           </CardContent>
         </Card>
@@ -564,7 +534,7 @@ export default function Home() {
                       </div>
                     )}
                     <div className="text-sm text-muted-foreground">
-                      {formatAmount(item.amount)} @ {formatCurrency(item.price_buy)}
+                      {formatCryptoAmountValue(item.amount, item.symbol)} @ {formatCurrencyAmount(item.price_buy)}
                     </div>
                     {item.source && (
                       <div className="text-sm text-muted-foreground">
@@ -577,7 +547,7 @@ export default function Home() {
                       <div className="text-sm text-muted-foreground transition-all duration-300 ease-in-out">
                         {(loading || currencyChanging) ? (
                           <span className="animate-pulse">Loading...</span>
-                        ) : item.current_price ? formatCurrency(item.current_price) : 'N/A'}
+                        ) : item.current_price ? formatCurrencyAmount(item.current_price) : 'N/A'}
                       </div>
                     </div>
                     {item.current_value && (
@@ -589,7 +559,7 @@ export default function Home() {
                         }`}>
                           {(loading || currencyChanging) ? (
                             <span className="animate-pulse">Loading...</span>
-                          ) : formatCurrency(item.current_value)}
+                          ) : formatCurrencyAmount(item.current_value)}
                         </div>
                         {item.pnl !== undefined && (
                           <div className={`text-sm transition-all duration-300 ease-in-out ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -597,7 +567,7 @@ export default function Home() {
                               <span className="animate-pulse">Loading...</span>
                             ) : (
                               <>
-                                {formatCurrency(item.pnl)} ({formatPercent(item.pnl_percent || 0)})
+                                {formatCurrencyAmount(item.pnl)} ({formatPercentAmount(item.pnl_percent || 0)})
                               </>
                             )}
                           </div>
@@ -674,7 +644,7 @@ export default function Home() {
                           {loadingAlertPrices ? (
                             <div className="animate-pulse">Loading...</div>
                           ) : currentPrice > 0 ? (
-                            formatCurrency(currentPrice)
+                            formatCurrencyAmount(currentPrice)
                           ) : (
                             'N/A'
                           )}
@@ -693,7 +663,7 @@ export default function Home() {
                         <div className="flex items-center space-x-2">
                           <span className="font-medium">{alert.symbol}</span>
                           <span className="text-sm text-muted-foreground">
-                            {alert.alert_type} {formatCurrency(alert.threshold_price)}
+                            {alert.alert_type} {formatCurrencyAmount(alert.threshold_price)}
                           </span>
                         </div>
                         {alert.message && (

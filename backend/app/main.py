@@ -176,30 +176,38 @@ async def fetch_prices_for_symbols(symbols: List[str]):
                         WHERE symbol = ? AND base_currency = ?
                     """, (converted_price, converted_price, symbol, base_currency))
                 
-                # Calculate P&L for each item
+                # Calculate P&L for each item using USD-based calculations
                 cursor.execute("""
-                    SELECT id, amount, price_buy, commission, base_currency FROM portfolio_items 
+                    SELECT id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase 
+                    FROM portfolio_items 
                     WHERE symbol = ?
                 """, (symbol,))
                 
                 items = cursor.fetchall()
-                for item_id, amount, price_buy, commission, base_currency in items:
-                    # Convert USD price to the item's base currency if needed
-                    if base_currency != "USD":
-                        converted_price = currency_service.convert_amount(price, "USD", base_currency)
-                    else:
-                        converted_price = price
+                for item_id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase in items:
+                    # Use USD price for calculations
+                    current_value_usd = amount * price
+                    total_investment_usd = (amount * price_buy_usd) + commission_usd
+                    pnl_usd = current_value_usd - total_investment_usd
+                    pnl_percent_usd = (pnl_usd / total_investment_usd * 100) if total_investment_usd > 0 else 0
                     
-                    current_value = amount * converted_price
-                    total_investment = (amount * price_buy) + commission
-                    pnl = current_value - total_investment
-                    pnl_percent = (pnl / total_investment * 100) if total_investment > 0 else 0
+                    # Convert to display currency for display
+                    if base_currency != "USD":
+                        current_price_display = currency_service.convert_amount(price, "USD", base_currency)
+                        current_value_display = currency_service.convert_amount(current_value_usd, "USD", base_currency)
+                        pnl_display = currency_service.convert_amount(pnl_usd, "USD", base_currency)
+                    else:
+                        current_price_display = price
+                        current_value_display = current_value_usd
+                        pnl_display = pnl_usd
                     
                     cursor.execute("""
                         UPDATE portfolio_items 
-                        SET current_value = ?, pnl = ?, pnl_percent = ?
+                        SET current_price = ?, current_value = ?, pnl = ?, pnl_percent = ?,
+                            current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?
                         WHERE id = ?
-                    """, (current_value, pnl, pnl_percent, item_id))
+                    """, (current_price_display, current_value_display, pnl_display, pnl_percent_usd,
+                          price, current_value_usd, pnl_usd, pnl_percent_usd, item_id))
             
             conn.commit()
             conn.close()
@@ -497,6 +505,14 @@ class PortfolioItem(BaseModel):
     current_value: Optional[float] = None
     pnl: Optional[float] = None
     pnl_percent: Optional[float] = None
+    # New USD-based fields for calculations
+    price_buy_usd: Optional[float] = None
+    commission_usd: Optional[float] = None
+    current_price_usd: Optional[float] = None
+    current_value_usd: Optional[float] = None
+    pnl_usd: Optional[float] = None
+    pnl_percent_usd: Optional[float] = None
+    exchange_rate_at_purchase: Optional[float] = None
 
     class Config:
         json_encoders = {
@@ -541,12 +557,17 @@ class PriceAlert(BaseModel):
     message: Optional[str] = None
     is_active: bool = True
     created_at: str
+    # New USD-based fields for calculations
+    threshold_price_usd: Optional[float] = None
+    base_currency: Optional[str] = None
+    exchange_rate_at_creation: Optional[float] = None
 
 class PriceAlertCreate(BaseModel):
     symbol: str
     threshold_price: float
     alert_type: str
     message: Optional[str] = None
+    base_currency: Optional[str] = None
 
 class PriceAlertUpdate(BaseModel):
     symbol: Optional[str] = None
@@ -748,6 +769,15 @@ def init_database():
             current_value REAL,
             pnl REAL,
             pnl_percent REAL,
+            -- New USD-based columns for calculations
+            price_buy_usd REAL,
+            commission_usd REAL,
+            current_price_usd REAL,
+            current_value_usd REAL,
+            pnl_usd REAL,
+            pnl_percent_usd REAL,
+            -- Exchange rate at time of purchase
+            exchange_rate_at_purchase REAL,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
@@ -763,6 +793,10 @@ def init_database():
             message TEXT,
             is_active BOOLEAN DEFAULT 1,
             created_at TEXT NOT NULL,
+            -- New USD-based columns for calculations
+            threshold_price_usd REAL,
+            base_currency TEXT,
+            exchange_rate_at_creation REAL,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
@@ -837,6 +871,68 @@ def init_database():
         logger.info("✅ Added symbol column to alert_history table")
     except sqlite3.OperationalError:
         # Column already exists, ignore
+        pass
+    
+    # Add new USD-based columns to portfolio_items table if they don't exist
+    try:
+        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN price_buy_usd REAL")
+        logger.info("✅ Added price_buy_usd column to portfolio_items table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN commission_usd REAL")
+        logger.info("✅ Added commission_usd column to portfolio_items table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN current_price_usd REAL")
+        logger.info("✅ Added current_price_usd column to portfolio_items table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN current_value_usd REAL")
+        logger.info("✅ Added current_value_usd column to portfolio_items table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN pnl_usd REAL")
+        logger.info("✅ Added pnl_usd column to portfolio_items table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN pnl_percent_usd REAL")
+        logger.info("✅ Added pnl_percent_usd column to portfolio_items table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN exchange_rate_at_purchase REAL")
+        logger.info("✅ Added exchange_rate_at_purchase column to portfolio_items table")
+    except sqlite3.OperationalError:
+        pass
+    
+    # Add new USD-based columns to alerts table if they don't exist
+    try:
+        cursor.execute("ALTER TABLE alerts ADD COLUMN threshold_price_usd REAL")
+        logger.info("✅ Added threshold_price_usd column to alerts table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE alerts ADD COLUMN base_currency TEXT")
+        logger.info("✅ Added base_currency column to alerts table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE alerts ADD COLUMN exchange_rate_at_creation REAL")
+        logger.info("✅ Added exchange_rate_at_creation column to alerts table")
+    except sqlite3.OperationalError:
         pass
     
     conn.commit()
@@ -932,7 +1028,7 @@ def format_total_investment_text(amount: float, currency: str) -> str:
     return f"{symbol}{formatted_amount}" if symbol in ["$", "€", "£", "¥"] else f"{formatted_amount} {symbol}"
 
 def convert_portfolio_item(item: dict, target_currency: str) -> dict:
-    """Convert a portfolio item to target currency"""
+    """Convert a portfolio item to target currency using USD-based calculations"""
     if item["base_currency"] == target_currency:
         # Ensure total_investment_text is properly formatted even without conversion
         if not item.get("total_investment_text") or not any(symbol in item.get("total_investment_text", "") for symbol in ["$", "€", "Kč", "£", "¥"]):
@@ -941,39 +1037,38 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
         return item
 
     try:
-        # Convert price_buy
-        converted_price_buy = currency_service.convert_amount(
-            item["price_buy"], item["base_currency"], target_currency
-        )
-        
-        # Convert current_price
-        converted_current_price = currency_service.convert_amount(
-            item.get("current_price", 0), item["base_currency"], target_currency
-        ) if item.get("current_price") else None
-        
-        # Convert current_value - FIXED: Don't convert if already in target currency
-        if item.get("current_value") and item["base_currency"] == target_currency:
-            converted_current_value = item.get("current_value")
+        # Use USD values for calculations if available, otherwise convert from display currency
+        if item.get("price_buy_usd") is not None:
+            # Use stored USD values for accurate calculations
+            price_buy_usd = item["price_buy_usd"]
+            commission_usd = item.get("commission_usd", 0)
+            current_value_usd = item.get("current_value_usd", 0)
+            pnl_usd = item.get("pnl_usd", 0)
         else:
-            converted_current_value = currency_service.convert_amount(
-                item.get("current_value", 0), item["base_currency"], target_currency
-            ) if item.get("current_value") else None
+            # Fallback: convert from display currency to USD
+            price_buy_usd = currency_service.convert_amount(item["price_buy"], item["base_currency"], "USD")
+            commission_usd = currency_service.convert_amount(item.get("commission", 0), item["base_currency"], "USD")
+            current_value_usd = currency_service.convert_amount(item.get("current_value", 0), item["base_currency"], "USD") if item.get("current_value") else 0
+            pnl_usd = currency_service.convert_amount(item.get("pnl", 0), item["base_currency"], "USD") if item.get("pnl") else 0
         
-        # Convert pnl - FIXED: Don't convert if already in target currency
-        if item.get("pnl") and item["base_currency"] == target_currency:
-            converted_pnl = item.get("pnl")
-        else:
-            converted_pnl = currency_service.convert_amount(
-                item.get("pnl", 0), item["base_currency"], target_currency
-            ) if item.get("pnl") else None
+        # Convert USD values to target currency for display
+        converted_price_buy = currency_service.convert_amount(price_buy_usd, "USD", target_currency)
+        converted_commission = currency_service.convert_amount(commission_usd, "USD", target_currency)
+        converted_current_value = currency_service.convert_amount(current_value_usd, "USD", target_currency) if current_value_usd else None
+        converted_pnl = currency_service.convert_amount(pnl_usd, "USD", target_currency) if pnl_usd else None
         
-        # Convert commission
-        converted_commission = currency_service.convert_amount(
-            item.get("commission", 0), item["base_currency"], target_currency
-        ) if item.get("commission") else 0.0
+        # Convert current price for display
+        converted_current_price = None
+        if item.get("current_price_usd") is not None:
+            converted_current_price = currency_service.convert_amount(item["current_price_usd"], "USD", target_currency)
+        elif item.get("current_price"):
+            converted_current_price = currency_service.convert_amount(item["current_price"], item["base_currency"], target_currency)
 
         # Calculate total investment in target currency
         total_investment = (item["amount"] * converted_price_buy) + converted_commission
+        
+        # Calculate P&L percentage using USD values for accuracy
+        pnl_percent = item.get("pnl_percent_usd") if item.get("pnl_percent_usd") is not None else item.get("pnl_percent", 0)
         
         return {
             **item,
@@ -982,6 +1077,7 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
             "current_price": round(converted_current_price, 8) if converted_current_price else None,
             "current_value": round(converted_current_value, 8) if converted_current_value else None,
             "pnl": round(converted_pnl, 8) if converted_pnl else None,
+            "pnl_percent": round(pnl_percent, 8),
             "commission": round(converted_commission, 8),
             "total_investment_text": format_total_investment_text(total_investment, target_currency)
         }
@@ -1442,7 +1538,15 @@ async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_
             "current_price": row[14],      # current_price
             "current_value": row[15],      # current_value
             "pnl": row[16],                # pnl
-            "pnl_percent": row[17]         # pnl_percent
+            "pnl_percent": row[17],        # pnl_percent
+            # New USD-based fields
+            "price_buy_usd": row[18] if len(row) > 18 else None,
+            "commission_usd": row[19] if len(row) > 19 else None,
+            "current_price_usd": row[20] if len(row) > 20 else None,
+            "current_value_usd": row[21] if len(row) > 21 else None,
+            "pnl_usd": row[22] if len(row) > 22 else None,
+            "pnl_percent_usd": row[23] if len(row) > 23 else None,
+            "exchange_rate_at_purchase": row[24] if len(row) > 24 else None
         }
         
         # Convert currency if needed
@@ -1510,6 +1614,15 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
     
     now = datetime.now().isoformat() + "Z"
     
+    # Get current exchange rate for the base currency
+    exchange_rate = 1.0
+    if item.base_currency != "USD":
+        exchange_rate = currency_service.get_rate(item.base_currency)
+    
+    # Convert to USD for calculations
+    price_buy_usd = item.price_buy / exchange_rate if item.base_currency != "USD" else item.price_buy
+    commission_usd = item.commission / exchange_rate if item.base_currency != "USD" else item.commission
+    
     # Format total investment text if not provided or improperly formatted
     total_investment = (item.amount * item.price_buy) + item.commission
     formatted_total_investment = item.total_investment_text
@@ -1519,12 +1632,16 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
     cursor.execute('''
         INSERT INTO portfolio_items 
         (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
-         total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
+         price_buy_usd, commission_usd, current_price_usd, current_value_usd, pnl_usd, pnl_percent_usd,
+         exchange_rate_at_purchase)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         current_user["id"], item.symbol, item.amount, item.price_buy, item.purchase_date, item.base_currency,
         item.source, item.commission, formatted_total_investment, now, now,
-        round(item.price_buy, 8), round(item.amount * item.price_buy, 8), 0.0, 0.0
+        round(item.price_buy, 8), round(item.amount * item.price_buy, 8), 0.0, 0.0,
+        round(price_buy_usd, 8), round(commission_usd, 8), round(price_buy_usd, 8), 
+        round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate
     ))
     
     item_id = cursor.lastrowid
@@ -1547,7 +1664,14 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         current_price=round(item.price_buy, 8),
         current_value=round(item.amount * item.price_buy, 8),
         pnl=0.0,
-        pnl_percent=0.0
+        pnl_percent=0.0,
+        price_buy_usd=round(price_buy_usd, 8),
+        commission_usd=round(commission_usd, 8),
+        current_price_usd=round(price_buy_usd, 8),
+        current_value_usd=round(item.amount * price_buy_usd, 8),
+        pnl_usd=0.0,
+        pnl_percent_usd=0.0,
+        exchange_rate_at_purchase=exchange_rate
     )
 
 @app.put("/api/portfolio/{item_id}", response_model=PortfolioItem)
@@ -1678,7 +1802,9 @@ async def get_alerts(active_only: bool = False, current_user: dict = Depends(get
         alerts.append(PriceAlert(
             id=row[0], symbol=row[2], threshold_price=row[3],
             alert_type=row[4], message=row[5], is_active=bool(row[6]),
-            created_at=row[7]
+            created_at=row[7], threshold_price_usd=row[8] if len(row) > 8 else None,
+            base_currency=row[9] if len(row) > 9 else None,
+            exchange_rate_at_creation=row[10] if len(row) > 10 else None
         ))
     
     return alerts
@@ -1691,10 +1817,21 @@ async def create_alert(alert: PriceAlertCreate, current_user: dict = Depends(get
     
     now = datetime.now().isoformat() + "Z"
     
+    # Get current exchange rate for the base currency (default to USD if not specified)
+    base_currency = alert.base_currency or "USD"
+    exchange_rate = 1.0
+    if base_currency != "USD":
+        exchange_rate = currency_service.get_rate(base_currency)
+    
+    # Convert threshold price to USD for calculations
+    threshold_price_usd = alert.threshold_price / exchange_rate if base_currency != "USD" else alert.threshold_price
+    
     cursor.execute('''
-        INSERT INTO alerts (user_id, symbol, threshold_price, alert_type, message, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (current_user["id"], alert.symbol, alert.threshold_price, alert.alert_type, alert.message, True, now))
+        INSERT INTO alerts (user_id, symbol, threshold_price, alert_type, message, is_active, created_at,
+                           threshold_price_usd, base_currency, exchange_rate_at_creation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (current_user["id"], alert.symbol, alert.threshold_price, alert.alert_type, alert.message, True, now,
+          threshold_price_usd, base_currency, exchange_rate))
     
     alert_id = cursor.lastrowid
     conn.commit()
@@ -1703,7 +1840,8 @@ async def create_alert(alert: PriceAlertCreate, current_user: dict = Depends(get
     return PriceAlert(
         id=alert_id, symbol=alert.symbol, threshold_price=alert.threshold_price,
         alert_type=alert.alert_type, message=alert.message, is_active=True,
-        created_at=now
+        created_at=now, threshold_price_usd=threshold_price_usd, 
+        base_currency=base_currency, exchange_rate_at_creation=exchange_rate
     )
 
 @app.put("/api/alerts/{alert_id}", response_model=PriceAlert)
