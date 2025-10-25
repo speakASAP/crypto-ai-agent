@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { apiClient } from '@/lib/api'
 
 export default function ProfilePage() {
   const [profileData, setProfileData] = useState({
@@ -23,12 +24,18 @@ export default function ProfilePage() {
     newPassword: '',
     confirmPassword: ''
   })
-  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram' | 'system'>('profile')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [confirmationText, setConfirmationText] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [cryptoRefreshLoading, setCryptoRefreshLoading] = useState(false)
+  const [cryptoRefreshResult, setCryptoRefreshResult] = useState<{
+    message: string
+    count: number
+    last_updated: string
+  } | null>(null)
   const { user, updateProfile, changePassword, logout, deleteAccount, testTelegramConnection, loading } = useAuthStore()
   const router = useRouter()
 
@@ -179,6 +186,23 @@ export default function ProfilePage() {
     }
   }
 
+  const handleRefreshCryptoSymbols = async () => {
+    setCryptoRefreshLoading(true)
+    setError('')
+    setSuccess('')
+    setCryptoRefreshResult(null)
+    
+    try {
+      const result = await apiClient.refreshCryptoSymbols()
+      setCryptoRefreshResult(result)
+      setSuccess(`Successfully refreshed ${result.count} cryptocurrency symbols!`)
+    } catch (error: any) {
+      setError(error.message || 'Failed to refresh crypto symbols')
+    } finally {
+      setCryptoRefreshLoading(false)
+    }
+  }
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -240,6 +264,16 @@ export default function ProfilePage() {
                 }`}
               >
                 Telegram Settings
+              </button>
+              <button
+                onClick={() => setActiveTab('system')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'system'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                System Settings
               </button>
             </nav>
           </div>
@@ -529,6 +563,90 @@ export default function ProfilePage() {
                   </div>
                 )}
               </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === 'system' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>System Settings</CardTitle>
+              <CardDescription>
+                Manage system data and configurations
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-blue-800 mb-2">🔄 Cryptocurrency Symbols Database</h3>
+                  <div className="text-sm text-blue-700 space-y-2">
+                    <p>Refresh the cryptocurrency symbols database to ensure you have access to the latest cryptocurrencies for creating price alerts.</p>
+                    <p className="text-xs text-blue-600">
+                      <strong>Note:</strong> This will fetch the top 500 cryptocurrencies by market cap from CoinGecko API and update the local database.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-900">Refresh Crypto Symbols</h4>
+                      <p className="text-sm text-gray-500">
+                        Update the database with the latest cryptocurrency symbols and names
+                      </p>
+                    </div>
+                    <Button 
+                      onClick={handleRefreshCryptoSymbols}
+                      disabled={cryptoRefreshLoading}
+                      className="flex items-center gap-2"
+                    >
+                      {cryptoRefreshLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Refreshing...
+                        </>
+                      ) : (
+                        <>
+                          🔄 Refresh Symbols
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  {cryptoRefreshResult && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <h4 className="text-sm font-medium text-green-800 mb-2">✅ Refresh Complete</h4>
+                      <div className="text-sm text-green-700 space-y-1">
+                        <p><strong>Message:</strong> {cryptoRefreshResult.message}</p>
+                        <p><strong>Symbols Count:</strong> {cryptoRefreshResult.count}</p>
+                        <p><strong>Last Updated:</strong> {new Date(cryptoRefreshResult.last_updated).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="text-red-600 text-sm">
+                      {error}
+                    </div>
+                  )}
+
+                  {success && (
+                    <div className="text-green-600 text-sm">
+                      {success}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium text-gray-900 mb-2">System Information</h4>
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <p><strong>Database:</strong> SQLite</p>
+                    <p><strong>API Source:</strong> CoinGecko API</p>
+                    <p><strong>Update Frequency:</strong> Manual (on-demand)</p>
+                    <p><strong>Symbols Limit:</strong> 500 cryptocurrencies</p>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}

@@ -15,7 +15,7 @@ interface SymbolsState {
   addTrackedSymbol: (symbol: TrackedSymbolCreate) => Promise<void>
   updateTrackedSymbol: (symbol: string, update: TrackedSymbolUpdate) => Promise<void>
   removeTrackedSymbol: (symbol: string) => Promise<void>
-  fetchCryptoSymbols: (tradableOnly?: boolean) => Promise<void>
+  fetchCryptoSymbols: (limit?: number) => Promise<void>
   fetchSymbolPrices: (symbols: string[]) => Promise<void>
   clearError: () => void
 }
@@ -92,9 +92,9 @@ export const useSymbolsStore = create<SymbolsState>()(
         }
       },
 
-      fetchCryptoSymbols: async (tradableOnly = true) => {
+      fetchCryptoSymbols: async (limit = 500) => {
         try {
-          const cryptoSymbols = await apiClient.getCryptoSymbols(tradableOnly)
+          const cryptoSymbols = await apiClient.getCryptoSymbols(limit)
           set({ cryptoSymbols })
         } catch (error: any) {
           console.error('Failed to fetch crypto symbols:', error)

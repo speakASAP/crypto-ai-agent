@@ -49,6 +49,10 @@ export default function Home() {
   const [refreshingRates, setRefreshingRates] = useState(false)
   const [currencyChanging, setCurrencyChanging] = useState(false)
   
+  // Alert current prices state
+  const [alertCurrentPrices, setAlertCurrentPrices] = useState<Record<string, number>>({})
+  const [loadingAlertPrices, setLoadingAlertPrices] = useState(false)
+  
   // Crypto symbol states
   const [cryptoLastUpdated, setCryptoLastUpdated] = useState<string>('')
   const [cryptoLastUpdatedFormatted, setCryptoLastUpdatedFormatted] = useState<string>('')
@@ -78,6 +82,53 @@ export default function Home() {
       setLastUpdatedFormatted(rates.last_updated_formatted || rates.last_updated)
     } catch (error) {
       console.error('Failed to load exchange rates:', error)
+    }
+  }
+
+  // Function to convert USD price to selected currency
+  const convertToCurrency = (usdPrice: number, targetCurrency: string): number => {
+    if (targetCurrency === 'USD') return usdPrice
+    if (!exchangeRates[targetCurrency]) return usdPrice
+    return usdPrice * exchangeRates[targetCurrency]
+  }
+
+  // Function to fetch current prices for alert symbols
+  const loadAlertCurrentPrices = async () => {
+    if (alerts.length === 0) return
+    
+    setLoadingAlertPrices(true)
+    try {
+      const uniqueSymbols = Array.from(new Set(alerts.map(alert => alert.symbol)))
+      const prices: Record<string, number> = {}
+      
+      for (const symbol of uniqueSymbols) {
+        try {
+          const data = await apiClient.getSymbolPrice(symbol)
+          const usdPrice = data.price
+          const convertedPrice = convertToCurrency(usdPrice, selectedCurrency)
+          prices[symbol] = convertedPrice
+        } catch (error) {
+          console.error(`Failed to fetch price for ${symbol}:`, error)
+          prices[symbol] = 0
+        }
+      }
+      
+      setAlertCurrentPrices(prices)
+    } catch (error) {
+      console.error('Failed to load alert current prices:', error)
+    } finally {
+      setLoadingAlertPrices(false)
+    }
+  }
+
+
+  // Function to calculate percentage difference between current price and threshold
+  const calculatePriceDifference = (currentPrice: number, thresholdPrice: number) => {
+    if (currentPrice === 0) return { percentage: 0, isAbove: false }
+    const percentage = ((currentPrice - thresholdPrice) / thresholdPrice) * 100
+    return {
+      percentage: Math.abs(percentage),
+      isAbove: currentPrice > thresholdPrice
     }
   }
 
@@ -142,6 +193,13 @@ export default function Home() {
       setCurrencyFromUserPreference(user.preferred_currency as any)
     }
   }, [user, isHydrated])
+
+  // Load alert current prices when alerts or exchange rates change
+  useEffect(() => {
+    if (alerts.length > 0 && Object.keys(exchangeRates).length > 0) {
+      loadAlertCurrentPrices()
+    }
+  }, [alerts, exchangeRates, selectedCurrency])
 
   // Periodic refresh of timestamps
   useEffect(() => {
@@ -234,6 +292,7 @@ export default function Home() {
   // Alert handlers
   const handleAddAlert = () => {
     setEditingAlert(null)
+    setPresetAlertData(null) // Clear any preset data for generic alert creation
     setAlertModalOpen(true)
   }
 
@@ -599,45 +658,80 @@ export default function Home() {
             </div>
           ) : (
             <div className="space-y-2">
-              {alerts.map((alert) => (
-                <div key={alert.id} className="flex items-center justify-between p-3 border rounded">
-                  <div>
-                    <span className="font-medium">{alert.symbol}</span>
-                    <span className="ml-2 text-sm text-muted-foreground">
-                      {alert.alert_type} {formatCurrency(alert.threshold_price)}
-                    </span>
-                    {alert.message && (
-                      <div className="text-sm text-muted-foreground mt-1">
-                        {alert.message}
+              {alerts.map((alert) => {
+                const currentPrice = alertCurrentPrices[alert.symbol] || 0
+                const priceDiff = calculatePriceDifference(currentPrice, alert.threshold_price)
+                
+                return (
+                  <div key={alert.id} className="flex items-center justify-between p-3 border rounded">
+                    {/* Left side - Current price and percentage difference */}
+                    <div className="flex items-center space-x-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 min-w-[120px]">
+                        <div className="text-xs text-blue-600 font-medium mb-1">
+                          {alert.symbol} Current Price
+                        </div>
+                        <div className="text-lg font-bold text-blue-800">
+                          {loadingAlertPrices ? (
+                            <div className="animate-pulse">Loading...</div>
+                          ) : currentPrice > 0 ? (
+                            formatCurrency(currentPrice)
+                          ) : (
+                            'N/A'
+                          )}
+                        </div>
+                        {currentPrice > 0 && (
+                          <div className={`text-xs mt-1 ${
+                            priceDiff.isAbove ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {priceDiff.isAbove ? '📈' : '📉'} {priceDiff.percentage.toFixed(1)}% {priceDiff.isAbove ? 'above' : 'below'} threshold
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      alert.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                    }`}>
-                      {alert.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                    <div className="flex items-center space-x-1">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleEditAlert(alert)}
-                      >
-                        Edit
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleDeleteAlert(alert.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        Delete
-                      </Button>
+                      
+                      {/* Alert details */}
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium">{alert.symbol}</span>
+                          <span className="text-sm text-muted-foreground">
+                            {alert.alert_type} {formatCurrency(alert.threshold_price)}
+                          </span>
+                        </div>
+                        {alert.message && (
+                          <div className="text-sm text-muted-foreground mt-1">
+                            {alert.message}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Right side - Status and actions */}
+                    <div className="flex items-center space-x-2">
+                      <span className={`px-2 py-1 text-xs rounded ${
+                        alert.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {alert.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      <div className="flex items-center space-x-1">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleEditAlert(alert)}
+                        >
+                          Edit
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleDeleteAlert(alert.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -664,6 +758,7 @@ export default function Home() {
         currentPrice={presetAlertData?.currentPrice}
         selectedCurrency={selectedCurrency}
         portfolioItem={presetAlertData?.portfolioItem}
+        availableSymbols={trackedSymbols.map(s => s.symbol)}
       />
     </div>
   )

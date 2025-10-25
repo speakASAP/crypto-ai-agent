@@ -6,7 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, Currency } from '@/types'
+import { CryptoSearchSelect } from '@/components/CryptoSearchSelect'
+import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, Currency, CryptoSymbol } from '@/types'
+import { apiClient } from '@/lib/api'
 
 interface AlertModalProps {
   isOpen: boolean
@@ -25,9 +27,31 @@ interface AlertModalProps {
     pnl?: number
     pnl_percent?: number
   }
+  availableSymbols?: string[]
 }
 
-export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, currentPrice, selectedCurrency, portfolioItem }: AlertModalProps) {
+// Utility function to format numbers with spaces for thousands
+const formatNumberWithSpaces = (value: number | string): string => {
+  const num = typeof value === 'string' ? parseFloat(value) : value
+  if (isNaN(num)) return '0'
+  
+  // Split by decimal point
+  const parts = num.toString().split('.')
+  const integerPart = parts[0]
+  const decimalPart = parts[1] ? '.' + parts[1] : ''
+  
+  // Add spaces every 3 digits from the right
+  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+  
+  return formattedInteger + decimalPart
+}
+
+// Utility function to parse formatted number back to number
+const parseFormattedNumber = (value: string): number => {
+  return parseFloat(value.replace(/\s/g, ''))
+}
+
+export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, currentPrice, selectedCurrency, portfolioItem, availableSymbols = [] }: AlertModalProps) {
   const [formData, setFormData] = useState({
     symbol: '',
     threshold_price: '',
@@ -38,6 +62,70 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
   const [loading, setLoading] = useState(false)
   const [thresholdPrice, setThresholdPrice] = useState(0)
   const [priceRange, setPriceRange] = useState({ min: 0, max: 0 })
+  const [selectedSymbol, setSelectedSymbol] = useState('')
+  const [selectedCurrentPrice, setSelectedCurrentPrice] = useState(0)
+  const [loadingPrice, setLoadingPrice] = useState(false)
+  const [selectedCryptoSymbol, setSelectedCryptoSymbol] = useState<CryptoSymbol | null>(null)
+  const [formattedThresholdPrice, setFormattedThresholdPrice] = useState('')
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
+
+  // Function to load exchange rates
+  const loadExchangeRates = async () => {
+    try {
+      const rates = await apiClient.getExchangeRates()
+      setExchangeRates(rates.rates)
+    } catch (error) {
+      console.error('Failed to load exchange rates:', error)
+    }
+  }
+
+  // Function to convert USD price to selected currency
+  const convertToCurrency = (usdPrice: number, targetCurrency: string): number => {
+    if (targetCurrency === 'USD') return usdPrice
+    if (!exchangeRates[targetCurrency]) return usdPrice
+    return usdPrice * exchangeRates[targetCurrency]
+  }
+
+  // Function to fetch current price for selected symbol
+  const fetchCurrentPrice = async (symbol: string) => {
+    if (!symbol) return
+    
+    setLoadingPrice(true)
+    try {
+      const data = await apiClient.getSymbolPrice(symbol)
+      const usdPrice = data.price
+      
+      // Convert USD price to selected currency
+      const convertedPrice = convertToCurrency(usdPrice, selectedCurrency)
+      
+      setSelectedCurrentPrice(convertedPrice)
+      setThresholdPrice(convertedPrice)
+      setFormattedThresholdPrice(formatNumberWithSpaces(convertedPrice))
+      setFormData(prev => ({ 
+        ...prev, 
+        threshold_price: convertedPrice.toString() 
+      }))
+      // Set price range to ±50% of current price
+      const range = convertedPrice * 0.5
+      setPriceRange({
+        min: Math.max(0, convertedPrice - range),
+        max: convertedPrice + range
+      })
+    } catch (error) {
+      console.error('Failed to fetch current price:', error)
+      // Set default values on error
+      setSelectedCurrentPrice(0)
+      setThresholdPrice(0)
+      setFormattedThresholdPrice('0')
+      setFormData(prev => ({ 
+        ...prev, 
+        threshold_price: '0' 
+      }))
+      setPriceRange({ min: 0, max: 100000 }) // Default range
+    } finally {
+      setLoadingPrice(false)
+    }
+  }
 
   useEffect(() => {
     if (alert) {
@@ -48,6 +136,8 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
         message: alert.message || ''
       })
       setThresholdPrice(alert.threshold_price)
+      setSelectedSymbol(alert.symbol)
+      setSelectedCurrentPrice(0) // We don't have current price for editing
     } else if (presetSymbol && currentPrice) {
       setFormData({
         symbol: presetSymbol,
@@ -56,6 +146,9 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
         message: ''
       })
       setThresholdPrice(currentPrice)
+      setSelectedSymbol(presetSymbol)
+      setSelectedCurrentPrice(currentPrice)
+      setFormattedThresholdPrice(formatNumberWithSpaces(currentPrice))
       // Set price range to ±50% of current price
       const range = currentPrice * 0.5
       setPriceRange({
@@ -63,6 +156,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
         max: currentPrice + range
       })
     } else {
+      // Reset for new alert creation
       setFormData({
         symbol: '',
         threshold_price: '',
@@ -71,8 +165,18 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
       })
       setThresholdPrice(0)
       setPriceRange({ min: 0, max: 0 })
+      setSelectedSymbol('')
+      setSelectedCurrentPrice(0)
+      setFormattedThresholdPrice('')
     }
   }, [alert, presetSymbol, currentPrice, isOpen])
+
+  // Load exchange rates when component mounts
+  useEffect(() => {
+    if (isOpen) {
+      loadExchangeRates()
+    }
+  }, [isOpen])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -80,7 +184,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
 
     try {
       const data = {
-        symbol: presetSymbol || formData.symbol,
+        symbol: presetSymbol || selectedSymbol || formData.symbol,
         threshold_price: parseFloat(formData.threshold_price),
         alert_type: formData.alert_type as 'ABOVE' | 'BELOW',
         message: formData.message
@@ -132,13 +236,15 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
   }
 
   const adjustThresholdByPercentage = (percentage: number) => {
-    if (!currentPrice) return
+    const effectiveCurrentPrice = currentPrice || selectedCurrentPrice
+    if (!effectiveCurrentPrice) return
     
-    const adjustment = currentPrice * (percentage / 100)
-    const newThreshold = currentPrice + adjustment
+    const adjustment = effectiveCurrentPrice * (percentage / 100)
+    const newThreshold = effectiveCurrentPrice + adjustment
     const clampedThreshold = Math.max(priceRange.min, Math.min(priceRange.max, newThreshold))
     
     setThresholdPrice(clampedThreshold)
+    setFormattedThresholdPrice(formatNumberWithSpaces(clampedThreshold))
     setFormData(prev => ({ 
       ...prev, 
       threshold_price: clampedThreshold.toString() 
@@ -147,6 +253,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
 
   const handleSliderChange = (value: number) => {
     setThresholdPrice(value)
+    setFormattedThresholdPrice(formatNumberWithSpaces(value))
     setFormData(prev => ({ 
       ...prev, 
       threshold_price: value.toString() 
@@ -159,10 +266,11 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
   }
 
   const calculatePotentialPnL = () => {
-    if (!currentPrice || !thresholdPrice) return null
+    const effectiveCurrentPrice = currentPrice || selectedCurrentPrice
+    if (!effectiveCurrentPrice || !thresholdPrice) return null
     
-    const priceChange = thresholdPrice - currentPrice
-    const percentageChange = (priceChange / currentPrice) * 100
+    const priceChange = thresholdPrice - effectiveCurrentPrice
+    const percentageChange = (priceChange / effectiveCurrentPrice) * 100
     
     return {
       priceChange,
@@ -171,10 +279,26 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
     }
   }
 
+  const calculatePriceDifference = () => {
+    const effectiveCurrentPrice = currentPrice || selectedCurrentPrice
+    if (!effectiveCurrentPrice || !thresholdPrice) return null
+    
+    const priceChange = thresholdPrice - effectiveCurrentPrice
+    const percentageChange = (priceChange / effectiveCurrentPrice) * 100
+    
+    return {
+      priceChange,
+      percentageChange,
+      isAbove: priceChange > 0,
+      isBelow: priceChange < 0
+    }
+  }
+
   const calculateInvestmentBasedPnL = () => {
     if (!portfolioItem || !thresholdPrice) return null
     
     const { amount, price_buy, commission, total_investment_text, current_value, pnl, pnl_percent } = portfolioItem
+    const effectiveCurrentPrice = currentPrice || selectedCurrentPrice
     
     // Use the same logic as the main dashboard - use total_investment_text if available
     let totalInvestment: number
@@ -193,7 +317,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
     const thresholdValue = amount * thresholdPrice
     
     // Use the same current value that the main dashboard uses
-    const currentValue = current_value || (amount * (currentPrice || 0))
+    const currentValue = current_value || (amount * (effectiveCurrentPrice || 0))
     
     // If we have the exact P&L from the main dashboard, use that as base
     // and calculate the difference from threshold price
@@ -223,7 +347,10 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
   }
 
   const calculateInvestmentPnL = () => {
-    if (!portfolioItem || !currentPrice) return null
+    if (!portfolioItem) return null
+    
+    const effectiveCurrentPrice = currentPrice || selectedCurrentPrice
+    if (!effectiveCurrentPrice) return null
     
     const { amount, price_buy, commission, total_investment_text, current_value, pnl, pnl_percent } = portfolioItem
     
@@ -241,7 +368,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
       totalInvestment = (amount * price_buy) + (commission || 0)
     }
     
-    const currentValue = current_value || (amount * currentPrice)
+    const currentValue = current_value || (amount * effectiveCurrentPrice)
     const currentPnL = pnl || (currentValue - totalInvestment)
     const currentPnLPercent = pnl_percent || ((currentPnL / totalInvestment) * 100)
     
@@ -259,7 +386,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>
-            {alert ? 'Edit Price Alert' : `Create Alert for ${presetSymbol || 'Crypto'}`}
+            {alert ? 'Edit Price Alert' : `Create Alert for ${presetSymbol || selectedSymbol || 'Crypto'}`}
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
@@ -291,7 +418,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                         <div className="font-medium">{formatCurrency(currentPrice || 0)}</div>
                       </div>
                     </div>
-                    <div className={`px-3 py-1 rounded text-xs font-medium ${
+                    <div className={`px-6 py-1 rounded text-xs font-medium ${
                       investment.isProfit ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
                       {investment.isProfit ? '📈' : '📉'} {formatCurrencyRounded(Math.abs(investment.currentPnL))} ({investment.currentPnLPercent.toFixed(1)}%)
@@ -301,15 +428,86 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
               )
             })()}
 
+            {/* Symbol Selection - only show when no preset symbol */}
+            {!presetSymbol && !alert && (
+              <CryptoSearchSelect
+                value={selectedSymbol}
+                onValueChange={(value) => {
+                  setSelectedSymbol(value)
+                  setFormData(prev => ({ ...prev, symbol: value }))
+                }}
+                onSymbolSelect={(symbol) => {
+                  setSelectedCryptoSymbol(symbol)
+                  setSelectedSymbol(symbol.symbol)
+                  setFormData(prev => ({ ...prev, symbol: symbol.symbol }))
+                  fetchCurrentPrice(symbol.symbol)
+                }}
+                placeholder="Type to search cryptocurrencies..."
+                disabled={loading}
+              />
+            )}
+
+            {/* Price Input - Manual entry when no current price available */}
+            {!currentPrice && !selectedCurrentPrice && selectedSymbol && (
+              <div className="space-y-2">
+                <Label htmlFor="threshold_price">Threshold Price ({selectedCurrency})</Label>
+                <Input
+                  id="threshold_price"
+                  type="text"
+                  value={formattedThresholdPrice}
+                  onChange={(e) => {
+                    const value = parseFormattedNumber(e.target.value)
+                    if (!isNaN(value)) {
+                      setThresholdPrice(value)
+                      setFormattedThresholdPrice(formatNumberWithSpaces(value))
+                      setFormData(prev => ({ 
+                        ...prev, 
+                        threshold_price: value.toString() 
+                      }))
+                    } else if (e.target.value === '') {
+                      setThresholdPrice(0)
+                      setFormattedThresholdPrice('')
+                      setFormData(prev => ({ 
+                        ...prev, 
+                        threshold_price: '0' 
+                      }))
+                    }
+                  }}
+                  placeholder="Enter threshold price"
+                />
+                <div className="text-xs text-muted-foreground">
+                  Enter the price at which you want to be alerted
+                </div>
+              </div>
+            )}
+
+            {/* Current Price Display for Create Alert */}
+            {(currentPrice || selectedCurrentPrice) && selectedSymbol && !presetSymbol && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-blue-600 font-medium">
+                      {presetSymbol || selectedSymbol || 'Crypto'} Current Price
+                    </div>
+                    <div className="text-2xl font-bold text-blue-800">
+                      {formatCurrency(currentPrice || selectedCurrentPrice)}
+                    </div>
+                  </div>
+                  {loadingPrice && (
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Price Slider */}
-            {currentPrice && priceRange.min !== priceRange.max && (
+            {(currentPrice || selectedCurrentPrice) && priceRange.min !== priceRange.max && (
               <div className="space-y-2">
                 <div className="space-y-2">
                   {/* Price Range Display */}
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>{formatCurrency(priceRange.min)}</span>
-                    <span className="font-medium text-green-600">Current: {formatCurrency(currentPrice)}</span>
+                    <span className="font-medium text-green-600">Current: {formatCurrency(currentPrice || selectedCurrentPrice)}</span>
                     <span>{formatCurrency(priceRange.max)}</span>
                   </div>
                   
@@ -325,15 +523,15 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                     className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
                       style={{
                         background: (() => {
-                          const investmentPnL = calculateInvestmentBasedPnL()
-                          if (!investmentPnL) {
+                          const priceDiff = calculatePriceDifference()
+                          if (!priceDiff) {
                             return `linear-gradient(to right, 
                               ${formData.alert_type === 'ABOVE' ? '#10b981' : '#ef4444'} 0%, 
                               ${formData.alert_type === 'ABOVE' ? '#10b981' : '#ef4444'} ${getSliderPosition()}%, 
                               #e5e7eb ${getSliderPosition()}%, 
                               #e5e7eb 100%)`
                           }
-                          const color = investmentPnL.isProfit ? '#10b981' : '#ef4444'
+                          const color = priceDiff.isAbove ? '#10b981' : '#ef4444'
                           return `linear-gradient(to right, 
                             ${color} 0%, 
                             ${color} ${getSliderPosition()}%, 
@@ -345,7 +543,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                     {/* Current price marker */}
                     <div 
                       className="absolute top-0 w-1 h-2 bg-green-600 rounded-full transform -translate-x-1/2"
-                      style={{ left: `${((currentPrice - priceRange.min) / (priceRange.max - priceRange.min)) * 100}%` }}
+                      style={{ left: `${(((currentPrice || selectedCurrentPrice) - priceRange.min) / (priceRange.max - priceRange.min)) * 100}%` }}
                     />
                   </div>
                   
@@ -353,23 +551,31 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                   <div className="text-center">
                     <div className={`inline-block px-3 py-1 rounded text-sm font-medium ${
                       (() => {
-                        const investmentPnL = calculateInvestmentBasedPnL()
-                        if (!investmentPnL) {
+                        const priceDiff = calculatePriceDifference()
+                        if (!priceDiff) {
                           return formData.alert_type === 'ABOVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                         }
-                        return investmentPnL.isProfit ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        return priceDiff.isAbove ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                       })()
                     }`}>
                       <input
-                        type="number"
-                        value={thresholdPrice}
+                        type="text"
+                        value={formattedThresholdPrice}
                         onChange={(e) => {
-                          const value = parseFloat(e.target.value)
+                          const value = parseFormattedNumber(e.target.value)
                           if (!isNaN(value)) {
                             setThresholdPrice(value)
+                            setFormattedThresholdPrice(formatNumberWithSpaces(value))
                             setFormData(prev => ({ 
                               ...prev, 
                               threshold_price: value.toString() 
+                            }))
+                          } else if (e.target.value === '') {
+                            setThresholdPrice(0)
+                            setFormattedThresholdPrice('')
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              threshold_price: '0' 
                             }))
                           }
                         }}
@@ -377,10 +583,24 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                         style={{
                           color: 'inherit'
                         }}
-                        step={currentPrice ? (priceRange.max - priceRange.min) / 10000 : 0.0001}
                       />
                     </div>
-                    {/* P&L Calculation */}
+                    
+                    {/* Price Difference Display */}
+                    {(() => {
+                      const priceDiff = calculatePriceDifference()
+                      if (!priceDiff) return null
+                      
+                      return (
+                        <div className={`text-xs mt-2 px-2 py-1 rounded ${
+                          priceDiff.isAbove ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                        }`}>
+                          {priceDiff.isAbove ? '📈' : '📉'} {priceDiff.isAbove ? 'Above' : 'Below'} current price: {Math.abs(priceDiff.percentageChange).toFixed(1)}% ({formatCurrency(Math.abs(priceDiff.priceChange))})
+                        </div>
+                      )
+                    })()}
+                    
+                    {/* P&L Calculation - only show if we have portfolio item */}
                     {(() => {
                       const investmentPnL = calculateInvestmentBasedPnL()
                       if (!investmentPnL) return null
@@ -389,7 +609,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                         <div className={`text-xs mt-2 px-2 py-1 rounded ${
                           investmentPnL.isProfit ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
                         }`}>
-                          {investmentPnL.isProfit ? '📈' : '📉'} {investmentPnL.isProfit ? 'Gain' : 'Loss'}: {formatCurrency(Math.abs(investmentPnL.investmentChange))} ({investmentPnL.investmentPercentageChange.toFixed(1)}%) from invested amount
+                          {investmentPnL.isProfit ? '📈' : '📉'} {investmentPnL.isProfit ? 'Gain' : 'Loss'}: {investmentPnL.investmentPercentageChange.toFixed(1)}% ({formatCurrency(Math.abs(investmentPnL.investmentChange))} from invested)
                         </div>
                       )
                     })()}
@@ -448,7 +668,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                 id="message"
                 value={formData.message}
                 onChange={(e) => handleChange('message', e.target.value)}
-                placeholder={`${presetSymbol || formData.symbol} alert triggered!`}
+                placeholder={`${presetSymbol || selectedSymbol || formData.symbol || 'Crypto'} alert triggered!`}
               />
               <div className="text-xs text-muted-foreground">
                 This message will be sent to Telegram when the alert triggers

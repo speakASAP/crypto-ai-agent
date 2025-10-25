@@ -14,11 +14,9 @@ export interface TrackedSymbolUpdate {
 }
 
 export interface CryptoSymbol {
-  id: number
   symbol: string
-  name?: string
-  description?: string
-  is_tradable: boolean
+  name: string
+  market_cap_rank?: number
   last_updated: string
 }
 

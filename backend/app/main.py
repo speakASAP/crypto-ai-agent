@@ -561,6 +561,16 @@ class TrackedSymbol(BaseModel):
     active: bool = True
     last_updated: str
 
+class CryptoSymbol(BaseModel):
+    symbol: str
+    name: str
+    market_cap_rank: Optional[int] = None
+    last_updated: str
+
+class CryptoSymbolSearch(BaseModel):
+    query: str
+    limit: int = 50
+
 # Authentication Models
 class UserCreate(BaseModel):
     email: EmailStr
@@ -768,6 +778,18 @@ def init_database():
             last_updated TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users (id),
             UNIQUE(user_id, symbol)
+        )
+    ''')
+
+    # Create crypto_symbols table for storing available cryptocurrencies
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS crypto_symbols (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            market_cap_rank INTEGER,
+            last_updated TEXT NOT NULL,
+            created_at TEXT NOT NULL
         )
     ''')
 
@@ -1819,6 +1841,26 @@ async def get_tracked_symbols(active_only: bool = False, current_user: dict = De
     
     return symbols
 
+@app.get("/api/symbols/{symbol}/price")
+async def get_symbol_price(symbol: str, current_user: dict = Depends(get_current_active_user)):
+    """Get current price for a specific symbol"""
+    try:
+        # Get current price from the price service
+        prices = await price_service.get_current_prices([symbol.upper()])
+        
+        if symbol.upper() in prices:
+            return {
+                "symbol": symbol.upper(),
+                "price": prices[symbol.upper()],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Price not found for symbol {symbol}")
+            
+    except Exception as e:
+        logger.error(f"Error fetching price for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch price")
+
 # Currency endpoints
 @app.post("/api/currency/refresh")
 async def refresh_currency_rates():
@@ -1890,6 +1932,182 @@ async def get_symbol_last_updated():
         "last_bulk_update_formatted": price_service.get_formatted_timestamp(),
         "symbol_timestamps": price_service.get_all_symbol_timestamps()
     }
+
+# Crypto symbols endpoints
+@app.get("/api/crypto-symbols", response_model=List[CryptoSymbol])
+async def get_crypto_symbols(limit: int = 500, current_user: dict = Depends(get_current_active_user)):
+    """Get all available cryptocurrency symbols"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT symbol, name, market_cap_rank, last_updated 
+        FROM crypto_symbols 
+        ORDER BY market_cap_rank ASC, symbol ASC 
+        LIMIT ?
+    """, (limit,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    symbols = []
+    for row in rows:
+        symbols.append(CryptoSymbol(
+            symbol=row[0],
+            name=row[1],
+            market_cap_rank=row[2],
+            last_updated=row[3]
+        ))
+    
+    return symbols
+
+@app.get("/api/crypto-symbols/search", response_model=List[CryptoSymbol])
+async def search_crypto_symbols(q: str, limit: int = 50, current_user: dict = Depends(get_current_active_user)):
+    """Search cryptocurrency symbols by name or symbol"""
+    if not q or len(q) < 2:
+        return []
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    search_term = f"%{q.upper()}%"
+    cursor.execute("""
+        SELECT symbol, name, market_cap_rank, last_updated 
+        FROM crypto_symbols 
+        WHERE symbol LIKE ? OR name LIKE ?
+        ORDER BY market_cap_rank ASC, symbol ASC 
+        LIMIT ?
+    """, (search_term, search_term, limit))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    symbols = []
+    for row in rows:
+        symbols.append(CryptoSymbol(
+            symbol=row[0],
+            name=row[1],
+            market_cap_rank=row[2],
+            last_updated=row[3]
+        ))
+    
+    return symbols
+
+@app.post("/api/crypto-symbols/refresh")
+async def refresh_crypto_symbols(current_user: dict = Depends(get_current_active_user)):
+    """Refresh cryptocurrency symbols from external API"""
+    try:
+        # Use CoinGecko API to get top cryptocurrencies
+        # Create SSL context that doesn't verify certificates
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Get top 500 cryptocurrencies by market cap (2 pages of 250 each)
+            url = "https://api.coingecko.com/api/v3/coins/markets"
+            all_data = []
+            
+            # Fetch first 250 cryptocurrencies
+            params_page1 = {
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": 250,
+                "page": 1,
+                "sparkline": "false"
+            }
+            
+            async with session.get(url, params=params_page1) as response:
+                if response.status == 200:
+                    data_page1 = await response.json()
+                    all_data.extend(data_page1)
+                    logger.info(f"Fetched {len(data_page1)} cryptocurrencies from page 1")
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to fetch first page from CoinGecko API")
+            
+            # Fetch next 250 cryptocurrencies
+            params_page2 = {
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": 250,
+                "page": 2,
+                "sparkline": "false"
+            }
+            
+            async with session.get(url, params=params_page2) as response:
+                if response.status == 200:
+                    data_page2 = await response.json()
+                    all_data.extend(data_page2)
+                    logger.info(f"Fetched {len(data_page2)} cryptocurrencies from page 2")
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to fetch second page from CoinGecko API")
+            
+            data = all_data
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Clear existing data
+            cursor.execute("DELETE FROM crypto_symbols")
+            
+            # Insert new data
+            current_time = datetime.now(timezone.utc).isoformat()
+            inserted_count = 0
+            
+            for coin in data:
+                try:
+                    # Safely extract and convert data
+                    symbol = str(coin.get("symbol", "")).upper()
+                    name = str(coin.get("name", ""))
+                    market_cap_rank = coin.get("market_cap_rank")
+                    
+                    # Skip if symbol or name is empty
+                    if not symbol or not name:
+                        continue
+                    
+                    # Convert market_cap_rank to int or None
+                    if market_cap_rank is not None:
+                        try:
+                            market_cap_rank = int(market_cap_rank)
+                        except (ValueError, TypeError):
+                            market_cap_rank = None
+                    else:
+                        market_cap_rank = None
+                    
+                    # Ensure all values are proper types for SQLite
+                    symbol = str(symbol) if symbol else ""
+                    name = str(name) if name else ""
+                    current_time_str = str(current_time)
+                    
+                    cursor.execute("""
+                        INSERT INTO crypto_symbols (symbol, name, market_cap_rank, last_updated, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        symbol,
+                        name,
+                        market_cap_rank,
+                        current_time_str,
+                        current_time_str
+                    ))
+                    inserted_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error inserting coin {coin.get('symbol', 'unknown')}: {e}")
+                    continue
+            
+            conn.commit()
+            conn.close()
+            
+            return {
+                "message": f"Successfully refreshed {inserted_count} cryptocurrency symbols",
+                "count": inserted_count,
+                "last_updated": current_time
+            }
+                    
+    except Exception as e:
+        logger.error(f"Error refreshing crypto symbols: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh crypto symbols: {str(e)}")
 
 # WebSocket endpoint
 @app.websocket("/ws")
