@@ -16,6 +16,7 @@ import { getRelativeTime, getDataFreshness, getFreshnessColorClass, getTimestamp
 import { refreshAllData } from '@/lib/refreshUtils'
 import { formatCurrency, formatCurrencyWhole, formatPercent, formatCryptoAmount, formatInvestmentText, Currency } from '@/lib/currencyUtils'
 import Link from 'next/link'
+import { User, LogOut } from 'lucide-react'
 
 export default function Home() {
   const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem } = usePortfolioStore()
@@ -357,12 +358,12 @@ export default function Home() {
           {user ? (
             <>
               <Link href="/profile">
-                <Button variant="outline">
-                  Profile
+                <Button variant="outline" title="Profile">
+                  <User className="h-4 w-4" />
                 </Button>
               </Link>
-              <Button variant="outline" onClick={logout}>
-                Logout
+              <Button variant="outline" onClick={logout} title="Logout">
+                <LogOut className="h-4 w-4" />
               </Button>
             </>
           ) : (
