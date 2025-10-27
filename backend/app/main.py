@@ -509,12 +509,16 @@ async def trigger_alert(
     message: str,
     trigger_price: float,
     trigger_time: datetime,
-    was_missed: bool = False
+    was_missed: bool = False,
+    conn: Optional[sqlite3.Connection] = None
 ):
     """Trigger an alert and send notifications"""
-    conn = None
-    try:
+    should_close = False
+    if conn is None:
         conn = get_db_connection()
+        should_close = True
+    
+    try:
         cursor = conn.cursor()
         
         # Get portfolio information for this symbol
@@ -610,10 +614,10 @@ async def trigger_alert(
         
     except Exception as e:
         logger.error(f"Error triggering alert {alert_id}: {e}")
-        if conn:
+        if should_close and conn:
             conn.rollback()
     finally:
-        if conn:
+        if should_close and conn:
             conn.close()
 
 async def check_and_trigger_alerts(current_prices: Dict[str, float]):
@@ -631,7 +635,7 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 INSERT OR REPLACE INTO price_check_tracking 
                 (symbol, last_check_timestamp, last_check_price, updated_at)
                 VALUES (?, ?, ?, ?)
-            ''', (symbol, current_time.isoformat() + "Z", price, current_time.isoformat() + "Z"))
+            ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
         
         # Get all active alerts
         cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
@@ -648,16 +652,46 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
             current_price = current_prices[symbol]
             should_trigger = False
             
-            # Check if alert should trigger
-            if alert_type == 'ABOVE' and current_price >= threshold_price:
+            # Convert threshold price to USD for comparison (current_price is in USD)
+            effective_threshold_usd = threshold_price_usd
+            
+            # If threshold_price_usd is NULL or 0, convert from base currency
+            if not effective_threshold_usd or effective_threshold_usd == 0:
+                if base_currency and base_currency != "USD":
+                    try:
+                        effective_threshold_usd = currency_service.convert_amount(threshold_price, base_currency, "USD")
+                        logger.debug(f"Converted {symbol} threshold from {base_currency} {threshold_price} to USD {effective_threshold_usd}")
+                    except Exception as e:
+                        logger.warning(f"Could not convert threshold price for {symbol}: {e}")
+                        continue
+                elif not base_currency:
+                    # Legacy alert without base_currency - try to infer from threshold price
+                    # If threshold is very high, assume CZK; otherwise assume it's already in USD
+                    if threshold_price > 100:
+                        try:
+                            effective_threshold_usd = currency_service.convert_amount(threshold_price, "CZK", "USD")
+                            logger.debug(f"Converted legacy {symbol} threshold from CZK {threshold_price} to USD {effective_threshold_usd}")
+                        except Exception as e:
+                            logger.warning(f"Could not convert legacy threshold price for {symbol}: {e}")
+                            # Try USD as-is
+                            effective_threshold_usd = threshold_price
+                    else:
+                        # Assume already in USD (or EUR - try both)
+                        effective_threshold_usd = threshold_price
+                else:
+                    effective_threshold_usd = threshold_price
+            
+            # Check if alert should trigger (comparing USD to USD)
+            if alert_type == 'ABOVE' and current_price >= effective_threshold_usd:
                 should_trigger = True
-            elif alert_type == 'BELOW' and current_price <= threshold_price:
+            elif alert_type == 'BELOW' and current_price <= effective_threshold_usd:
                 should_trigger = True
             
             if should_trigger:
                 await trigger_alert(
                     alert_id, user_id, symbol, threshold_price, alert_type,
-                    message, current_price, current_time, was_missed=False
+                    message, current_price, current_time, was_missed=False,
+                    conn=conn
                 )
                 triggered_count += 1
         
