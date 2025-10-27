@@ -49,22 +49,19 @@ export const usePortfolioStore = create<PortfolioState>()(
       createItem: async (item: PortfolioCreate) => {
         set({ loading: true, error: null })
         try {
-          const newItem = await apiClient.createPortfolioItem(item)
-          set(state => ({ 
-            items: [...state.items, newItem], 
-            loading: false 
-          }))
+          await apiClient.createPortfolioItem(item)
           
           // Trigger the same refresh action as the refresh button
           try {
             await refreshCryptoPrices()
-            // Reload portfolio data with new prices (same as refresh button)
-            get().fetchPortfolio()
-            get().fetchSummary()
+            // Reload portfolio data with new prices
+            await get().fetchPortfolio()
+            await get().fetchSummary()
           } catch (refreshError) {
             console.warn('Price refresh failed, but portfolio item was created:', refreshError)
-            // Still refresh summary even if price refresh fails
-            get().fetchSummary()
+            // Still refresh portfolio and summary even if price refresh fails
+            await get().fetchPortfolio()
+            await get().fetchSummary()
           }
         } catch (error: any) {
           set({ 
@@ -77,13 +74,12 @@ export const usePortfolioStore = create<PortfolioState>()(
       updateItem: async (id: number, item: PortfolioUpdate) => {
         set({ loading: true, error: null })
         try {
-          const updatedItem = await apiClient.updatePortfolioItem(id, item)
-          set(state => ({
-            items: state.items.map(i => i.id === id ? updatedItem : i),
-            loading: false
-          }))
-          // Refresh summary
-          get().fetchSummary()
+          await apiClient.updatePortfolioItem(id, item)
+          
+          // Refresh portfolio to get the item in the selected currency
+          // This ensures correct display regardless of the item's base_currency
+          await get().fetchPortfolio()
+          await get().fetchSummary()
         } catch (error: any) {
           set({ 
             error: error.message || 'Failed to update portfolio item', 
@@ -154,9 +150,15 @@ export const usePortfolioStore = create<PortfolioState>()(
         // Update items with new price for the specific symbol
         const updatedItems = state.items.map(item => {
           if (item.symbol === symbol) {
-            // Use USD values for calculations if available
-            const priceBuyUsd = item.price_buy_usd || item.price_buy
-            const commissionUsd = item.commission_usd || item.commission
+            // CRITICAL: Always use price_buy_usd for calculations, never use price_buy
+            // because price_buy may be in a different currency after conversion
+            if (!item.price_buy_usd) {
+              console.warn(`Item ${item.symbol} missing price_buy_usd, skipping WebSocket update`)
+              return item
+            }
+            
+            const priceBuyUsd = item.price_buy_usd
+            const commissionUsd = item.commission_usd || 0
             
             // Calculate USD values
             const currentValueUsd = item.amount * usdPrice
@@ -193,8 +195,13 @@ export const usePortfolioStore = create<PortfolioState>()(
         
         // Update summary with new totals using USD values for accuracy
         const newSummary = updatedItems.reduce((acc, item) => {
-          const priceBuyUsd = item.price_buy_usd || item.price_buy
-          const commissionUsd = item.commission_usd || item.commission
+          // CRITICAL: Always use price_buy_usd for summary calculations
+          if (!item.price_buy_usd) {
+            return acc // Skip items without USD values
+          }
+          
+          const priceBuyUsd = item.price_buy_usd
+          const commissionUsd = item.commission_usd || 0
           const totalInvestmentUsd = (item.amount * priceBuyUsd) + commissionUsd
           const currentValueUsd = item.current_value_usd || item.current_value || 0
           const pnlUsd = item.pnl_usd || item.pnl || 0
