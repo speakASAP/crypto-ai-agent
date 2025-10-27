@@ -182,13 +182,24 @@ async def fetch_prices_for_symbols(symbols: List[str]):
             
             # Calculate P&L for each item using USD-based calculations
             cursor.execute("""
-                SELECT id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase 
+                SELECT id, amount, price_buy, price_buy_usd, commission, commission_usd, base_currency, exchange_rate_at_purchase 
                 FROM portfolio_items 
                 WHERE symbol = ?
             """, (symbol,))
             
             items = cursor.fetchall()
-            for item_id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase in items:
+            for item_id, amount, price_buy, price_buy_usd, commission, commission_usd, base_currency, exchange_rate_at_purchase in items:
+                # Use USD values if available, otherwise calculate from display currency
+                if price_buy_usd is None or commission_usd is None:
+                    # Calculate USD values from display currency
+                    if base_currency != "USD":
+                        exchange_rate = exchange_rate_at_purchase if exchange_rate_at_purchase else currency_service.get_rate(base_currency)
+                        price_buy_usd = price_buy / exchange_rate if exchange_rate else price_buy
+                        commission_usd = commission / exchange_rate if exchange_rate else commission
+                    else:
+                        price_buy_usd = price_buy
+                        commission_usd = commission
+                
                 # Use USD price for calculations
                 current_value_usd = amount * price
                 total_investment_usd = (amount * price_buy_usd) + commission_usd
@@ -208,10 +219,12 @@ async def fetch_prices_for_symbols(symbols: List[str]):
                 cursor.execute("""
                     UPDATE portfolio_items 
                     SET current_price = ?, current_value = ?, pnl = ?, pnl_percent = ?,
-                        current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?
+                        current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?,
+                        price_buy_usd = ?, commission_usd = ?
                     WHERE id = ?
                 """, (current_price_display, current_value_display, pnl_display, pnl_percent_usd,
-                      price, current_value_usd, pnl_usd, pnl_percent_usd, item_id))
+                      price, current_value_usd, pnl_usd, pnl_percent_usd, 
+                      price_buy_usd, commission_usd, item_id))
         
         conn.commit()
         
@@ -2104,17 +2117,76 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
                         total_investment = (amount * price_buy) + commission
                         update_values[total_investment_text_idx] = format_total_investment_text(total_investment, base_currency)
         
-        update_fields.append("updated_at = ?")
-        update_values.append(datetime.now().isoformat() + "Z")
-        update_values.append(item_id)
-        
-        cursor.execute(f'''
-            UPDATE portfolio_items 
-            SET {', '.join(update_fields)}
-            WHERE id = ?
-        ''', update_values)
-        
-        conn.commit()
+        # Recalculate USD values if price_buy, amount, commission, or base_currency are being updated
+        needs_usd_recalc = any(field in update_fields for field in ["price_buy = ?", "amount = ?", "commission = ?", "base_currency = ?"])
+        if needs_usd_recalc:
+            # Get current values before update for comparison
+            cursor.execute("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", (item_id,))
+            old_data = cursor.fetchone()
+            
+            # Perform the update first
+            update_fields.append("updated_at = ?")
+            update_values.append(datetime.now().isoformat() + "Z")
+            update_values.append(item_id)
+            
+            cursor.execute(f'''
+                UPDATE portfolio_items 
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            ''', update_values)
+            conn.commit()
+            
+            # Get updated values for USD recalculation
+            cursor.execute("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", (item_id,))
+            new_data = cursor.fetchone()
+            if new_data:
+                amount, price_buy, commission, base_currency = new_data
+                
+                # Get current exchange rate
+                exchange_rate = 1.0
+                if base_currency != "USD":
+                    exchange_rate = currency_service.get_rate(base_currency)
+                
+                # Convert to USD
+                price_buy_usd = price_buy / exchange_rate if base_currency != "USD" else price_buy
+                commission_usd = commission / exchange_rate if base_currency != "USD" else commission
+                
+                # Update USD values and trigger price recalculation
+                cursor.execute('''
+                    UPDATE portfolio_items 
+                    SET price_buy_usd = ?, commission_usd = ?, exchange_rate_at_purchase = ?,
+                        current_value = ?, current_value_usd = ?, pnl = ?, pnl_percent = ?, pnl_usd = ?, pnl_percent_usd = ?
+                    WHERE id = ?
+                ''', (
+                    round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate,
+                    round(amount * price_buy, 8), round(amount * price_buy_usd, 8),
+                    0.0, 0.0, 0.0, 0.0,
+                    item_id
+                ))
+                conn.commit()
+                
+                # Trigger price update to recalculate P&L
+                cursor.execute("SELECT symbol FROM portfolio_items WHERE id = ?", (item_id,))
+                symbol_row = cursor.fetchone()
+                if symbol_row:
+                    symbol = symbol_row[0]
+                    # Schedule price update in background
+                    try:
+                        asyncio.create_task(fetch_prices_for_symbols([symbol]))
+                    except:
+                        pass  # If asyncio.create_task fails, price update will happen on next scheduled run
+        else:
+            update_fields.append("updated_at = ?")
+            update_values.append(datetime.now().isoformat() + "Z")
+            update_values.append(item_id)
+            
+            cursor.execute(f'''
+                UPDATE portfolio_items 
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            ''', update_values)
+            
+            conn.commit()
     
     conn.close()
     
@@ -2126,11 +2198,19 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
     conn.close()
     
     return PortfolioItem(
-        id=row[0], symbol=row[1], amount=row[2], price_buy=row[3],
-        purchase_date=row[4], base_currency=row[5], purchase_price_eur=row[6],
-        purchase_price_czk=row[7], source=row[8], commission=row[9],
-        total_investment_text=row[10], created_at=row[11], updated_at=row[12],
-        current_price=row[13], current_value=row[14], pnl=row[15], pnl_percent=row[16]
+        id=row[0], symbol=row[2], amount=row[3], price_buy=row[4],
+        purchase_date=row[5], base_currency=row[6], purchase_price_eur=row[7],
+        purchase_price_czk=row[8], source=row[9], commission=row[10],
+        total_investment_text=row[11], created_at=row[12], updated_at=row[13],
+        current_price=row[14], current_value=row[15], pnl=row[16], pnl_percent=row[17],
+        # USD-based fields for proper calculations
+        price_buy_usd=row[18] if len(row) > 18 else None,
+        commission_usd=row[19] if len(row) > 19 else None,
+        current_price_usd=row[20] if len(row) > 20 else None,
+        current_value_usd=row[21] if len(row) > 21 else None,
+        pnl_usd=row[22] if len(row) > 22 else None,
+        pnl_percent_usd=row[23] if len(row) > 23 else None,
+        exchange_rate_at_purchase=row[24] if len(row) > 24 else None
     )
 
 @app.delete("/api/portfolio/{item_id}")

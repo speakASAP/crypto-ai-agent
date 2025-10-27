@@ -43,26 +43,14 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
     return isNaN(parsed) ? null : parsed
   }
 
-  // Helper function to format total investment text with currency symbol
+  // Helper function to format total investment text without currency symbol
   const formatTotalInvestmentText = (amount: number, currency: string): string => {
-    if (!amount || amount === 0) return `0 ${currency}`
+    if (!amount || amount === 0) return `0.00000000`
     
-    // Format number with commas for thousands
-    const formatted_amount = amount >= 1 
-      ? amount.toLocaleString('en-US', { maximumFractionDigits: 0 })
-      : amount.toFixed(8).replace(/\.?0+$/, '')
+    // Format number with exactly 8 decimal places
+    const formatted_amount = amount.toFixed(8)
     
-    // Add currency symbol
-    const currency_symbols: Record<string, string> = {
-      "USD": "$",
-      "EUR": "€",
-      "CZK": "Kč",
-      "GBP": "£",
-      "JPY": "¥"
-    }
-    
-    const symbol = currency_symbols[currency] || currency
-    return symbol in ["$", "€", "£", "¥"] ? `${symbol}${formatted_amount}` : `${formatted_amount} ${symbol}`
+    return formatted_amount
   }
 
   // Track if user is actively editing total_investment_text field
@@ -122,14 +110,21 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
 
   useEffect(() => {
     if (item) {
+      // Convert ISO datetime to date format for date input
+      const formatDateForInput = (isoDate: string | undefined): string => {
+        if (!isoDate) return ''
+        // Extract just the date portion (yyyy-MM-dd) from ISO string
+        return isoDate.split('T')[0]
+      }
+
       setFormData({
         symbol: item.symbol,
-        amount: item.amount.toString(),
-        price_buy: item.price_buy.toString(),
-        purchase_date: item.purchase_date || '',
+        amount: item.amount ? item.amount.toFixed(8) : '',
+        price_buy: item.price_buy ? item.price_buy.toFixed(8) : '',
+        purchase_date: formatDateForInput(item.purchase_date),
         base_currency: item.base_currency as 'USD' | 'EUR' | 'CZK',
         source: item.source || '',
-        commission: item.commission.toString(),
+        commission: item.commission ? item.commission.toFixed(8) : '0.00000000',
         total_investment_text: item.total_investment_text || ''
       })
     } else {
@@ -177,6 +172,30 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
   }
 
   const handleChange = (field: string, value: string) => {
+    // Normalize numeric input: handle dots, commas, and spaces for number fields
+    if (field === 'amount' || field === 'price_buy' || field === 'commission') {
+      // Remove spaces (thousands separator in some locales)
+      let normalized = value.replace(/\s/g, '')
+      
+      // Determine if comma or dot is used as decimal separator
+      const lastCommaIdx = normalized.lastIndexOf(',')
+      const lastDotIdx = normalized.lastIndexOf('.')
+      
+      // If both exist, the last one is the decimal separator
+      if (lastCommaIdx > lastDotIdx) {
+        // Comma is decimal separator, replace with dot
+        normalized = normalized.replace(/\./g, '').replace(',', '.')
+      } else if (lastDotIdx > lastCommaIdx) {
+        // Dot is decimal separator, remove commas (they're thousands separators)
+        normalized = normalized.replace(/,/g, '')
+      } else if (lastCommaIdx !== -1 && lastDotIdx === -1) {
+        // Only comma exists, treat it as decimal separator
+        normalized = normalized.replace(',', '.')
+      }
+      // If only dot exists or neither exists, use as-is
+      
+      value = normalized
+    }
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
@@ -246,11 +265,10 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                   <Label htmlFor="amount">Amount</Label>
                   <Input
                     id="amount"
-                    type="number"
-                    step="0.00000001"
+                    type="text"
                     value={formData.amount}
                     onChange={(e) => handleChange('amount', e.target.value)}
-                    placeholder="0.50000000"
+                    placeholder="0.00000000"
                     required
                   />
                 </div>
@@ -258,11 +276,10 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                   <Label htmlFor="price_buy">Buy Price</Label>
                   <Input
                     id="price_buy"
-                    type="number"
-                    step="0.00000001"
+                    type="text"
                     value={formData.price_buy}
                     onChange={(e) => handleChange('price_buy', e.target.value)}
-                    placeholder="30000.00000000"
+                    placeholder="0.00000000"
                   />
                   <div className="text-sm text-gray-600">
                     Leave empty and enter Total Investment to calculate automatically
@@ -276,8 +293,7 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                   <Label htmlFor="commission">Commission</Label>
                   <Input
                     id="commission"
-                    type="number"
-                    step="0.00000001"
+                    type="text"
                     value={formData.commission}
                     onChange={(e) => handleChange('commission', e.target.value)}
                     placeholder="0.00000000"
@@ -291,7 +307,7 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                     onChange={(e) => handleChange('total_investment_text', e.target.value)}
                     onFocus={() => setIsEditingTotalInvestment(true)}
                     onBlur={() => setIsEditingTotalInvestment(false)}
-                    placeholder="e.g., $15,015 or €4,200 or 50,000 Kč"
+                    placeholder="0.00000000"
                   />
                   <div className="text-sm text-gray-600">
                     Enter the total amount you invested
