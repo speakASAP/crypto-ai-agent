@@ -63,6 +63,10 @@ export default function Home() {
   // Binance import states
   const [importingBinance, setImportingBinance] = useState(false)
   const [importMessage, setImportMessage] = useState<string>('')
+  
+  // Bitfinex import states
+  const [importingBitfinex, setImportingBitfinex] = useState(false)
+  const [importBitfinexMessage, setImportBitfinexMessage] = useState<string>('')
 
   useEffect(() => {
     // Fetch initial data
@@ -284,6 +288,35 @@ export default function Home() {
       setImportMessage(error.response?.data?.detail || 'Failed to import from Binance')
     } finally {
       setImportingBinance(false)
+    }
+  }
+
+  const handleImportFromBitfinex = async () => {
+    if (!window.confirm('This will import your entire Bitfinex portfolio. Continue?')) {
+      return
+    }
+
+    setImportingBitfinex(true)
+    setImportBitfinexMessage('')
+
+    try {
+      const result = await apiClient.importBitfinexPortfolio()
+
+      if (result.success) {
+        setImportBitfinexMessage(`Successfully imported ${result.items_imported} items!`)
+        // Refresh portfolio data
+        await fetchPortfolio()
+        await fetchSummary()
+        // Clear message after 5 seconds
+        setTimeout(() => setImportBitfinexMessage(''), 5000)
+      } else {
+        setImportBitfinexMessage(result.message || 'Import failed')
+      }
+    } catch (error: any) {
+      console.error('Bitfinex import error:', error)
+      setImportBitfinexMessage(error.response?.data?.detail || 'Failed to import from Bitfinex')
+    } finally {
+      setImportingBitfinex(false)
     }
   }
 
@@ -550,14 +583,26 @@ export default function Home() {
                   {importMessage}
                 </div>
               )}
+              {importBitfinexMessage && (
+                <div className={`mt-2 text-sm ${importBitfinexMessage.includes('Successfully') ? 'text-green-600' : 'text-red-600'}`}>
+                  {importBitfinexMessage}
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <Button 
                 onClick={handleImportFromBinance}
-                disabled={importingBinance}
+                disabled={importingBinance || importingBitfinex}
                 variant="outline"
               >
                 {importingBinance ? 'Importing...' : '📥 Import from Binance'}
+              </Button>
+              <Button 
+                onClick={handleImportFromBitfinex}
+                disabled={importingBinance || importingBitfinex}
+                variant="outline"
+              >
+                {importingBitfinex ? 'Importing...' : '📥 Import from Bitfinex'}
               </Button>
               <Button onClick={handleAddPortfolioItem}>
                 Add New Item

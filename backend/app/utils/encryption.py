@@ -134,5 +134,44 @@ class CredentialEncryption:
             'api_secret': credentials['api_secret']
         }
 
+    def encrypt_bitfinex_credentials(self, api_key: str, api_secret: str) -> str:
+        """
+        Encrypt Bitfinex API credentials specifically
+        
+        Args:
+            api_key: Bitfinex API key
+            api_secret: Bitfinex API secret
+            
+        Returns:
+            Encrypted credentials string
+        """
+        credentials = {
+            'api_key': api_key,
+            'api_secret': api_secret,
+            'exchange': 'bitfinex',
+            'timestamp': str(int(time.time()))
+        }
+        return self.encrypt_credentials(credentials)
+
+    def decrypt_bitfinex_credentials(self, encrypted_credentials: str) -> Dict[str, str]:
+        """
+        Decrypt Bitfinex API credentials
+        
+        Args:
+            encrypted_credentials: Encrypted credentials string
+            
+        Returns:
+            Dictionary with 'api_key' and 'api_secret'
+        """
+        credentials = self.decrypt_credentials(encrypted_credentials)
+        
+        if credentials.get('exchange') != 'bitfinex':
+            raise ValueError("Invalid credentials: not Bitfinex credentials")
+        
+        return {
+            'api_key': credentials['api_key'],
+            'api_secret': credentials['api_secret']
+        }
+
 # Global instance for use throughout the application
 credential_encryption = CredentialEncryption()

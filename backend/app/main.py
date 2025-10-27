@@ -956,6 +956,34 @@ class BinanceCredentials(BaseModel):
             raise ValueError('Binance API secret is required and must be at least 10 characters')
         return v.strip()
 
+class BitfinexCredentials(BaseModel):
+    api_key: str
+    api_secret: str
+    
+    @validator('api_key')
+    def validate_api_key(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError('Bitfinex API key is required and must be at least 10 characters')
+        return v.strip()
+    
+    @validator('api_secret')
+    def validate_api_secret(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError('Bitfinex API secret is required and must be at least 10 characters')
+        return v.strip()
+
+class BitfinexCredentialsResponse(BaseModel):
+    has_credentials: bool
+    message: str
+    account_info: Optional[Dict[str, Any]] = None
+
+class BitfinexTestResponse(BaseModel):
+    success: bool
+    message: str
+    account_info: Optional[Dict[str, Any]] = None
+    error_code: Optional[str] = None
+    troubleshooting: Optional[str] = None
+
 class BinanceCredentialsResponse(BaseModel):
     has_credentials: bool
     message: str
@@ -1919,6 +1947,83 @@ async def delete_binance_credentials(current_user: dict = Depends(get_current_ac
         return {"message": "Binance credentials deleted successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to delete Binance credentials")
+
+# Bitfinex Credential Management endpoints
+@app.post("/api/auth/bitfinex-credentials", response_model=BitfinexCredentialsResponse)
+async def save_bitfinex_credentials(credentials: BitfinexCredentials, current_user: dict = Depends(get_current_active_user)):
+    """Save user's Bitfinex API credentials"""
+    from .services.bitfinex_credential_service import bitfinex_credential_service
+    
+    user_id = current_user["id"]
+    
+    # Save credentials
+    success = bitfinex_credential_service.save_user_credentials(
+        user_id, credentials.api_key, credentials.api_secret
+    )
+    
+    if success:
+        # Test the credentials
+        test_result = await bitfinex_credential_service.test_user_credentials(user_id)
+        
+        return BitfinexCredentialsResponse(
+            has_credentials=True,
+            message="Bitfinex credentials saved successfully",
+            account_info=test_result.get('account_info') if test_result.get('success') else None
+        )
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save Bitfinex credentials")
+
+@app.get("/api/auth/bitfinex-credentials", response_model=BitfinexCredentialsResponse)
+async def get_bitfinex_credentials_status(current_user: dict = Depends(get_current_active_user)):
+    """Get user's Bitfinex credentials status"""
+    from .services.bitfinex_credential_service import bitfinex_credential_service
+    
+    user_id = current_user["id"]
+    has_credentials = bitfinex_credential_service.has_user_credentials(user_id)
+    
+    if has_credentials:
+        # Test the credentials to get account info
+        test_result = await bitfinex_credential_service.test_user_credentials(user_id)
+        
+        return BitfinexCredentialsResponse(
+            has_credentials=True,
+            message="Bitfinex credentials are configured",
+            account_info=test_result.get('account_info') if test_result.get('success') else None
+        )
+    else:
+        return BitfinexCredentialsResponse(
+            has_credentials=False,
+            message="No Bitfinex credentials configured"
+        )
+
+@app.post("/api/auth/test-bitfinex-connection", response_model=BitfinexTestResponse)
+async def test_bitfinex_connection(current_user: dict = Depends(get_current_active_user)):
+    """Test user's Bitfinex API connection"""
+    from .services.bitfinex_credential_service import bitfinex_credential_service
+    
+    user_id = current_user["id"]
+    result = await bitfinex_credential_service.test_user_credentials(user_id)
+    
+    return BitfinexTestResponse(
+        success=result.get('success', False),
+        message=result.get('message', 'Unknown error'),
+        account_info=result.get('account_info'),
+        error_code=str(result.get('error_code')) if result.get('error_code') is not None else None,
+        troubleshooting=result.get('troubleshooting')
+    )
+
+@app.delete("/api/auth/bitfinex-credentials")
+async def delete_bitfinex_credentials(current_user: dict = Depends(get_current_active_user)):
+    """Delete user's Bitfinex API credentials"""
+    from .services.bitfinex_credential_service import bitfinex_credential_service
+    
+    user_id = current_user["id"]
+    success = bitfinex_credential_service.delete_user_credentials(user_id)
+    
+    if success:
+        return {"message": "Bitfinex credentials deleted successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete Bitfinex credentials")
 
 # Portfolio endpoints
 @app.get("/api/portfolio/", response_model=List[PortfolioItem])
@@ -2902,6 +3007,130 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
         raise
     except Exception as e:
         logger.error(f"Error executing Binance import: {e}")
+        raise HTTPException(status_code=500, detail=f"Import execution failed: {str(e)}")
+
+# Bitfinex Import Endpoints
+@app.post("/api/import/bitfinex/test-connection")
+async def test_bitfinex_import_connection(current_user: dict = Depends(get_current_active_user)):
+    """Test Bitfinex API connection using user credentials"""
+    try:
+        from .services.bitfinex_credential_service import bitfinex_credential_service
+        
+        result = await bitfinex_credential_service.test_user_credentials(current_user["id"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error testing Bitfinex connection: {e}")
+        raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
+
+@app.post("/api/import/bitfinex/preview")
+async def preview_bitfinex_import(current_user: dict = Depends(get_current_active_user)):
+    """Preview Bitfinex portfolio import without saving using user credentials"""
+    try:
+        from .services.bitfinex_credential_service import bitfinex_credential_service
+        
+        result = await bitfinex_credential_service.import_user_portfolio(current_user["id"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error previewing Bitfinex import: {e}")
+        raise HTTPException(status_code=500, detail=f"Import preview failed: {str(e)}")
+
+@app.post("/api/import/bitfinex/execute")
+async def execute_bitfinex_import(current_user: dict = Depends(get_current_active_user)):
+    """Execute Bitfinex portfolio import and save to database using user credentials"""
+    try:
+        from .services.bitfinex_credential_service import bitfinex_credential_service
+        
+        result = await bitfinex_credential_service.import_user_portfolio(current_user["id"])
+        
+        if not result['success']:
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+        # Save portfolio items to database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        imported_count = 0
+        now = datetime.now().isoformat() + "Z"
+        
+        for item in result['portfolio_items']:
+            try:
+                # Check if item already exists (same symbol and similar amount)
+                cursor.execute('''
+                    SELECT id FROM portfolio_items 
+                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
+                ''', (current_user["id"], item['symbol'], item['amount']))
+                
+                if cursor.fetchone():
+                    logger.info(f"Skipping duplicate item: {item['symbol']}")
+                    continue
+                
+                # Ensure currency rates are loaded for conversion
+                currency_service.ensure_rates_initialized()
+                
+                # Convert prices to USD if needed
+                base_currency = item.get('base_currency', 'USD')
+                price_buy = item['price_buy']
+                commission = item.get('commission', 0.0)
+                
+                if base_currency != 'USD' and price_buy > 0:
+                    # Convert to USD
+                    price_buy_usd = currency_service.convert_amount(price_buy, base_currency, 'USD')
+                    commission_usd = currency_service.convert_amount(commission, base_currency, 'USD')
+                    exchange_rate = currency_service.rates.get(base_currency, 1.0) if base_currency in currency_service.rates else 1.0
+                else:
+                    # Already in USD or price is 0
+                    price_buy_usd = price_buy
+                    commission_usd = commission
+                    exchange_rate = None
+                
+                # Insert new portfolio item with USD values
+                cursor.execute('''
+                    INSERT INTO portfolio_items 
+                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
+                     total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
+                     price_buy_usd, commission_usd, exchange_rate_at_purchase)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    current_user["id"], item['symbol'], item['amount'], price_buy,
+                    item['purchase_date'], base_currency, item['source'], commission,
+                    item['total_investment_text'], now, now,
+                    round(price_buy, 8), round(item['amount'] * price_buy, 8), 0.0, 0.0,
+                    round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate
+                ))
+                imported_count += 1
+                
+            except Exception as e:
+                logger.warning(f"Failed to import item {item['symbol']}: {e}")
+                continue
+        
+        # Record import history
+        cursor.execute('''
+            INSERT INTO import_history 
+            (user_id, source, import_date, items_imported, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            current_user["id"], 'Bitfinex', now, imported_count, 
+            'success' if imported_count > 0 else 'partial', now
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Bitfinex import completed: {imported_count} items imported for user {current_user['id']}")
+        
+        return {
+            'success': True,
+            'message': f'Successfully imported {imported_count} portfolio items from Bitfinex',
+            'items_imported': imported_count,
+            'total_found': len(result['portfolio_items'])
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing Bitfinex import: {e}")
         raise HTTPException(status_code=500, detail=f"Import execution failed: {str(e)}")
 
 @app.get("/api/import/history")

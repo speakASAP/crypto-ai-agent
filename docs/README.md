@@ -18,6 +18,7 @@
 - [**Multi-Currency Portfolio**](MULTI_CURRENCY_PORTFOLIO_PLAN.md) - Multi-currency support system
 - [**Binance Import Guide**](BINANCE_IMPORT_GUIDE.md) - Complete Binance portfolio import documentation
 - [**Binance Quick Reference**](BINANCE_QUICK_REFERENCE.md) - Quick setup and troubleshooting
+- [**Bitfinex Import Guide**](BITFINEX_IMPORT_GUIDE.md) - Complete Bitfinex portfolio import documentation
 
 ## 🚨 Price Alerts
 
@@ -42,9 +43,10 @@
    - [Startup Guide](STARTUP_GUIDE.md)
    - [User Management](USER_MANAGEMENT.md)
 
-2. **Import Binance Portfolio**
+2. **Import Portfolio from Exchanges**
    - [Binance Quick Reference](BINANCE_QUICK_REFERENCE.md)
    - [Binance Import Guide](BINANCE_IMPORT_GUIDE.md)
+   - [Bitfinex Import Guide](BITFINEX_IMPORT_GUIDE.md)
 
 3. **Set Up Price Alerts**
    - [Price Alerts Plan](PRICE_ALERTS_PLAN.md)
@@ -62,8 +64,9 @@
 
 ## 🆕 Recent Updates
 
-### Latest Features (2025-10-25)
+### Latest Features (2025-01-25)
 
+- ✅ **Bitfinex Portfolio Import** - Automatically import your Bitfinex holdings
 - ✅ **Binance Portfolio Import** - Automatically import your Binance holdings
 - ✅ **Multi-Currency Support** - USD, EUR, CZK tracking
 - ✅ **Source Tracking** - Track where assets were purchased

@@ -29,12 +29,22 @@ export default function ProfilePage() {
     accountInfo?: any
   } | null>(null)
   const [binanceTestLoading, setBinanceTestLoading] = useState(false)
+  const [bitfinexData, setBitfinexData] = useState({
+    apiKey: '',
+    apiSecret: ''
+  })
+  const [bitfinexStatus, setBitfinexStatus] = useState<{
+    hasCredentials: boolean
+    message: string
+    accountInfo?: any
+  } | null>(null)
+  const [bitfinexTestLoading, setBitfinexTestLoading] = useState(false)
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   })
-  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram' | 'binance' | 'system'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram' | 'binance' | 'bitfinex' | 'system'>('profile')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -279,6 +289,72 @@ export default function ProfilePage() {
     }
   }
 
+  const handleBitfinexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBitfinexData(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }))
+  }
+
+  const handleBitfinexSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    
+    try {
+      const result = await apiClient.saveBitfinexCredentials(bitfinexData.apiKey, bitfinexData.apiSecret)
+      setSuccess('Bitfinex credentials saved successfully!')
+      setBitfinexStatus({
+        hasCredentials: true,
+        message: result.message,
+        accountInfo: result.account_info
+      })
+      // Clear the form
+      setBitfinexData({ apiKey: '', apiSecret: '' })
+    } catch (error: any) {
+      setError(error.detail || error.message || 'Failed to save Bitfinex credentials')
+    }
+  }
+
+  const handleTestBitfinex = async () => {
+    setBitfinexTestLoading(true)
+    setError('')
+    setSuccess('')
+    
+    try {
+      const result = await apiClient.testBitfinexConnection()
+      if (result.success) {
+        setSuccess('Bitfinex connection test successful!')
+        setBitfinexStatus(prev => prev ? {
+          ...prev,
+          accountInfo: result.account_info
+        } : null)
+      } else {
+        setError(result.message || 'Bitfinex connection test failed')
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to test Bitfinex connection')
+    } finally {
+      setBitfinexTestLoading(false)
+    }
+  }
+
+  const handleDeleteBitfinex = async () => {
+    setError('')
+    setSuccess('')
+    
+    try {
+      await apiClient.deleteBitfinexCredentials()
+      setSuccess('Bitfinex credentials deleted successfully!')
+      setBitfinexStatus({
+        hasCredentials: false,
+        message: 'No Bitfinex credentials configured'
+      })
+    } catch (error: any) {
+      setError(error.detail || error.message || 'Failed to delete Bitfinex credentials')
+    }
+  }
+
   // Load Binance status when user is authenticated
   useEffect(() => {
     if (!user) return
@@ -297,6 +373,26 @@ export default function ProfilePage() {
     }
     
     loadBinanceStatus()
+  }, [user])
+
+  // Load Bitfinex status when user is authenticated
+  useEffect(() => {
+    if (!user) return
+    
+    const loadBitfinexStatus = async () => {
+      try {
+        const result = await apiClient.getBitfinexCredentials()
+        setBitfinexStatus({
+          hasCredentials: result.has_credentials,
+          message: result.message,
+          accountInfo: result.account_info
+        })
+      } catch (error) {
+        console.error('Failed to load Bitfinex status:', error)
+      }
+    }
+    
+    loadBitfinexStatus()
   }, [user])
 
   if (!user) {
@@ -370,6 +466,16 @@ export default function ProfilePage() {
                 }`}
               >
                 Binance Settings
+              </button>
+              <button
+                onClick={() => setActiveTab('bitfinex')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'bitfinex'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Bitfinex Settings
               </button>
               <button
                 onClick={() => setActiveTab('system')}
@@ -797,6 +903,151 @@ export default function ProfilePage() {
                           <p><strong>Account Type:</strong> {binanceStatus.accountInfo.account_type || 'Unknown'}</p>
                           <p><strong>Can Trade:</strong> {binanceStatus.accountInfo.can_trade ? 'Yes' : 'No'}</p>
                           <p><strong>Balances:</strong> {binanceStatus.accountInfo.balances_count || 0} assets</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="text-red-600 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                {success && (
+                  <div className="text-green-600 text-sm">
+                    {success}
+                  </div>
+                )}
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === 'bitfinex' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Bitfinex API Settings</CardTitle>
+              <CardDescription>
+                Configure your personal Bitfinex API credentials for portfolio import
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                <h3 className="text-sm font-medium text-yellow-800 mb-2">🔐 Security Notice</h3>
+                <div className="text-sm text-yellow-700 space-y-2">
+                  <p><strong>Your API credentials are encrypted and stored securely.</strong></p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>API keys are encrypted using industry-standard encryption</li>
+                    <li>Only you can access your credentials</li>
+                    <li>Credentials are never shared or logged</li>
+                    <li>You can delete your credentials at any time</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <h3 className="text-sm font-medium text-blue-800 mb-2">📱 How to Get Your Bitfinex API Credentials</h3>
+                <div className="text-sm text-blue-700 space-y-2">
+                  <p><strong>Step 1 - Create API Key:</strong></p>
+                  <ol className="list-decimal list-inside ml-4 space-y-1">
+                    <li>Log in to your Bitfinex account</li>
+                    <li>Go to Account → API Key Management</li>
+                    <li>Click "Create New Key"</li>
+                    <li>Enter a label (e.g., "Crypto AI Agent")</li>
+                    <li>Complete 2FA verification</li>
+                    <li>Copy your API Key and API Secret</li>
+                  </ol>
+                  <p className="mt-3"><strong>Step 2 - Set Permissions:</strong></p>
+                  <ol className="list-decimal list-inside ml-4 space-y-1">
+                    <li>Enable "Account Info" permission</li>
+                    <li>Enable "Account History" permission</li>
+                    <li>Enable "Wallets" permission</li>
+                    <li>Disable trading and withdrawal permissions (for security)</li>
+                  </ol>
+                  <p className="mt-3 text-xs text-blue-600">
+                    <strong>Note:</strong> Only "Account Info", "Account History", and "Wallets" permissions are required for portfolio import.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleBitfinexSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="bitfinexApiKey">Bitfinex API Key</Label>
+                  <Input
+                    id="bitfinexApiKey"
+                    name="apiKey"
+                    type="password"
+                    value={bitfinexData.apiKey}
+                    onChange={handleBitfinexChange}
+                    placeholder="Enter your Bitfinex API key"
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Your Bitfinex API key (will be encrypted and stored securely)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="bitfinexApiSecret">Bitfinex API Secret</Label>
+                  <Input
+                    id="bitfinexApiSecret"
+                    name="apiSecret"
+                    type="password"
+                    value={bitfinexData.apiSecret}
+                    onChange={handleBitfinexChange}
+                    placeholder="Enter your Bitfinex API secret"
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Your Bitfinex API secret (will be encrypted and stored securely)
+                  </p>
+                </div>
+
+                <div className="flex space-x-3">
+                  <Button type="submit" disabled={loading || !bitfinexData.apiKey || !bitfinexData.apiSecret}>
+                    {loading ? 'Saving...' : 'Save Bitfinex Credentials'}
+                  </Button>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={handleTestBitfinex}
+                    disabled={bitfinexTestLoading || !bitfinexStatus?.hasCredentials}
+                  >
+                    {bitfinexTestLoading ? 'Testing...' : 'Test Connection'}
+                  </Button>
+                  {bitfinexStatus?.hasCredentials && (
+                    <Button 
+                      type="button" 
+                      variant="destructive" 
+                      onClick={handleDeleteBitfinex}
+                      disabled={loading}
+                    >
+                      Delete Credentials
+                    </Button>
+                  )}
+                </div>
+
+                {bitfinexStatus && (
+                  <div className={`border rounded-lg p-4 ${
+                    bitfinexStatus.hasCredentials 
+                      ? 'bg-green-50 border-green-200' 
+                      : 'bg-gray-50 border-gray-200'
+                  }`}>
+                    <h4 className={`text-sm font-medium mb-2 ${
+                      bitfinexStatus.hasCredentials ? 'text-green-800' : 'text-gray-800'
+                    }`}>
+                      {bitfinexStatus.hasCredentials ? '✅ Credentials Status' : 'ℹ️ No Credentials'}
+                    </h4>
+                    <div className={`text-sm space-y-1 ${
+                      bitfinexStatus.hasCredentials ? 'text-green-700' : 'text-gray-600'
+                    }`}>
+                      <p><strong>Status:</strong> {bitfinexStatus.message}</p>
+                      {bitfinexStatus.accountInfo && (
+                        <>
+                          <p><strong>User ID:</strong> {bitfinexStatus.accountInfo.id || 'Unknown'}</p>
+                          <p><strong>Email:</strong> {bitfinexStatus.accountInfo.email || 'Unknown'}</p>
                         </>
                       )}
                     </div>
