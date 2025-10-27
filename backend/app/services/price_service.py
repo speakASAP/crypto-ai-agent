@@ -130,6 +130,62 @@ class PriceService:
             logger.error(f"Error fetching price history for {symbol}: {e}")
             return []
     
+    async def get_historical_prices_for_range(
+        self, 
+        symbol: str, 
+        start_timestamp: int, 
+        end_timestamp: int
+    ) -> List[Dict]:
+        """Get historical prices between two timestamps using Binance klines API"""
+        try:
+            # Create SSL context that doesn't verify certificates
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                # Determine interval based on time range
+                time_diff = end_timestamp - start_timestamp
+                if time_diff <= 24 * 60 * 60 * 1000:  # Less than 24 hours
+                    interval = '1m'  # 1-minute candles for precision
+                else:
+                    interval = '1h'  # 1-hour candles for longer periods
+                
+                url = f"{self.api_url}/klines"
+                params = {
+                    'symbol': f"{symbol.upper()}USDT",
+                    'interval': interval,
+                    'startTime': start_timestamp,
+                    'endTime': end_timestamp,
+                    'limit': 1000  # Maximum allowed by Binance
+                }
+                
+                async with session.get(url, params=params, timeout=30) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        history = [
+                            {
+                                'timestamp': int(candle[0]),
+                                'open': float(candle[1]),
+                                'high': float(candle[2]),
+                                'low': float(candle[3]),
+                                'close': float(candle[4]),
+                                'volume': float(candle[5])
+                            }
+                            for candle in data
+                        ]
+                        
+                        logger.info(f"Fetched {len(history)} historical price points for {symbol} from {start_timestamp} to {end_timestamp}")
+                        return history
+                    else:
+                        logger.warning(f"API returned status {response.status} for {symbol} historical data")
+                        return []
+                        
+        except Exception as e:
+            logger.error(f"Error fetching historical prices for {symbol}: {e}")
+            return []
+    
     async def get_24h_stats(self, symbols: List[str]) -> Dict[str, Dict]:
         """Get 24-hour statistics for symbols"""
         if not symbols:

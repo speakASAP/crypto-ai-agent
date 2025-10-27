@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depe
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Set
+from typing import List, Optional, Dict, Set, Any
 from pydantic import BaseModel, EmailStr, validator
 import logging
 import sqlite3
@@ -142,86 +142,95 @@ manager = ConnectionManager()
 # Background price fetching
 async def fetch_prices_for_symbols(symbols: List[str]):
     """Fetch prices for symbols and broadcast updates"""
+    conn = None
     try:
         # Ensure currency rates are initialized before any conversions
         currency_service.ensure_rates_initialized()
         
         prices = await price_service.get_current_prices(symbols)
         
+        if not prices:
+            logger.warning("No prices fetched, skipping update")
+            return
+        
         # Update database with new prices
-        if prices:
-            conn = get_db_connection()
-            cursor = conn.cursor()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for symbol, price in prices.items():
+            # Get the base currency for this symbol from the database
+            cursor.execute("SELECT DISTINCT base_currency FROM portfolio_items WHERE symbol = ?", (symbol,))
+            base_currencies = cursor.fetchall()
             
-            for symbol, price in prices.items():
-                # Get the base currency for this symbol from the database
-                cursor.execute("SELECT DISTINCT base_currency FROM portfolio_items WHERE symbol = ?", (symbol,))
-                base_currencies = cursor.fetchall()
+            for base_currency_row in base_currencies:
+                base_currency = base_currency_row[0]
                 
-                for base_currency_row in base_currencies:
-                    base_currency = base_currency_row[0]
-                    
-                    # Convert USD price to the base currency if needed
-                    if base_currency != "USD":
-                        converted_price = currency_service.convert_amount(price, "USD", base_currency)
-                    else:
-                        converted_price = price
-                    
-                    # Update current_price for all items with this symbol and base currency
-                    cursor.execute("""
-                        UPDATE portfolio_items 
-                        SET current_price = ?, 
-                            current_value = amount * ?,
-                            updated_at = datetime('now')
-                        WHERE symbol = ? AND base_currency = ?
-                    """, (converted_price, converted_price, symbol, base_currency))
+                # Convert USD price to the base currency if needed
+                if base_currency != "USD":
+                    converted_price = currency_service.convert_amount(price, "USD", base_currency)
+                else:
+                    converted_price = price
                 
-                # Calculate P&L for each item using USD-based calculations
+                # Update current_price for all items with this symbol and base currency
                 cursor.execute("""
-                    SELECT id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase 
-                    FROM portfolio_items 
-                    WHERE symbol = ?
-                """, (symbol,))
+                    UPDATE portfolio_items 
+                    SET current_price = ?, 
+                        current_value = amount * ?,
+                        updated_at = datetime('now')
+                    WHERE symbol = ? AND base_currency = ?
+                """, (converted_price, converted_price, symbol, base_currency))
+            
+            # Calculate P&L for each item using USD-based calculations
+            cursor.execute("""
+                SELECT id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase 
+                FROM portfolio_items 
+                WHERE symbol = ?
+            """, (symbol,))
+            
+            items = cursor.fetchall()
+            for item_id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase in items:
+                # Use USD price for calculations
+                current_value_usd = amount * price
+                total_investment_usd = (amount * price_buy_usd) + commission_usd
+                pnl_usd = current_value_usd - total_investment_usd
+                pnl_percent_usd = (pnl_usd / total_investment_usd * 100) if total_investment_usd > 0 else 0
                 
-                items = cursor.fetchall()
-                for item_id, amount, price_buy_usd, commission_usd, base_currency, exchange_rate_at_purchase in items:
-                    # Use USD price for calculations
-                    current_value_usd = amount * price
-                    total_investment_usd = (amount * price_buy_usd) + commission_usd
-                    pnl_usd = current_value_usd - total_investment_usd
-                    pnl_percent_usd = (pnl_usd / total_investment_usd * 100) if total_investment_usd > 0 else 0
-                    
-                    # Convert to display currency for display
-                    if base_currency != "USD":
-                        current_price_display = currency_service.convert_amount(price, "USD", base_currency)
-                        current_value_display = currency_service.convert_amount(current_value_usd, "USD", base_currency)
-                        pnl_display = currency_service.convert_amount(pnl_usd, "USD", base_currency)
-                    else:
-                        current_price_display = price
-                        current_value_display = current_value_usd
-                        pnl_display = pnl_usd
-                    
-                    cursor.execute("""
-                        UPDATE portfolio_items 
-                        SET current_price = ?, current_value = ?, pnl = ?, pnl_percent = ?,
-                            current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?
-                        WHERE id = ?
-                    """, (current_price_display, current_value_display, pnl_display, pnl_percent_usd,
-                          price, current_value_usd, pnl_usd, pnl_percent_usd, item_id))
-            
-            conn.commit()
-            conn.close()
-            
-            # Broadcast updates via WebSocket
-            for symbol, price in prices.items():
-                await manager.broadcast_price_update(symbol, price)
-            
-            # Check and trigger alerts
-            await check_and_trigger_alerts(prices)
+                # Convert to display currency for display
+                if base_currency != "USD":
+                    current_price_display = currency_service.convert_amount(price, "USD", base_currency)
+                    current_value_display = currency_service.convert_amount(current_value_usd, "USD", base_currency)
+                    pnl_display = currency_service.convert_amount(pnl_usd, "USD", base_currency)
+                else:
+                    current_price_display = price
+                    current_value_display = current_value_usd
+                    pnl_display = pnl_usd
                 
+                cursor.execute("""
+                    UPDATE portfolio_items 
+                    SET current_price = ?, current_value = ?, pnl = ?, pnl_percent = ?,
+                        current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?
+                    WHERE id = ?
+                """, (current_price_display, current_value_display, pnl_display, pnl_percent_usd,
+                      price, current_value_usd, pnl_usd, pnl_percent_usd, item_id))
+        
+        conn.commit()
+        
+        # Broadcast updates via WebSocket
+        for symbol, price in prices.items():
+            await manager.broadcast_price_update(symbol, price)
+        
+        # Check and trigger alerts
+        await check_and_trigger_alerts(prices)
+            
         logger.info(f"Fetched and updated prices for {len(prices)} symbols")
+        
     except Exception as e:
-        logger.error(f"Error fetching prices: {e}")
+        logger.error(f"Error fetching prices: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
 
 async def background_price_fetcher():
     """Background task to periodically fetch prices"""
@@ -364,8 +373,8 @@ async def send_user_telegram_notification(user_id: int, message: str):
         logger.error(f"Error sending Telegram notification for user {user_id}: {e}")
         return False
 
-async def check_and_trigger_alerts(current_prices: Dict[str, float]):
-    """Check all active alerts against current prices and trigger notifications"""
+async def check_missed_alerts_on_startup():
+    """Check for alerts that may have been missed during downtime"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -374,14 +383,255 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
         cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
         alerts = cursor.fetchall()
         
-        triggered_alerts = []
+        if not alerts:
+            logger.info("No active alerts to check for missed triggers")
+            conn.close()
+            return
+        
+        logger.info(f"Checking {len(alerts)} active alerts for missed triggers")
         
         for alert in alerts:
-            alert_id, user_id, symbol, threshold_price, alert_type, message, is_active, created_at = alert
+            alert_id, user_id, symbol, threshold_price, alert_type, message, is_active, created_at, threshold_price_usd, base_currency, exchange_rate_at_creation = alert
+            
+            # Get last price check for this symbol
+            cursor.execute(
+                "SELECT last_check_timestamp, last_check_price FROM price_check_tracking WHERE symbol = ?",
+                (symbol,)
+            )
+            tracking = cursor.fetchone()
+            
+            if not tracking:
+                # First time checking, skip historical check
+                logger.debug(f"No price tracking data for {symbol}, skipping historical check")
+                continue
+            
+            last_check_timestamp, last_check_price = tracking
+            
+            # Fetch historical prices from last check to now
+            # Handle both 'Z' and '+00:00' timezone formats
+            if last_check_timestamp.endswith('Z'):
+                start_time = datetime.fromisoformat(last_check_timestamp.replace('Z', '+00:00'))
+            else:
+                start_time = datetime.fromisoformat(last_check_timestamp)
+            start_ms = int(start_time.timestamp() * 1000)
+            end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            
+            # Skip if the time difference is too small (less than 1 minute)
+            if end_ms - start_ms < 60000:
+                logger.debug(f"Time difference too small for {symbol}, skipping historical check")
+                continue
+            
+            logger.info(f"Checking historical prices for {symbol} from {start_time} to now")
+            
+            # Get historical data from Binance
+            historical_prices = await price_service.get_historical_prices_for_range(
+                symbol, start_ms, end_ms
+            )
+            
+            if not historical_prices:
+                logger.warning(f"No historical price data available for {symbol}")
+                continue
+            
+            # Convert threshold price to USD if needed
+            threshold_price_usd = threshold_price
+            if base_currency and base_currency != "USD":
+                try:
+                    threshold_price_usd = currency_service.convert_amount(threshold_price, base_currency, "USD")
+                    logger.debug(f"Converted {symbol} threshold from {base_currency} {threshold_price} to USD {threshold_price_usd}")
+                except Exception as e:
+                    logger.warning(f"Could not convert threshold price for {symbol}: {e}")
+                    continue
+            elif not base_currency and threshold_price > 100000:
+                # Legacy alert without base_currency - assume CZK if price is very high
+                try:
+                    threshold_price_usd = currency_service.convert_amount(threshold_price, "CZK", "USD")
+                    logger.debug(f"Converted legacy {symbol} threshold from CZK {threshold_price} to USD {threshold_price_usd}")
+                except Exception as e:
+                    logger.warning(f"Could not convert legacy threshold price for {symbol}: {e}")
+                    continue
+            
+            # Check if threshold was crossed during downtime
+            threshold_crossed = False
+            trigger_price = None
+            trigger_time = None
+            
+            for price_data in historical_prices:
+                high = price_data['high']
+                low = price_data['low']
+                timestamp = price_data['timestamp']
+                
+                if alert_type == 'ABOVE' and high >= threshold_price_usd:
+                    threshold_crossed = True
+                    trigger_price = high
+                    trigger_time = datetime.fromtimestamp(timestamp / 1000, timezone.utc)
+                    break
+                elif alert_type == 'BELOW' and low <= threshold_price_usd:
+                    threshold_crossed = True
+                    trigger_price = low
+                    trigger_time = datetime.fromtimestamp(timestamp / 1000, timezone.utc)
+                    break
+            
+            if threshold_crossed:
+                logger.info(f"Found missed alert for {symbol} at {trigger_time} (price: ${trigger_price:,.2f})")
+                # Trigger missed alert
+                await trigger_alert(
+                    alert_id, user_id, symbol, threshold_price, alert_type, 
+                    message, trigger_price, trigger_time, was_missed=True
+                )
+            else:
+                logger.debug(f"No threshold crossing found for {symbol} in historical data")
+        
+        conn.close()
+        logger.info("Startup alert check completed")
+        
+    except Exception as e:
+        logger.error(f"Error checking missed alerts: {e}")
+
+async def trigger_alert(
+    alert_id: int,
+    user_id: int, 
+    symbol: str,
+    threshold_price: float,
+    alert_type: str,
+    message: str,
+    trigger_price: float,
+    trigger_time: datetime,
+    was_missed: bool = False
+):
+    """Trigger an alert and send notifications"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get portfolio information for this symbol
+        # First, get all base currencies for this symbol
+        cursor.execute("""
+            SELECT DISTINCT base_currency 
+            FROM portfolio_items 
+            WHERE symbol = ? AND base_currency IS NOT NULL
+        """, (symbol,))
+        
+        base_currencies = [row[0] for row in cursor.fetchall()]
+        portfolio_data = []
+        
+        # Calculate portfolio data for each base currency
+        for base_currency in base_currencies:
+            # Convert USD price to base currency
+            if base_currency != "USD":
+                converted_price = currency_service.convert_amount(trigger_price, "USD", base_currency)
+            else:
+                converted_price = trigger_price
+            
+            # Get portfolio data for this base currency
+            cursor.execute("""
+                SELECT 
+                    SUM(amount) as total_amount,
+                    SUM(amount * price_buy + commission) as total_investment,
+                    SUM(amount * ?) as current_value,
+                    base_currency
+                FROM portfolio_items 
+                WHERE symbol = ? AND base_currency = ?
+                GROUP BY base_currency
+            """, (converted_price, symbol, base_currency))
+            
+            result = cursor.fetchone()
+            if result:
+                portfolio_data.append(result)
+        
+        # Log alert history with missed flag
+        check_type = 'historical' if was_missed else 'realtime'
+        cursor.execute('''
+            INSERT INTO alert_history 
+            (alert_id, user_id, symbol, triggered_price, triggered_at, was_missed, check_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (alert_id, user_id, symbol, trigger_price, 
+              trigger_time.isoformat() + "Z", was_missed, check_type))
+        
+        # Deactivate the alert (one-time alert behavior)
+        cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
+        
+        # Prepare notification message
+        alert_message = f"🚨 <b>Price Alert Triggered!</b>\n\n"
+        if was_missed:
+            alert_message += "⚠️ <b>Missed Alert Recovered</b>\n"
+            alert_message += f"Alert was triggered at: {trigger_time.strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n"
+        
+        alert_message += f"📈 <b>Symbol:</b> {symbol}\n"
+        alert_message += f"💰 <b>Trigger Price:</b> ${trigger_price:,.2f}\n"
+        alert_message += f"🎯 <b>Threshold:</b> ${threshold_price:,.2f} ({alert_type})\n"
+        
+        # Add portfolio information if available
+        if portfolio_data:
+            for total_amount, total_investment, current_value, base_currency in portfolio_data:
+                if total_amount > 0:
+                    pnl = current_value - total_investment
+                    pnl_percent = (pnl / total_investment * 100) if total_investment > 0 else 0
+                    
+                    alert_message += f"\n💼 <b>Portfolio Summary ({base_currency}):</b>\n"
+                    alert_message += f"📊 <b>Amount:</b> {total_amount:,.6f} {symbol}\n"
+                    alert_message += f"💵 <b>Original Investment:</b> {base_currency} {total_investment:,.2f}\n"
+                    alert_message += f"💎 <b>Current Value:</b> {base_currency} {current_value:,.2f}\n"
+                    alert_message += f"📈 <b>P&L:</b> {base_currency} {pnl:,.2f} ({pnl_percent:+.2f}%)\n"
+        
+        if message:
+            alert_message += f"\n💬 <b>Alert Message:</b> {message}\n"
+        alert_message += f"\n⏰ <b>Time:</b> {trigger_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        conn.commit()
+        
+        # Send notifications
+        await send_user_telegram_notification(user_id, alert_message)
+        await manager.send_alert_triggered({
+            'alert_id': alert_id,
+            'symbol': symbol,
+            'current_price': trigger_price,
+            'threshold_price': threshold_price,
+            'alert_type': alert_type,
+            'message': message,
+            'was_missed': was_missed,
+            'trigger_time': trigger_time.isoformat()
+        })
+        
+        logger.info(f"Triggered alert {alert_id} ({'missed' if was_missed else 'realtime'})")
+        
+    except Exception as e:
+        logger.error(f"Error triggering alert {alert_id}: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+async def check_and_trigger_alerts(current_prices: Dict[str, float]):
+    """Check all active alerts against current prices and trigger notifications"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        current_time = datetime.now(timezone.utc)
+        
+        # Update price check tracking for all symbols
+        for symbol, price in current_prices.items():
+            cursor.execute('''
+                INSERT OR REPLACE INTO price_check_tracking 
+                (symbol, last_check_timestamp, last_check_price, updated_at)
+                VALUES (?, ?, ?, ?)
+            ''', (symbol, current_time.isoformat() + "Z", price, current_time.isoformat() + "Z"))
+        
+        # Get all active alerts
+        cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
+        alerts = cursor.fetchall()
+        
+        triggered_count = 0
+        
+        for alert in alerts:
+            alert_id, user_id, symbol, threshold_price, alert_type, message, is_active, created_at, threshold_price_usd, base_currency, exchange_rate_at_creation = alert
             
             if symbol not in current_prices:
                 continue
-                
+            
             current_price = current_prices[symbol]
             should_trigger = False
             
@@ -390,101 +640,26 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 should_trigger = True
             elif alert_type == 'BELOW' and current_price <= threshold_price:
                 should_trigger = True
-                
+            
             if should_trigger:
-                # Get portfolio information for this symbol
-                # First, get all base currencies for this symbol
-                cursor.execute("""
-                    SELECT DISTINCT base_currency 
-                    FROM portfolio_items 
-                    WHERE symbol = ? AND base_currency IS NOT NULL
-                """, (symbol,))
-                
-                base_currencies = [row[0] for row in cursor.fetchall()]
-                portfolio_data = []
-                
-                # Calculate portfolio data for each base currency
-                for base_currency in base_currencies:
-                    # Convert USD price to base currency
-                    if base_currency != "USD":
-                        converted_price = currency_service.convert_amount(current_price, "USD", base_currency)
-                    else:
-                        converted_price = current_price
-                    
-                    # Get portfolio data for this base currency
-                    cursor.execute("""
-                        SELECT 
-                            SUM(amount) as total_amount,
-                            SUM(amount * price_buy + commission) as total_investment,
-                            SUM(amount * ?) as current_value,
-                            base_currency
-                        FROM portfolio_items 
-                        WHERE symbol = ? AND base_currency = ?
-                        GROUP BY base_currency
-                    """, (converted_price, symbol, base_currency))
-                    
-                    result = cursor.fetchone()
-                    if result:
-                        portfolio_data.append(result)
-                
-                # Log alert history
-                cursor.execute('''
-                    INSERT INTO alert_history 
-                    (alert_id, user_id, symbol, triggered_price, triggered_at)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (alert_id, user_id, symbol, current_price, datetime.now().isoformat() + "Z"))
-                
-                # Deactivate the alert
-                cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
-                
-                # Prepare enhanced notification message
-                alert_message = f"🚨 <b>Price Alert Triggered!</b>\n\n"
-                alert_message += f"📈 <b>Symbol:</b> {symbol}\n"
-                alert_message += f"💰 <b>Current Price:</b> ${current_price:,.2f}\n"
-                alert_message += f"🎯 <b>Threshold:</b> ${threshold_price:,.2f} ({alert_type})\n"
-                
-                # Add portfolio information if available
-                if portfolio_data:
-                    for total_amount, total_investment, current_value, base_currency in portfolio_data:
-                        if total_amount > 0:
-                            pnl = current_value - total_investment
-                            pnl_percent = (pnl / total_investment * 100) if total_investment > 0 else 0
-                            
-                            alert_message += f"\n💼 <b>Portfolio Summary ({base_currency}):</b>\n"
-                            alert_message += f"📊 <b>Amount:</b> {total_amount:,.6f} {symbol}\n"
-                            alert_message += f"💵 <b>Original Investment:</b> {base_currency} {total_investment:,.2f}\n"
-                            alert_message += f"💎 <b>Current Value:</b> {base_currency} {current_value:,.2f}\n"
-                            alert_message += f"📈 <b>P&L:</b> {base_currency} {pnl:,.2f} ({pnl_percent:+.2f}%)\n"
-                
-                if message:
-                    alert_message += f"\n💬 <b>Alert Message:</b> {message}\n"
-                alert_message += f"\n⏰ <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                
-                triggered_alerts.append({
-                    'alert_id': alert_id,
-                    'symbol': symbol,
-                    'current_price': current_price,
-                    'threshold_price': threshold_price,
-                    'alert_type': alert_type,
-                    'message': message,
-                    'notification_message': alert_message
-                })
+                await trigger_alert(
+                    alert_id, user_id, symbol, threshold_price, alert_type,
+                    message, current_price, current_time, was_missed=False
+                )
+                triggered_count += 1
         
         conn.commit()
-        conn.close()
         
-        # Send Telegram notifications for triggered alerts
-        for alert_data in triggered_alerts:
-            await send_user_telegram_notification(user_id, alert_data['notification_message'])
-            
-            # Broadcast alert triggered via WebSocket
-            await manager.send_alert_triggered(alert_data)
-            
-        if triggered_alerts:
-            logger.info(f"Triggered {len(triggered_alerts)} alerts")
-            
+        if triggered_count > 0:
+            logger.info(f"Triggered {triggered_count} alerts in real-time check")
+        
     except Exception as e:
         logger.error(f"Error checking alerts: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
 
 # Pydantic models
 class PortfolioItem(BaseModel):
@@ -652,6 +827,8 @@ class UserProfileUpdate(BaseModel):
     preferred_currency: Optional[str] = None
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
+    binance_api_key: Optional[str] = None
+    binance_api_secret: Optional[str] = None
 
     @validator('username')
     def validate_username(cls, v):
@@ -682,6 +859,20 @@ class UserProfileUpdate(BaseModel):
             if not v.strip().isdigit():
                 raise ValueError('Invalid Telegram chat ID format. Should be a numeric value like: 123456789')
         return v.strip() if v else ''
+    
+    @validator('binance_api_key')
+    def validate_binance_api_key(cls, v):
+        if v is not None and v.strip():
+            if len(v.strip()) < 10:
+                raise ValueError('Binance API key must be at least 10 characters')
+        return v.strip() if v else ''
+    
+    @validator('binance_api_secret')
+    def validate_binance_api_secret(cls, v):
+        if v is not None and v.strip():
+            if len(v.strip()) < 10:
+                raise ValueError('Binance API secret must be at least 10 characters')
+        return v.strip() if v else ''
 
 class PasswordChange(BaseModel):
     current_password: str
@@ -701,6 +892,34 @@ class AccountDeletionConfirm(BaseModel):
         if v != "DELETE":
             raise ValueError('Confirmation text must be exactly "DELETE"')
         return v
+
+class BinanceCredentials(BaseModel):
+    api_key: str
+    api_secret: str
+    
+    @validator('api_key')
+    def validate_api_key(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError('Binance API key is required and must be at least 10 characters')
+        return v.strip()
+    
+    @validator('api_secret')
+    def validate_api_secret(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError('Binance API secret is required and must be at least 10 characters')
+        return v.strip()
+
+class BinanceCredentialsResponse(BaseModel):
+    has_credentials: bool
+    message: str
+    account_info: Optional[Dict[str, Any]] = None
+
+class BinanceTestResponse(BaseModel):
+    success: bool
+    message: str
+    account_info: Optional[Dict[str, Any]] = None
+    error_code: Optional[str] = None
+    troubleshooting: Optional[str] = None
 
 def init_database():
     """Initialize SQLite database with user management tables"""
@@ -836,8 +1055,20 @@ def init_database():
             symbol TEXT NOT NULL,
             triggered_price REAL NOT NULL,
             triggered_at TEXT NOT NULL,
+            was_missed BOOLEAN DEFAULT 0,
+            check_type TEXT DEFAULT 'realtime',
             FOREIGN KEY (alert_id) REFERENCES alerts (id),
             FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+
+    # Create price_check_tracking table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS price_check_tracking (
+            symbol TEXT PRIMARY KEY,
+            last_check_timestamp TEXT NOT NULL,
+            last_check_price REAL NOT NULL,
+            updated_at TEXT NOT NULL
         )
     ''')
 
@@ -935,9 +1166,51 @@ def init_database():
     except sqlite3.OperationalError:
         pass
     
+    # Add new columns to alert_history table if they don't exist
+    try:
+        cursor.execute("ALTER TABLE alert_history ADD COLUMN was_missed BOOLEAN DEFAULT 0")
+        logger.info("✅ Added was_missed column to alert_history table")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE alert_history ADD COLUMN check_type TEXT DEFAULT 'realtime'")
+        logger.info("✅ Added check_type column to alert_history table")
+    except sqlite3.OperationalError:
+        pass
+    
+    # Create import history table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS import_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            import_date TEXT NOT NULL,
+            items_imported INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Create user API credentials table (encrypted storage)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_api_credentials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            exchange TEXT NOT NULL,
+            encrypted_credentials TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            UNIQUE(user_id, exchange)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
-    logger.info("✅ Database initialized with user management")
+    logger.info("✅ Database initialized with user management and import functionality")
 
 def load_migration_data():
     """Load data from migration file if it exists"""
@@ -1004,8 +1277,12 @@ def load_migration_data():
             logger.error(f"Error loading migration data: {e}")
 
 def get_db_connection():
-    """Get database connection"""
-    return sqlite3.connect(DB_FILE)
+    """Get database connection with timeout and WAL mode for better concurrency"""
+    conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging for better concurrency
+    conn.execute("PRAGMA synchronous=NORMAL")  # Balance between safety and performance
+    conn.execute("PRAGMA cache_size=10000")  # Increase cache size for better performance
+    return conn
 
 def format_total_investment_text(amount: float, currency: str) -> str:
     """Format total investment text with proper currency symbol"""
@@ -1101,6 +1378,10 @@ async def lifespan(app: FastAPI):
     # Initialize currency service
     await currency_service.get_exchange_rates()
     logger.info("✅ Currency service initialized")
+    
+    # Check for missed alerts on startup
+    await check_missed_alerts_on_startup()
+    logger.info("✅ Missed alert check completed")
     
     # Start background price update task
     price_task = asyncio.create_task(background_price_fetcher())
@@ -1335,6 +1616,15 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         cursor.execute(f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?", update_values)
         conn.commit()
     
+    # Handle Binance credentials separately (encrypted storage)
+    if update_data.binance_api_key is not None and update_data.binance_api_secret is not None:
+        from .services.binance_credential_service import binance_credential_service
+        binance_credential_service.save_user_credentials(
+            current_user["id"], 
+            update_data.binance_api_key, 
+            update_data.binance_api_secret
+        )
+    
     # Get updated user
     cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?", (current_user["id"],))
     user = cursor.fetchone()
@@ -1505,6 +1795,83 @@ async def delete_account(confirmation: AccountDeletionConfirm, current_user: dic
         conn.close()
         logger.error(f"Error deleting account for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete account")
+
+# Binance Credential Management endpoints
+@app.post("/api/auth/binance-credentials", response_model=BinanceCredentialsResponse)
+async def save_binance_credentials(credentials: BinanceCredentials, current_user: dict = Depends(get_current_active_user)):
+    """Save user's Binance API credentials"""
+    from .services.binance_credential_service import binance_credential_service
+    
+    user_id = current_user["id"]
+    
+    # Save credentials
+    success = binance_credential_service.save_user_credentials(
+        user_id, credentials.api_key, credentials.api_secret
+    )
+    
+    if success:
+        # Test the credentials
+        test_result = await binance_credential_service.test_user_credentials(user_id)
+        
+        return BinanceCredentialsResponse(
+            has_credentials=True,
+            message="Binance credentials saved successfully",
+            account_info=test_result.get('account_info') if test_result.get('success') else None
+        )
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save Binance credentials")
+
+@app.get("/api/auth/binance-credentials", response_model=BinanceCredentialsResponse)
+async def get_binance_credentials_status(current_user: dict = Depends(get_current_active_user)):
+    """Get user's Binance credentials status"""
+    from .services.binance_credential_service import binance_credential_service
+    
+    user_id = current_user["id"]
+    has_credentials = binance_credential_service.has_user_credentials(user_id)
+    
+    if has_credentials:
+        # Test the credentials to get account info
+        test_result = await binance_credential_service.test_user_credentials(user_id)
+        
+        return BinanceCredentialsResponse(
+            has_credentials=True,
+            message="Binance credentials are configured",
+            account_info=test_result.get('account_info') if test_result.get('success') else None
+        )
+    else:
+        return BinanceCredentialsResponse(
+            has_credentials=False,
+            message="No Binance credentials configured"
+        )
+
+@app.post("/api/auth/test-binance-connection", response_model=BinanceTestResponse)
+async def test_binance_connection(current_user: dict = Depends(get_current_active_user)):
+    """Test user's Binance API connection"""
+    from .services.binance_credential_service import binance_credential_service
+    
+    user_id = current_user["id"]
+    result = await binance_credential_service.test_user_credentials(user_id)
+    
+    return BinanceTestResponse(
+        success=result.get('success', False),
+        message=result.get('message', 'Unknown error'),
+        account_info=result.get('account_info'),
+        error_code=str(result.get('error_code')) if result.get('error_code') is not None else None,
+        troubleshooting=result.get('troubleshooting')
+    )
+
+@app.delete("/api/auth/binance-credentials")
+async def delete_binance_credentials(current_user: dict = Depends(get_current_active_user)):
+    """Delete user's Binance API credentials"""
+    from .services.binance_credential_service import binance_credential_service
+    
+    user_id = current_user["id"]
+    success = binance_credential_service.delete_user_credentials(user_id)
+    
+    if success:
+        return {"message": "Binance credentials deleted successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete Binance credentials")
 
 # Portfolio endpoints
 @app.get("/api/portfolio/", response_model=List[PortfolioItem])
@@ -2299,6 +2666,164 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 # Health check
+# Binance Import Endpoints
+@app.post("/api/import/binance/test-connection")
+async def test_binance_connection(current_user: dict = Depends(get_current_active_user)):
+    """Test Binance API connection using user credentials"""
+    try:
+        from .services.binance_credential_service import binance_credential_service
+        
+        result = await binance_credential_service.test_user_credentials(current_user["id"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error testing Binance connection: {e}")
+        raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
+
+@app.post("/api/import/binance/preview")
+async def preview_binance_import(current_user: dict = Depends(get_current_active_user)):
+    """Preview Binance portfolio import without saving using user credentials"""
+    try:
+        from .services.binance_credential_service import binance_credential_service
+        
+        result = await binance_credential_service.import_user_portfolio(current_user["id"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error previewing Binance import: {e}")
+        raise HTTPException(status_code=500, detail=f"Import preview failed: {str(e)}")
+
+@app.post("/api/import/binance/execute")
+async def execute_binance_import(current_user: dict = Depends(get_current_active_user)):
+    """Execute Binance portfolio import and save to database using user credentials"""
+    try:
+        from .services.binance_credential_service import binance_credential_service
+        
+        result = await binance_credential_service.import_user_portfolio(current_user["id"])
+        
+        if not result['success']:
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+        # Save portfolio items to database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        imported_count = 0
+        now = datetime.now().isoformat() + "Z"
+        
+        for item in result['portfolio_items']:
+            try:
+                # Check if item already exists (same symbol and similar amount)
+                cursor.execute('''
+                    SELECT id FROM portfolio_items 
+                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
+                ''', (current_user["id"], item['symbol'], item['amount']))
+                
+                if cursor.fetchone():
+                    logger.info(f"Skipping duplicate item: {item['symbol']}")
+                    continue
+                
+                # Ensure currency rates are loaded for conversion
+                currency_service.ensure_rates_initialized()
+                
+                # Convert prices to USD if needed
+                base_currency = item.get('base_currency', 'USD')
+                price_buy = item['price_buy']
+                commission = item.get('commission', 0.0)
+                
+                if base_currency != 'USD' and price_buy > 0:
+                    # Convert to USD
+                    price_buy_usd = currency_service.convert_amount(price_buy, base_currency, 'USD')
+                    commission_usd = currency_service.convert_amount(commission, base_currency, 'USD')
+                    exchange_rate = currency_service.rates.get(base_currency, 1.0) if base_currency in currency_service.rates else 1.0
+                else:
+                    # Already in USD or price is 0
+                    price_buy_usd = price_buy
+                    commission_usd = commission
+                    exchange_rate = None
+                
+                # Insert new portfolio item with USD values
+                cursor.execute('''
+                    INSERT INTO portfolio_items 
+                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
+                     total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
+                     price_buy_usd, commission_usd, exchange_rate_at_purchase)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    current_user["id"], item['symbol'], item['amount'], price_buy,
+                    item['purchase_date'], base_currency, item['source'], commission,
+                    item['total_investment_text'], now, now,
+                    round(price_buy, 8), round(item['amount'] * price_buy, 8), 0.0, 0.0,
+                    round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate
+                ))
+                imported_count += 1
+                
+            except Exception as e:
+                logger.warning(f"Failed to import item {item['symbol']}: {e}")
+                continue
+        
+        # Record import history
+        cursor.execute('''
+            INSERT INTO import_history 
+            (user_id, source, import_date, items_imported, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            current_user["id"], 'binance', now, imported_count, 
+            'success' if imported_count > 0 else 'partial', now
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Binance import completed: {imported_count} items imported for user {current_user['id']}")
+        
+        return {
+            'success': True,
+            'message': f'Successfully imported {imported_count} portfolio items from Binance',
+            'items_imported': imported_count,
+            'total_found': len(result['portfolio_items'])
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing Binance import: {e}")
+        raise HTTPException(status_code=500, detail=f"Import execution failed: {str(e)}")
+
+@app.get("/api/import/history")
+async def get_import_history(current_user: dict = Depends(get_current_active_user)):
+    """Get import history for the user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT source, import_date, items_imported, status, error_message, created_at
+            FROM import_history 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC
+        ''', (current_user["id"],))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        history = []
+        for row in rows:
+            history.append({
+                'source': row[0],
+                'import_date': row[1],
+                'items_imported': row[2],
+                'status': row[3],
+                'error_message': row[4],
+                'created_at': row[5]
+            })
+        
+        return {'import_history': history}
+        
+    except Exception as e:
+        logger.error(f"Error getting import history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get import history: {str(e)}")
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""

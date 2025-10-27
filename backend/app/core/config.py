@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     
     # External APIs
     binance_api_url: str = "https://api.binance.com/api/v3"
+    # Note: Binance API keys are now stored per-user in encrypted format
+    # Global keys are no longer used for security reasons
     currency_api_url: str = "https://api.exchangerate-api.com/v4/latest/USD"
     telegram_api_url: str = "https://api.telegram.org/bot"
     telegram_bot_token: str = ""

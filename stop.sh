@@ -148,11 +148,7 @@ else
     print_warning "You may need to manually kill them"
 fi
 
-# Clean up log files (optional)
-read -p "Do you want to clean up log files? (y/N): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    print_status "Cleaning up log files..."
-    rm -f $LOG_DIR/backend.log $LOG_DIR/frontend.log $LOG_DIR/backend_install.log $LOG_DIR/frontend_install.log
-    print_success "Log files cleaned up"
-fi
+# Clean up log files
+print_status "Cleaning up log files..."
+rm -f $LOG_DIR/backend.log $LOG_DIR/frontend.log $LOG_DIR/backend_install.log $LOG_DIR/frontend_install.log
+print_success "Log files cleaned up"

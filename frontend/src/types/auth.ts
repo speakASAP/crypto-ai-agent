@@ -51,3 +51,15 @@ export interface PasswordChange {
   current_password: string
   new_password: string
 }
+
+export interface BinanceCredentialsResponse {
+  message: string
+  has_credentials: boolean
+  account_info?: any
+}
+
+export interface BinanceTestResponse {
+  success: boolean
+  message: string
+  account_info?: any
+}

@@ -44,20 +44,12 @@ class EnvironmentValidator:
             self.validation_errors.append(f"Failed to load environment file: {str(e)}")
     
     def _define_validation_rules(self):
-        """Define validation rules for all environment variables"""
+        """Define validation rules for all environment variables
+        
+        Note: Binance API credentials are now stored per-user in the database
+        and are no longer required as environment variables.
+        """
         self.required_vars = {
-            "BINANCE_API_KEY": {
-                "type": str,
-                "min_length": 20,
-                "pattern": r"^[A-Za-z0-9]+$",
-                "description": "Binance API Key for cryptocurrency data access"
-            },
-            "BINANCE_API_SECRET": {
-                "type": str,
-                "min_length": 20,
-                "pattern": r"^[A-Za-z0-9]+$",
-                "description": "Binance API Secret for cryptocurrency data access"
-            },
             "TELEGRAM_TOKEN": {
                 "type": str,
                 "min_length": 30,
@@ -332,10 +324,7 @@ class EnvironmentValidator:
     
     def _validate_api_keys(self):
         """Validate API key formats"""
-        # Validate Binance API key format
-        binance_key = self.validated_vars.get("BINANCE_API_KEY")
-        if binance_key and len(binance_key) < 20:
-            self.validation_warnings.append("Binance API key seems too short, please verify it's correct")
+        # Note: Binance API credentials are validated per-user in the database
         
         # Validate Telegram token format
         telegram_token = self.validated_vars.get("TELEGRAM_TOKEN")

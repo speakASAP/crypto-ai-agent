@@ -46,11 +46,22 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
 
   useEffect(() => {
     if (item) {
+      // Convert ISO datetime to date format for HTML date input
+      const formatDateForInput = (isoDateString: string) => {
+        if (!isoDateString) return ''
+        try {
+          const date = new Date(isoDateString)
+          return date.toISOString().split('T')[0]
+        } catch {
+          return isoDateString.split('T')[0] // Fallback: just take the date part
+        }
+      }
+
       setFormData({
         symbol: item.symbol,
         amount: item.amount.toString(),
         price_buy: item.price_buy.toString(),
-        purchase_date: item.purchase_date || '',
+        purchase_date: formatDateForInput(item.purchase_date || ''),
         base_currency: item.base_currency as 'USD' | 'EUR' | 'CZK',
         source: item.source || '',
         commission: item.commission.toString(),

@@ -45,13 +45,18 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 - **Real-time Updates**: Live price tracking via WebSocket
 - **P&L Tracking**: Automatic profit/loss calculations
 - **Portfolio Summary**: Total value and performance metrics
+- **Binance Import**: Automatically import your Binance portfolio
+- **Source Tracking**: Track where each asset was purchased
 
 ### 🚨 Price Alerts
 
 - **Custom Alerts**: Set price thresholds for any cryptocurrency
 - **Real-time Notifications**: Instant alerts when prices hit targets
-- **Alert History**: Track all triggered alerts
-- **Telegram Integration**: Optional Telegram notifications
+- **Alert History**: Track all triggered alerts with recovery context
+- **Telegram Integration**: Optional Telegram notifications with user-specific settings
+- **Robust Recovery System**: Historical price checking to catch missed alerts during downtime
+- **Database Reliability**: WAL mode and connection pooling for high availability
+- **Missed Alert Detection**: Automatic recovery on service startup with detailed notifications
 
 ## Quick Start
 
@@ -106,6 +111,49 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
    - Create your account
    - Login and start managing your portfolio
 
+## 🚀 Binance Portfolio Import
+
+Import your cryptocurrency holdings directly from Binance with just a few clicks!
+
+### Quick Import Setup
+
+1. **Get Binance API Credentials:**
+   - Go to [Binance API Management](https://www.binance.com/en/my/settings/api-management)
+   - Create new API key with "Enable Reading" permission
+   - Copy API Key and Secret Key
+
+2. **Configure Environment:**
+
+   ```bash
+   # Add to your .env file
+   BINANCE_API_KEY=your_api_key_here
+   BINANCE_API_SECRET=your_secret_key_here
+   ```
+
+3. **Import Your Portfolio:**
+
+   ```bash
+   # Test the import
+   python test_binance_import.py
+   ```
+
+### What Gets Imported
+
+- ✅ **All cryptocurrency holdings** from your Binance account
+- ✅ **Real-time price tracking** for imported assets
+- ✅ **Multi-currency support** (USD, EUR, CZK)
+- ✅ **Source tracking** (marked as "Binance")
+- ✅ **Import history** for tracking
+
+### Security Features
+
+- 🔒 **Read-only access** - Cannot trade or withdraw
+- 🔒 **User isolation** - Only you can see your data
+- 🔒 **Secure API integration** - Industry-standard encryption
+- 🔒 **Duplicate prevention** - Won't import duplicate assets
+
+For detailed setup instructions, see [Binance Import Guide](docs/BINANCE_IMPORT_GUIDE.md).
+
 ## User Management System
 
 The Crypto AI Agent now features a complete multi-user authentication system that allows multiple users to manage their personal portfolios independently.
@@ -137,8 +185,15 @@ The Crypto AI Agent now features a complete multi-user authentication system tha
    - Enter your credentials
    - You'll be redirected to your personal dashboard
 
-4. **Manage your portfolio:**
+4. **Configure Binance API (Optional):**
+   - Go to Profile Settings → Binance Settings
+   - Add your Binance API credentials for portfolio import
+   - Your credentials are encrypted and stored securely
+   - Only you can access your API keys
+
+5. **Manage your portfolio:**
    - Add, edit, and delete portfolio items
+   - Import portfolio from Binance (if configured)
    - Set up price alerts
    - Track your investments
    - All data is private to your account
@@ -152,6 +207,9 @@ The Crypto AI Agent now features a complete multi-user authentication system tha
 - **Route Protection**: Automatic redirection for unauthenticated users
 - **Data Isolation**: Users can only access their own data
 - **Session Management**: Automatic token refresh and logout
+- **Encrypted API Credentials**: User API keys are encrypted using industry-standard encryption
+- **Credential Isolation**: Each user's API credentials are completely isolated
+- **No Global API Keys**: System no longer uses global API keys for enhanced security
 
 ### 📱 User Interface
 
@@ -175,6 +233,13 @@ All API endpoints now require authentication:
 - `POST /api/auth/password-reset-request` - Request password reset
 - `POST /api/auth/password-reset-confirm` - Confirm password reset
 
+**Binance Credential Management:**
+
+- `POST /api/auth/binance-credentials` - Save Binance API credentials
+- `GET /api/auth/binance-credentials` - Get Binance credentials status
+- `POST /api/auth/test-binance-connection` - Test Binance API connection
+- `DELETE /api/auth/binance-credentials` - Delete Binance credentials
+
 All portfolio, alerts, and symbols endpoints are now user-specific and require authentication.
 
 ### 🔧 Configuration
@@ -182,12 +247,19 @@ All portfolio, alerts, and symbols endpoints are now user-specific and require a
 The system uses the following environment variables:
 
 ```bash
-# JWT Configuration
+# JWT Configuration (REQUIRED)
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-JWT_SECRET_KEY=your-secret-key-here
+
+# Optional: Telegram Notifications
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
 ```
 
-**Important**: Change the JWT_SECRET in production for security.
+**Important**:
+
+- Change the JWT_SECRET in production for security
+- Binance API credentials are now configured per-user in Profile Settings
+- Global Binance API keys are no longer used for enhanced security
 
 ### 📊 Database Schema
 
@@ -196,6 +268,7 @@ The system includes the following user-related tables:
 - `users` - User accounts and profiles
 - `password_reset_tokens` - Password reset functionality
 - `user_sessions` - Session tracking (optional)
+- `user_api_credentials` - Encrypted storage of user API credentials
 - All existing tables now include `user_id` foreign keys
 
 ### 🧪 Testing User Management

@@ -59,6 +59,10 @@ export default function Home() {
   const [cryptoLastUpdated, setCryptoLastUpdated] = useState<string>('')
   const [cryptoLastUpdatedFormatted, setCryptoLastUpdatedFormatted] = useState<string>('')
   const [symbolTimestamps, setSymbolTimestamps] = useState<Record<string, string>>({})
+  
+  // Binance import states
+  const [importingBinance, setImportingBinance] = useState(false)
+  const [importMessage, setImportMessage] = useState<string>('')
 
   useEffect(() => {
     // Fetch initial data
@@ -203,7 +207,7 @@ export default function Home() {
     }
   }, [alerts, exchangeRates, selectedCurrency])
 
-  // Periodic refresh of timestamps
+  // Periodic refresh of timestamps and alerts
   useEffect(() => {
     const refreshInterval = process.env.NEXT_PUBLIC_FRONTEND_REFRESH_INTERVAL 
       ? parseInt(process.env.NEXT_PUBLIC_FRONTEND_REFRESH_INTERVAL) 
@@ -211,10 +215,12 @@ export default function Home() {
     
     const interval = setInterval(() => {
       loadCryptoTimestamps()
+      // Also refresh alerts to remove triggered ones
+      fetchAlerts()
     }, refreshInterval)
 
     return () => clearInterval(interval)
-  }, [])
+  }, [fetchAlerts])
 
   // Use unified currency formatting functions
   const formatCurrencyAmount = (amount: number) => formatCurrency(amount, selectedCurrency as Currency)
@@ -249,6 +255,35 @@ export default function Home() {
   const handleDeletePortfolioItem = async (id: number) => {
     if (window.confirm('Are you sure you want to delete this portfolio item?')) {
       await deleteItem(id)
+    }
+  }
+
+  const handleImportFromBinance = async () => {
+    if (!window.confirm('This will import your entire Binance portfolio. Continue?')) {
+      return
+    }
+
+    setImportingBinance(true)
+    setImportMessage('')
+
+    try {
+      const result = await apiClient.importBinancePortfolio()
+
+      if (result.success) {
+        setImportMessage(`Successfully imported ${result.items_imported} items!`)
+        // Refresh portfolio data
+        await fetchPortfolio()
+        await fetchSummary()
+        // Clear message after 5 seconds
+        setTimeout(() => setImportMessage(''), 5000)
+      } else {
+        setImportMessage(result.message || 'Import failed')
+      }
+    } catch (error: any) {
+      console.error('Binance import error:', error)
+      setImportMessage(error.response?.data?.detail || 'Failed to import from Binance')
+    } finally {
+      setImportingBinance(false)
     }
   }
 
@@ -510,10 +545,24 @@ export default function Home() {
             <div>
               <CardTitle>Portfolio</CardTitle>
               <CardDescription>Your cryptocurrency holdings</CardDescription>
+              {importMessage && (
+                <div className={`mt-2 text-sm ${importMessage.includes('Successfully') ? 'text-green-600' : 'text-red-600'}`}>
+                  {importMessage}
+                </div>
+              )}
             </div>
-            <Button onClick={handleAddPortfolioItem}>
-              Add New Item
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                onClick={handleImportFromBinance}
+                disabled={importingBinance}
+                variant="outline"
+              >
+                {importingBinance ? 'Importing...' : '📥 Import from Binance'}
+              </Button>
+              <Button onClick={handleAddPortfolioItem}>
+                Add New Item
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -617,9 +666,19 @@ export default function Home() {
               <CardTitle>Price Alerts</CardTitle>
               <CardDescription>Active price notifications</CardDescription>
             </div>
-            <Button onClick={handleAddAlert}>
-              Create Alert
-            </Button>
+            <div className="flex items-center space-x-2">
+              <Button 
+                onClick={() => fetchAlerts()}
+                variant="outline"
+                size="sm"
+                disabled={loading}
+              >
+                {loading ? 'Refreshing...' : '🔄'}
+              </Button>
+              <Button onClick={handleAddAlert}>
+                Create Alert
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>

@@ -483,7 +483,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
             )}
 
             {/* Current Price Display for Create Alert */}
-            {(currentPrice || selectedCurrentPrice) && selectedSymbol && !presetSymbol && (
+            {(((currentPrice && currentPrice > 0) || (selectedCurrentPrice && selectedCurrentPrice > 0)) && selectedSymbol && !presetSymbol) ? (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -499,10 +499,10 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                   )}
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Price Slider */}
-            {(currentPrice || selectedCurrentPrice) && priceRange.min !== priceRange.max && (
+            {(((currentPrice && currentPrice > 0) || (selectedCurrentPrice && selectedCurrentPrice > 0)) && priceRange.min !== priceRange.max) ? (
               <div className="space-y-2">
                 <div className="space-y-2">
                   {/* Price Range Display */}
@@ -617,8 +617,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                   </div>
                 </div>
               </div>
-            )}
-
+            ) : null}
 
             {/* Alert Type Selection */}
             <div className="space-y-2">

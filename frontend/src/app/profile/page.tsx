@@ -19,12 +19,22 @@ export default function ProfilePage() {
     telegramBotToken: '',
     telegramChatId: ''
   })
+  const [binanceData, setBinanceData] = useState({
+    apiKey: '',
+    apiSecret: ''
+  })
+  const [binanceStatus, setBinanceStatus] = useState<{
+    hasCredentials: boolean
+    message: string
+    accountInfo?: any
+  } | null>(null)
+  const [binanceTestLoading, setBinanceTestLoading] = useState(false)
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   })
-  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram' | 'system'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram' | 'binance' | 'system'>('profile')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -203,6 +213,92 @@ export default function ProfilePage() {
     }
   }
 
+  const handleBinanceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBinanceData(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }))
+  }
+
+  const handleBinanceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    
+    try {
+      const result = await apiClient.saveBinanceCredentials(binanceData.apiKey, binanceData.apiSecret)
+      setSuccess('Binance credentials saved successfully!')
+      setBinanceStatus({
+        hasCredentials: true,
+        message: result.message,
+        accountInfo: result.account_info
+      })
+      // Clear the form
+      setBinanceData({ apiKey: '', apiSecret: '' })
+    } catch (error: any) {
+      setError(error.detail || error.message || 'Failed to save Binance credentials')
+    }
+  }
+
+  const handleTestBinance = async () => {
+    setBinanceTestLoading(true)
+    setError('')
+    setSuccess('')
+    
+    try {
+      const result = await apiClient.testBinanceConnection()
+      if (result.success) {
+        setSuccess('Binance connection test successful!')
+        setBinanceStatus(prev => prev ? {
+          ...prev,
+          accountInfo: result.account_info
+        } : null)
+      } else {
+        setError(result.message || 'Binance connection test failed')
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to test Binance connection')
+    } finally {
+      setBinanceTestLoading(false)
+    }
+  }
+
+  const handleDeleteBinance = async () => {
+    setError('')
+    setSuccess('')
+    
+    try {
+      await apiClient.deleteBinanceCredentials()
+      setSuccess('Binance credentials deleted successfully!')
+      setBinanceStatus({
+        hasCredentials: false,
+        message: 'No Binance credentials configured'
+      })
+    } catch (error: any) {
+      setError(error.detail || error.message || 'Failed to delete Binance credentials')
+    }
+  }
+
+  // Load Binance status when user is authenticated
+  useEffect(() => {
+    if (!user) return
+    
+    const loadBinanceStatus = async () => {
+      try {
+        const result = await apiClient.getBinanceCredentials()
+        setBinanceStatus({
+          hasCredentials: result.has_credentials,
+          message: result.message,
+          accountInfo: result.account_info
+        })
+      } catch (error) {
+        console.error('Failed to load Binance status:', error)
+      }
+    }
+    
+    loadBinanceStatus()
+  }, [user])
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -264,6 +360,16 @@ export default function ProfilePage() {
                 }`}
               >
                 Telegram Settings
+              </button>
+              <button
+                onClick={() => setActiveTab('binance')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'binance'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Binance Settings
               </button>
               <button
                 onClick={() => setActiveTab('system')}
@@ -550,6 +656,152 @@ export default function ProfilePage() {
                     {loading ? 'Saving & Testing...' : 'Save & Test Connection'}
                   </Button>
                 </div>
+
+                {error && (
+                  <div className="text-red-600 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                {success && (
+                  <div className="text-green-600 text-sm">
+                    {success}
+                  </div>
+                )}
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === 'binance' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Binance API Settings</CardTitle>
+              <CardDescription>
+                Configure your personal Binance API credentials for portfolio import
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                <h3 className="text-sm font-medium text-yellow-800 mb-2">🔐 Security Notice</h3>
+                <div className="text-sm text-yellow-700 space-y-2">
+                  <p><strong>Your API credentials are encrypted and stored securely.</strong></p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>API keys are encrypted using industry-standard encryption</li>
+                    <li>Only you can access your credentials</li>
+                    <li>Credentials are never shared or logged</li>
+                    <li>You can delete your credentials at any time</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <h3 className="text-sm font-medium text-blue-800 mb-2">📱 How to Get Your Binance API Credentials</h3>
+                <div className="text-sm text-blue-700 space-y-2">
+                  <p><strong>Step 1 - Create API Key:</strong></p>
+                  <ol className="list-decimal list-inside ml-4 space-y-1">
+                    <li>Log in to your Binance account</li>
+                    <li>Go to Account → API Management</li>
+                    <li>Click "Create API"</li>
+                    <li>Enter a label (e.g., "Crypto AI Agent")</li>
+                    <li>Complete 2FA verification</li>
+                    <li>Copy your API Key and Secret Key</li>
+                  </ol>
+                  <p className="mt-3"><strong>Step 2 - Set Permissions:</strong></p>
+                  <ol className="list-decimal list-inside ml-4 space-y-1">
+                    <li>Enable "Enable Reading" permission</li>
+                    <li>Disable "Enable Spot & Margin Trading" (for security)</li>
+                    <li>Disable "Enable Futures" (for security)</li>
+                    <li>Disable "Enable Withdrawals" (for security)</li>
+                  </ol>
+                  <p className="mt-3 text-xs text-blue-600">
+                    <strong>Note:</strong> Only "Enable Reading" permission is required for portfolio import.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleBinanceSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="binanceApiKey">Binance API Key</Label>
+                  <Input
+                    id="binanceApiKey"
+                    name="apiKey"
+                    type="password"
+                    value={binanceData.apiKey}
+                    onChange={handleBinanceChange}
+                    placeholder="Enter your Binance API key"
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Your Binance API key (will be encrypted and stored securely)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="binanceApiSecret">Binance API Secret</Label>
+                  <Input
+                    id="binanceApiSecret"
+                    name="apiSecret"
+                    type="password"
+                    value={binanceData.apiSecret}
+                    onChange={handleBinanceChange}
+                    placeholder="Enter your Binance API secret"
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Your Binance API secret (will be encrypted and stored securely)
+                  </p>
+                </div>
+
+                <div className="flex space-x-3">
+                  <Button type="submit" disabled={loading || !binanceData.apiKey || !binanceData.apiSecret}>
+                    {loading ? 'Saving...' : 'Save Binance Credentials'}
+                  </Button>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={handleTestBinance}
+                    disabled={binanceTestLoading || !binanceStatus?.hasCredentials}
+                  >
+                    {binanceTestLoading ? 'Testing...' : 'Test Connection'}
+                  </Button>
+                  {binanceStatus?.hasCredentials && (
+                    <Button 
+                      type="button" 
+                      variant="destructive" 
+                      onClick={handleDeleteBinance}
+                      disabled={loading}
+                    >
+                      Delete Credentials
+                    </Button>
+                  )}
+                </div>
+
+                {binanceStatus && (
+                  <div className={`border rounded-lg p-4 ${
+                    binanceStatus.hasCredentials 
+                      ? 'bg-green-50 border-green-200' 
+                      : 'bg-gray-50 border-gray-200'
+                  }`}>
+                    <h4 className={`text-sm font-medium mb-2 ${
+                      binanceStatus.hasCredentials ? 'text-green-800' : 'text-gray-800'
+                    }`}>
+                      {binanceStatus.hasCredentials ? '✅ Credentials Status' : 'ℹ️ No Credentials'}
+                    </h4>
+                    <div className={`text-sm space-y-1 ${
+                      binanceStatus.hasCredentials ? 'text-green-700' : 'text-gray-600'
+                    }`}>
+                      <p><strong>Status:</strong> {binanceStatus.message}</p>
+                      {binanceStatus.accountInfo && (
+                        <>
+                          <p><strong>Account Type:</strong> {binanceStatus.accountInfo.account_type || 'Unknown'}</p>
+                          <p><strong>Can Trade:</strong> {binanceStatus.accountInfo.can_trade ? 'Yes' : 'No'}</p>
+                          <p><strong>Balances:</strong> {binanceStatus.accountInfo.balances_count || 0} assets</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {error && (
                   <div className="text-red-600 text-sm">
