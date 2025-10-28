@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import List, Dict
 from app.services.price_service import PriceService
+from app.services.multi_exchange_price_service import multi_exchange_price_service
 from app.services.currency_service import currency_service
 from app.api.websocket import manager
 
@@ -15,7 +16,7 @@ class PriceFetcherService:
     def __init__(self, price_service: PriceService):
         self.price_service = price_service
         self.is_running = False
-        self.fetch_interval = 30  # seconds
+        self.fetch_interval = 60  # seconds
         self.tracked_symbols = set()
         
     async def start(self):
@@ -52,7 +53,7 @@ class PriceFetcherService:
                 if self.tracked_symbols:
                     # Fetch prices for all tracked symbols
                     symbols_list = list(self.tracked_symbols)
-                    prices = await self.price_service.get_current_prices(symbols_list)
+                    prices = await multi_exchange_price_service.get_current_prices(symbols_list)
                     
                     # Broadcast price updates via WebSocket
                     for symbol, price in prices.items():

@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
     # Frontend Configuration
-    frontend_refresh_interval: int = 30000
+    frontend_refresh_interval: int = 60000
     
     # Script Configuration
     backend_port: int = 8000

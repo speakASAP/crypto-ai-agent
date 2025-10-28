@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
 from .services.price_service import PriceService
+from .services.multi_exchange_price_service import multi_exchange_price_service
 from .services.csv_import_service import CSVImportService
 from .dependencies.auth import get_current_active_user, get_db_connection
 from .utils.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, generate_reset_token
@@ -51,6 +52,8 @@ class ConnectionManager:
         self.active_connections: List[WebSocket] = []
         self.price_subscribers: Dict[str, Set[WebSocket]] = {}
         self.alert_subscribers: Set[WebSocket] = set()
+        # In-memory price cache: {symbol: {"price": float, "timestamp": str}}
+        self.price_cache: Dict[str, Dict] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -148,7 +151,7 @@ async def fetch_prices_for_symbols(symbols: List[str]):
         # Ensure currency rates are initialized before any conversions
         currency_service.ensure_rates_initialized()
         
-        prices = await price_service.get_current_prices(symbols)
+        prices = await multi_exchange_price_service.get_current_prices(symbols)
         
         if not prices:
             logger.warning("No prices fetched, skipping update")
@@ -229,6 +232,14 @@ async def fetch_prices_for_symbols(symbols: List[str]):
         
         conn.commit()
         
+        # Update in-memory cache
+        current_time = datetime.now(timezone.utc).isoformat()
+        for symbol, price in prices.items():
+            manager.price_cache[symbol] = {
+                "price": price,
+                "timestamp": current_time
+            }
+        
         # Broadcast updates via WebSocket
         for symbol, price in prices.items():
             await manager.broadcast_price_update(symbol, price)
@@ -260,8 +271,8 @@ async def background_price_fetcher():
         except Exception as e:
             logger.error(f"Error in background price fetcher: {e}")
         
-        # Wait 30 seconds before next fetch
-        await asyncio.sleep(30)
+        # Wait 60 seconds before next fetch
+        await asyncio.sleep(60)
 
 async def background_currency_fetcher():
     """Background task to periodically fetch currency rates"""
@@ -2631,12 +2642,42 @@ async def get_tracked_symbols(active_only: bool = False, current_user: dict = De
     
     return symbols
 
+@app.get("/api/symbols/prices")
+async def get_symbol_prices(symbols: str = None, current_user: dict = Depends(get_current_active_user)):
+    """Get current prices for multiple symbols from in-memory cache (batch endpoint)"""
+    try:
+        if not symbols:
+            return []
+        
+        # Parse comma-separated symbols
+        symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
+        
+        if not symbol_list:
+            return []
+        
+        # Get prices from in-memory cache
+        result = []
+        for symbol in symbol_list:
+            if symbol in manager.price_cache:
+                cache_entry = manager.price_cache[symbol]
+                result.append({
+                    "symbol": symbol,
+                    "price": cache_entry["price"],
+                    "timestamp": cache_entry["timestamp"]
+                })
+        
+        return result
+            
+    except Exception as e:
+        logger.error(f"Error fetching cached prices: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch prices")
+
 @app.get("/api/symbols/{symbol}/price")
 async def get_symbol_price(symbol: str, current_user: dict = Depends(get_current_active_user)):
     """Get current price for a specific symbol"""
     try:
         # Get current price from the price service
-        prices = await price_service.get_current_prices([symbol.upper()])
+        prices = await multi_exchange_price_service.get_current_prices([symbol.upper()])
         
         if symbol.upper() in prices:
             return {
@@ -2645,8 +2686,13 @@ async def get_symbol_price(symbol: str, current_user: dict = Depends(get_current
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
         else:
+            # Price not found - return 404 instead of 500
+            logger.warning(f"Price not found for symbol {symbol.upper()}")
             raise HTTPException(status_code=404, detail=f"Price not found for symbol {symbol}")
             
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404)
+        raise
     except Exception as e:
         logger.error(f"Error fetching price for {symbol}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch price")

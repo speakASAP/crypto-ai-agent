@@ -125,6 +125,12 @@ class CurrencyService:
         """Convert amount from one currency to another"""
         if from_currency == to_currency:
             return amount
+        
+        # Handle USDT as a stablecoin (always 1.0 to USD)
+        if from_currency == "USDT" and to_currency == "USD":
+            return amount
+        if from_currency == "USD" and to_currency == "USDT":
+            return amount
             
         # Ensure we have rates before conversion
         if not self.rates:
@@ -136,22 +142,26 @@ class CurrencyService:
                 logger.warning("No rates in database, using fallback rates")
                 self.rates = self.get_fallback_rates()
         
-        # Validate that we have the required currency rates
-        if from_currency != "USD" and from_currency not in self.rates:
+        # Validate that we have the required currency rates (skip USDT as it's a stablecoin)
+        if from_currency != "USD" and from_currency != "USDT" and from_currency not in self.rates:
             logger.error(f"Missing exchange rate for {from_currency}, using fallback")
             self.rates[from_currency] = self.get_fallback_rates().get(from_currency, 1.0)
             
-        if to_currency != "USD" and to_currency not in self.rates:
+        if to_currency != "USD" and to_currency != "USDT" and to_currency not in self.rates:
             logger.error(f"Missing exchange rate for {to_currency}, using fallback")
             self.rates[to_currency] = self.get_fallback_rates().get(to_currency, 1.0)
         
-        # Convert to USD first, then to target currency
-        if from_currency != "USD":
+        # Handle USDT as intermediate currency
+        if from_currency == "USDT":
+            usd_amount = amount  # USDT is 1:1 with USD
+        elif from_currency != "USD":
             usd_amount = amount / self.rates.get(from_currency, 1.0)
         else:
             usd_amount = amount
             
-        if to_currency != "USD":
+        if to_currency == "USDT":
+            converted_amount = usd_amount  # USDT is 1:1 with USD
+        elif to_currency != "USD":
             converted_amount = usd_amount * self.rates.get(to_currency, 1.0)
         else:
             converted_amount = usd_amount
@@ -190,7 +200,7 @@ class CurrencyService:
     
     def get_rate(self, currency: str) -> float:
         """Get exchange rate for a currency, with fallback"""
-        if currency == "USD":
+        if currency == "USD" or currency == "USDT":
             return 1.0
         
         if not self.rates:

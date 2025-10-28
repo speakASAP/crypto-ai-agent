@@ -21,6 +21,24 @@ import { User, LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 
+// Utility function to filter out only fiat currencies (let backend handle crypto symbols with fallback)
+const filterValidSymbols = (symbols: string[]): string[] => {
+  const fiatCurrencies = ['USDT', 'USD', 'EUR', 'GBP', 'JPY', 'CZK', 'USDC', 'BUSD', 'DAI', 'TUSD']
+  
+  return symbols.filter(symbol => {
+    const symbolUpper = symbol.toUpperCase()
+    
+    // Skip fiat currencies (these are handled directly in the frontend)
+    if (fiatCurrencies.includes(symbolUpper)) {
+      console.log(`🚫 Skipping fiat currency: ${symbolUpper}`)
+      return false
+    }
+    
+    // Let backend handle all crypto symbols with multi-exchange fallback
+    return true
+  })
+}
+
 export default function Home() {
   const router = useRouter()
   const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem, viewMode, sort, filters, setViewMode, setSort, setFilters, loadPreferencesFromUser } = usePortfolioStore()
@@ -130,17 +148,36 @@ export default function Home() {
     setLoadingAlertPrices(true)
     try {
       const uniqueSymbols = Array.from(new Set(alerts.map(alert => alert.symbol)))
+      const validSymbols = filterValidSymbols(uniqueSymbols)
       const prices: Record<string, number> = {}
       
+      // Handle USDT and other fiat currencies directly
       for (const symbol of uniqueSymbols) {
+        const symbolUpper = symbol.toUpperCase()
+        if (['USDT', 'USD', 'EUR', 'GBP', 'JPY', 'CZK', 'USDC', 'BUSD', 'DAI', 'TUSD'].includes(symbolUpper)) {
+          // For fiat currencies, use exchange rate conversion
+          if (symbolUpper === 'USDT' || symbolUpper === 'USD') {
+            prices[symbol] = 1.0
+          } else {
+            prices[symbol] = exchangeRates[symbolUpper] || 1.0
+          }
+          continue
+        }
+      }
+      
+      // Use batch endpoint to fetch all prices in one request
+      if (validSymbols.length > 0) {
         try {
-          const data = await apiClient.getSymbolPrice(symbol)
-          const usdPrice = data.price
-          const convertedPrice = convertToCurrency(usdPrice, selectedCurrency)
-          prices[symbol] = convertedPrice
+          const batchPrices = await apiClient.getSymbolPrices(validSymbols)
+          
+          // Convert batch prices to the format we need
+          for (const priceData of batchPrices) {
+            const usdPrice = priceData.price
+            const convertedPrice = convertToCurrency(usdPrice, selectedCurrency)
+            prices[priceData.symbol] = convertedPrice
+          }
         } catch (error) {
-          console.error(`Failed to fetch price for ${symbol}:`, error)
-          prices[symbol] = 0
+          console.error('Failed to fetch batch prices:', error)
         }
       }
       
@@ -204,18 +241,22 @@ export default function Home() {
       // Subscribe to price updates for portfolio symbols
       if (items.length > 0) {
         const symbols = items.map(item => item.symbol)
-        subscribeToPrices(symbols)
-        console.log('📊 Subscribing to portfolio symbols:', symbols)
+        const validSymbols = filterValidSymbols(symbols)
+        subscribeToPrices(validSymbols)
+        console.log('📊 Subscribing to portfolio symbols:', validSymbols)
       }
       
       // Also subscribe to tracked symbols if available
       if (trackedSymbols.length > 0) {
         const symbols = trackedSymbols.map(s => s.symbol)
-        subscribeToPrices(symbols)
-        console.log('📊 Subscribing to tracked symbols:', symbols)
+        const validSymbols = filterValidSymbols(symbols)
+        subscribeToPrices(validSymbols)
+        console.log('📊 Subscribing to tracked symbols:', validSymbols)
       }
     }
-  }, [isConnected, items, trackedSymbols, subscribeToPrices, subscribeToAlerts])
+    // Only re-subscribe when the actual symbol lists change, not on every reference change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, JSON.stringify(items.map(i => i.symbol)), JSON.stringify(trackedSymbols.map(s => s.symbol))])
 
   // Load portfolio preferences from user when available
   useEffect(() => {
@@ -249,7 +290,7 @@ export default function Home() {
   useEffect(() => {
     const refreshInterval = process.env.NEXT_PUBLIC_FRONTEND_REFRESH_INTERVAL 
       ? parseInt(process.env.NEXT_PUBLIC_FRONTEND_REFRESH_INTERVAL) 
-      : 30000 // Default 30 seconds
+      : 60000 // Default 60 seconds
     
     const interval = setInterval(() => {
       loadCryptoTimestamps()
@@ -848,8 +889,10 @@ export default function Home() {
               bVal = b.pnl_percent || 0
               break
             case 'current_value':
-              aVal = a.current_value || 0
-              bVal = b.current_value || 0
+              // Sort by P&L (mathematically correct: positive down to 0, then negative)
+              // sorting should be like 45, 12, 9, -3, -10, -200
+              aVal = a.pnl || 0
+              bVal = b.pnl || 0
               break
             default:
               return 0
@@ -1084,24 +1127,24 @@ export default function Home() {
                         ) : item.current_price ? formatCurrencyAmount(item.current_price) : 'N/A'}
                       </div>
                     </div>
-                    {item.current_value && (
+                    {item.pnl !== undefined && (
                       <div className="text-right">
                         <div className={`text-sm font-medium px-2 py-1 rounded transition-all duration-300 ease-in-out ${
-                          item.current_value >= (item.amount * item.price_buy) + item.commission
+                          item.pnl >= 0
                             ? 'text-green-600 bg-green-50'
                             : 'text-red-600 bg-red-50'
                         }`}>
                           {(loading || currencyChanging) ? (
                             <span className="animate-pulse">Loading...</span>
-                          ) : formatCurrencyAmount(item.current_value)}
+                          ) : formatCurrencyAmount(item.pnl)}
                         </div>
-                        {item.pnl !== undefined && (
+                        {item.current_value && (
                           <div className={`text-sm transition-all duration-300 ease-in-out ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {(loading || currencyChanging) ? (
                               <span className="animate-pulse">Loading...</span>
                             ) : (
                               <>
-                                {formatCurrencyAmount(item.pnl)} ({formatPercentAmount(item.pnl_percent || 0)})
+                                {formatCurrencyAmount(item.current_value)} ({formatPercentAmount(item.pnl_percent || 0)})
                               </>
                             )}
                           </div>
@@ -1273,8 +1316,27 @@ export default function Home() {
               No active alerts. Create some price alerts to get notified.
             </div>
           ) : (
-            <div className="space-y-2">
-              {alerts.map((alert) => {
+            <>
+              <div className="flex justify-end mb-2">
+                <div className="text-sm text-muted-foreground">
+                  Showing {alerts.length} alert{alerts.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+              <div className="space-y-2">
+              {alerts
+                .sort((a, b) => {
+                  // Sort by symbol first
+                  if (a.symbol !== b.symbol) {
+                    return a.symbol.localeCompare(b.symbol)
+                  }
+                  // If same symbol, sort by alert type (ABOVE before BELOW)
+                  if (a.alert_type !== b.alert_type) {
+                    return a.alert_type === 'ABOVE' ? -1 : 1
+                  }
+                  // If same type, sort by threshold price
+                  return a.threshold_price - b.threshold_price
+                })
+                .map((alert) => {
                 const currentPrice = alertCurrentPrices[alert.symbol] || 0
                 const priceDiff = calculatePriceDifference(currentPrice, alert.threshold_price)
                 
@@ -1348,7 +1410,8 @@ export default function Home() {
                   </div>
                 )
               })}
-            </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

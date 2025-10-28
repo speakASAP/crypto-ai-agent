@@ -27,8 +27,45 @@ class PriceService:
         if not symbols:
             return {}
         
-        # Create symbol list for Binance API
-        symbol_list = [f"{symbol.upper()}USDT" for symbol in symbols]
+        # Filter out invalid symbols and create symbol list for Binance API
+        valid_symbols = []
+        symbol_list = []
+        
+        # Known fiat currencies that should never be fetched as crypto prices
+        fiat_currencies = {'USDT', 'USD', 'EUR', 'GBP', 'JPY', 'CZK', 'CAD', 'AUD', 'CHF', 'SEK', 'NOK', 'DKK', 'PLN', 'HUF', 'RUB', 'CNY', 'KRW', 'SGD', 'HKD', 'NZD', 'TRY', 'BRL', 'MXN', 'INR', 'ZAR', 'THB', 'MYR', 'PHP', 'IDR', 'VND'}
+        
+        # Known invalid/problematic symbols that don't exist on Binance
+        invalid_symbols = {'USDC', 'BUSD', 'TUSD', 'DAI', 'FRAX', 'LUSD', 'SUSD', 'GUSD', 'USDP', 'USDD', 'UST', 'USTC', 'LUNA', 'LUNA2', 'LUNC'}
+        
+        for symbol in symbols:
+            symbol_upper = symbol.upper()
+            
+            # Skip fiat currencies
+            if symbol_upper in fiat_currencies:
+                logger.debug(f"Skipping fiat currency {symbol_upper}")
+                continue
+                
+            # Skip known invalid symbols
+            if symbol_upper in invalid_symbols:
+                logger.debug(f"Skipping invalid/problematic symbol {symbol_upper}")
+                continue
+                
+            # Skip symbols that end with USDT (invalid pairs)
+            if symbol_upper.endswith('USDT') and symbol_upper != 'USDT':
+                logger.debug(f"Skipping invalid pair {symbol_upper}")
+                continue
+            
+            # Skip very short or very long symbols (likely invalid)
+            if len(symbol_upper) < 2 or len(symbol_upper) > 10:
+                logger.debug(f"Skipping symbol with invalid length {symbol_upper}")
+                continue
+            
+            valid_symbols.append(symbol_upper)
+            symbol_list.append(f"{symbol_upper}USDT")
+        
+        if not valid_symbols:
+            logger.debug(f"No valid symbols found in input: {symbols}")
+            return {}
         
         try:
             # Create SSL context that doesn't verify certificates
@@ -57,7 +94,7 @@ class PriceService:
                         logger.warning(f"Failed to fetch price for {symbol_list[i]}: {result}")
                         continue
                     if result:
-                        base_symbol = symbol_list[i].replace('USDT', '')
+                        base_symbol = valid_symbols[i]
                         prices[base_symbol] = result
                         # Track individual symbol update time
                         self.last_updated_timestamps[base_symbol] = current_time
