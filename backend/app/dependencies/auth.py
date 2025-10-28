@@ -42,7 +42,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?", 
+        "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = ?", 
         (user_id,)
     )
     user = cursor.fetchone()

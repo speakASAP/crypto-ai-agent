@@ -28,6 +28,8 @@ interface AlertModalProps {
     pnl_percent?: number
   }
   availableSymbols?: string[]
+  defaultAlertPercentageAbove?: number
+  defaultAlertPercentageBelow?: number
 }
 
 // Utility function to format numbers with spaces for thousands
@@ -51,7 +53,7 @@ const parseFormattedNumber = (value: string): number => {
   return parseFloat(value.replace(/\s/g, ''))
 }
 
-export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, currentPrice, selectedCurrency, portfolioItem, availableSymbols = [] }: AlertModalProps) {
+export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, currentPrice, selectedCurrency, portfolioItem, availableSymbols = [], defaultAlertPercentageAbove, defaultAlertPercentageBelow }: AlertModalProps) {
   const [formData, setFormData] = useState({
     symbol: '',
     threshold_price: '',
@@ -139,16 +141,20 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
       setSelectedSymbol(alert.symbol)
       setSelectedCurrentPrice(0) // We don't have current price for editing
     } else if (presetSymbol && currentPrice) {
+      // Apply default percentage for ABOVE alert type if provided
+      const adjustment = defaultAlertPercentageAbove ? currentPrice * (defaultAlertPercentageAbove / 100) : 0
+      const defaultThreshold = currentPrice + adjustment
+      
       setFormData({
         symbol: presetSymbol,
-        threshold_price: currentPrice.toString(),
+        threshold_price: defaultThreshold.toString(),
         alert_type: 'ABOVE',
         message: ''
       })
-      setThresholdPrice(currentPrice)
+      setThresholdPrice(defaultThreshold)
       setSelectedSymbol(presetSymbol)
       setSelectedCurrentPrice(currentPrice)
-      setFormattedThresholdPrice(formatNumberWithSpaces(currentPrice))
+      setFormattedThresholdPrice(formatNumberWithSpaces(defaultThreshold))
       // Set price range to ±50% of current price
       const range = currentPrice * 0.5
       setPriceRange({
@@ -177,6 +183,30 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
       loadExchangeRates()
     }
   }, [isOpen])
+
+  // Apply default percentage when alert type changes (only for new alerts, not when editing)
+  useEffect(() => {
+    if (!alert && !presetSymbol && selectedSymbol && selectedCurrentPrice > 0) {
+      const percentage = formData.alert_type === 'ABOVE' ? defaultAlertPercentageAbove : defaultAlertPercentageBelow
+      if (percentage == null) return
+      const adjustment = selectedCurrentPrice * (percentage / 100)
+      const newThreshold = formData.alert_type === 'ABOVE' 
+        ? selectedCurrentPrice + adjustment 
+        : selectedCurrentPrice - adjustment
+      
+      // Clamp to price range if available
+      const clampedThreshold = priceRange.min && priceRange.max 
+        ? Math.max(priceRange.min, Math.min(priceRange.max, newThreshold))
+        : newThreshold
+      
+      setThresholdPrice(clampedThreshold)
+      setFormattedThresholdPrice(formatNumberWithSpaces(clampedThreshold))
+      setFormData( prev => ({ 
+        ...prev, 
+        threshold_price: clampedThreshold.toString() 
+      }))
+    }
+  }, [formData.alert_type, selectedSymbol, selectedCurrentPrice, defaultAlertPercentageAbove, defaultAlertPercentageBelow])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

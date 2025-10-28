@@ -1,8 +1,23 @@
 import { create } from 'zustand'
-import { devtools } from 'zustand/middleware'
+import { devtools, persist, createJSONStorage } from 'zustand/middleware'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PortfolioSummary, Currency } from '@/types'
+import { User } from '@/types/auth'
 import { apiClient } from '@/lib/api'
 import { refreshCryptoPrices } from '@/lib/refreshUtils'
+
+type ViewMode = 'cards' | 'table'
+type SortBy = 'symbol' | 'investment' | 'platform' | 'pnl' | 'pnl_percent' | 'current_value'
+type SortDir = 'asc' | 'desc'
+interface PortfolioFilters {
+  symbol: string
+  platform: string | 'All'
+  investmentMin?: number
+  investmentMax?: number
+  pnlMin?: number
+  pnlMax?: number
+  pnlPercentMin?: number
+  pnlPercentMax?: number
+}
 
 interface PortfolioState {
   items: PortfolioItem[]
@@ -10,6 +25,10 @@ interface PortfolioState {
   selectedCurrency: Currency
   loading: boolean
   error: string | null
+  viewMode: ViewMode
+  sort: { by: SortBy; dir: SortDir }
+  filters: PortfolioFilters
+  persistTimeout: NodeJS.Timeout | null
   
   // Actions
   fetchPortfolio: () => Promise<void>
@@ -21,16 +40,29 @@ interface PortfolioState {
   setCurrencyFromUserPreference: (currency: Currency) => void
   clearError: () => void
   updatePortfolioWithNewPrice: (symbol: string, price: number, exchangeRates?: Record<string, number>) => void
+  setViewMode: (viewMode: ViewMode) => void
+  setSort: (by: SortBy, dir?: SortDir) => void
+  setFilters: (filters: Partial<PortfolioFilters>) => void
+  loadPreferencesFromUser: (user: User) => void
+  persistPreferences: () => void
 }
 
 export const usePortfolioStore = create<PortfolioState>()(
-  devtools(
-    (set, get) => ({
+  persist(
+    devtools(
+      (set, get) => ({
       items: [],
       summary: null,
       selectedCurrency: 'USD',
       loading: false,
       error: null,
+      viewMode: 'cards',
+      sort: { by: 'symbol', dir: 'asc' },
+      filters: {
+        symbol: '',
+        platform: 'All'
+      },
+      persistTimeout: null,
 
       fetchPortfolio: async () => {
         set({ loading: true, error: null })
@@ -236,10 +268,73 @@ export const usePortfolioStore = create<PortfolioState>()(
           items: updatedItems,
           summary: newSummary
         })
+      },
+
+      setViewMode: (viewMode: ViewMode) => {
+        set({ viewMode })
+        get().persistPreferences()
+      },
+
+      setSort: (by: SortBy, dir?: SortDir) => {
+        const state = get()
+        const currentDir = by === state.sort.by ? state.sort.dir : 'asc'
+        const newDir: SortDir = dir || (currentDir === 'asc' ? 'desc' : 'asc')
+        set({ sort: { by, dir: newDir } })
+        get().persistPreferences()
+      },
+
+      setFilters: (newFilters: Partial<PortfolioFilters>) => {
+        const current = get().filters
+        set({ filters: { ...current, ...newFilters } })
+        get().persistPreferences()
+      },
+
+      loadPreferencesFromUser: (user: User) => {
+        if (user.preferred_portfolio_view) {
+          set({ viewMode: user.preferred_portfolio_view })
+        }
+        if (user.portfolio_sort) {
+          set({ sort: user.portfolio_sort as { by: SortBy; dir: SortDir } })
+        }
+        if (user.portfolio_filters) {
+          set({ filters: { ...get().filters, ...user.portfolio_filters } })
+        }
+      },
+
+      persistPreferences: () => {
+        const state = get()
+        // Clear existing timeout
+        if (state.persistTimeout) {
+          clearTimeout(state.persistTimeout)
+        }
+        
+        // Set new timeout for throttling
+        const timeout = setTimeout(async () => {
+          try {
+            await apiClient.updateProfile({
+              preferred_portfolio_view: state.viewMode,
+              portfolio_sort: state.sort,
+              portfolio_filters: state.filters
+            })
+          } catch (error) {
+            console.error('Failed to persist portfolio preferences:', error)
+          }
+        }, 500)
+        
+        set({ persistTimeout: timeout })
       }
     }),
+    { name: 'portfolio-store' }
+    ),
     {
-      name: 'portfolio-store'
+      name: 'portfolio-preferences',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state: PortfolioState) => ({
+        selectedCurrency: state.selectedCurrency,
+        viewMode: state.viewMode,
+        sort: state.sort,
+        filters: state.filters
+      })
     }
   )
 )

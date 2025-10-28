@@ -8,6 +8,11 @@ export interface User {
   created_at: string
   telegram_bot_token?: string
   telegram_chat_id?: string
+  default_alert_percentage_above?: number
+  default_alert_percentage_below?: number
+  preferred_portfolio_view?: 'cards' | 'table'
+  portfolio_sort?: { by: string; dir: string }
+  portfolio_filters?: Record<string, any>
 }
 
 export interface UserLogin {
@@ -45,6 +50,11 @@ export interface UserProfileUpdate {
   preferred_currency?: string
   telegram_bot_token?: string
   telegram_chat_id?: string
+  default_alert_percentage_above?: number
+  default_alert_percentage_below?: number
+  preferred_portfolio_view?: 'cards' | 'table'
+  portfolio_sort?: { by: string; dir: string }
+  portfolio_filters?: Record<string, any>
 }
 
 export interface PasswordChange {

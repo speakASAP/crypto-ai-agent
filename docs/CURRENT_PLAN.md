@@ -33,6 +33,32 @@
 - ✅ Error handling and troubleshooting
 - ✅ Comprehensive testing and validation
 
+### ✅ CSV Portfolio Import (COMPLETED)
+
+**Status**: FULLY IMPLEMENTED AND TESTED
+**Completion Date**: 2025-01-28
+
+#### Import Features
+
+- ✅ Flexible column mapping with automatic template detection
+- ✅ Fuzzy header matching using Levenshtein distance (60% threshold)
+- ✅ Transaction aggregation - combines buy/sell into net positions
+- ✅ Weighted average pricing for accurate cost basis
+- ✅ Multi-currency support with automatic USD conversion
+- ✅ Template presets for Revolut, Coinbase, and Binance
+- ✅ Duplicate prevention
+- ✅ Import history tracking
+- ✅ Support for various date and number formats
+
+#### Technical Implementation
+
+- ✅ CSVImportService with fuzzy matching and aggregation
+- ✅ Template system with JSON configuration files
+- ✅ Database table for user-specific column mappings
+- ✅ 5 API endpoints for upload, execute, templates, and mappings
+- ✅ Comprehensive error handling and validation
+- ✅ Tested with Revolut CSV (19 transactions → 15 aggregated positions)
+
 ### ✅ Account Management Enhancement (COMPLETED)
 
 **Status**: FULLY IMPLEMENTED AND TESTED

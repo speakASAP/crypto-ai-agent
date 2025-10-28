@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, status
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, status, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
 from .services.price_service import PriceService
+from .services.csv_import_service import CSVImportService
 from .dependencies.auth import get_current_active_user, get_db_connection
 from .utils.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, generate_reset_token
 from .core.config import settings
@@ -847,6 +848,8 @@ class UserResponse(BaseModel):
     created_at: str
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
+    default_alert_percentage_above: Optional[float] = 60.0
+    default_alert_percentage_below: Optional[float] = 20.0
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -876,12 +879,21 @@ class UserProfileUpdate(BaseModel):
     telegram_chat_id: Optional[str] = None
     binance_api_key: Optional[str] = None
     binance_api_secret: Optional[str] = None
+    default_alert_percentage_above: Optional[float] = None
+    default_alert_percentage_below: Optional[float] = None
 
     @validator('username')
     def validate_username(cls, v):
         if v is not None:
             if len(v) < 3:
                 raise ValueError('Username must be at least 3 characters')
+        return v
+    
+    @validator('default_alert_percentage_above', 'default_alert_percentage_below')
+    def validate_percentage(cls, v):
+        if v is not None:
+            if v < 0 or v > 1000:
+                raise ValueError('Percentage must be between 0 and 1000')
         return v
 
     @validator('preferred_currency')
@@ -995,6 +1007,19 @@ class BinanceTestResponse(BaseModel):
     account_info: Optional[Dict[str, Any]] = None
     error_code: Optional[str] = None
     troubleshooting: Optional[str] = None
+
+class CSVUploadResponse(BaseModel):
+    success: bool
+    message: str
+    detected_exchange: Optional[str] = None
+    preview_data: List[Dict[str, Any]] = []
+    total_rows: int = 0
+    aggregated_items: List[Dict[str, Any]] = []
+    errors: List[str] = []
+
+class CSVExecuteRequest(BaseModel):
+    exchange: str
+    column_mapping: Optional[Dict[str, str]] = None
 
 def init_database():
     """Initialize SQLite database with user management tables"""
@@ -1171,6 +1196,22 @@ def init_database():
         # Column already exists, ignore
         pass
     
+    # Add default_alert_percentage_above column to existing users table if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN default_alert_percentage_above REAL DEFAULT 60.0")
+        logger.info("✅ Added default_alert_percentage_above column to users table")
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
+    # Add default_alert_percentage_below column to existing users table if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN default_alert_percentage_below REAL DEFAULT 20.0")
+        logger.info("✅ Added default_alert_percentage_below column to users table")
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
     # Add symbol column to existing alert_history table if it doesn't exist
     try:
         cursor.execute("ALTER TABLE alert_history ADD COLUMN symbol TEXT")
@@ -1278,6 +1319,21 @@ def init_database():
             encrypted_credentials TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            UNIQUE(user_id, exchange)
+        )
+    ''')
+    
+    # Create CSV import mappings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS csv_import_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            exchange TEXT NOT NULL,
+            column_mapping TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_used TEXT,
             FOREIGN KEY (user_id) REFERENCES users (id),
             UNIQUE(user_id, exchange)
         )
@@ -1641,7 +1697,9 @@ async def get_current_user_info(current_user: dict = Depends(get_current_active_
         is_active=current_user["is_active"],
         created_at=current_user["created_at"],
         telegram_bot_token=current_user.get("telegram_bot_token"),
-        telegram_chat_id=current_user.get("telegram_chat_id")
+        telegram_chat_id=current_user.get("telegram_chat_id"),
+        default_alert_percentage_above=current_user.get("default_alert_percentage_above"),
+        default_alert_percentage_below=current_user.get("default_alert_percentage_below")
     )
 
 @app.put("/api/auth/profile", response_model=UserResponse)
@@ -1682,6 +1740,12 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
     if update_data.telegram_chat_id is not None:
         update_fields.append("telegram_chat_id = ?")
         update_values.append(update_data.telegram_chat_id)
+    if update_data.default_alert_percentage_above is not None:
+        update_fields.append("default_alert_percentage_above = ?")
+        update_values.append(update_data.default_alert_percentage_above)
+    if update_data.default_alert_percentage_below is not None:
+        update_fields.append("default_alert_percentage_below = ?")
+        update_values.append(update_data.default_alert_percentage_below)
     
     if update_fields:
         update_fields.append("updated_at = ?")
@@ -1701,7 +1765,7 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         )
     
     # Get updated user
-    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?", (current_user["id"],))
+    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = ?", (current_user["id"],))
     user = cursor.fetchone()
     conn.close()
     
@@ -1714,7 +1778,9 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         is_active=user[5],
         created_at=user[6],
         telegram_bot_token=user[7],
-        telegram_chat_id=user[8]
+        telegram_chat_id=user[8],
+        default_alert_percentage_above=user[9] if user[9] is not None else 60.0,
+        default_alert_percentage_below=user[10] if user[10] is not None else 20.0
     )
 
 @app.post("/api/auth/change-password")
@@ -3166,6 +3232,325 @@ async def get_import_history(current_user: dict = Depends(get_current_active_use
     except Exception as e:
         logger.error(f"Error getting import history: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get import history: {str(e)}")
+
+# CSV Import Endpoints
+csv_import_service = CSVImportService()
+
+@app.post("/api/import/csv/upload", response_model=CSVUploadResponse)
+async def upload_csv_file(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Upload and preview CSV file"""
+    try:
+        # Validate file
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="File must be a CSV file")
+        
+        # Read file content
+        content = await file.read()
+        
+        if len(content) > 10 * 1024 * 1024:  # 10MB limit
+            raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+        
+        # Parse CSV
+        rows = csv_import_service.parse_csv_file(content)
+        
+        if not rows:
+            return CSVUploadResponse(
+                success=False,
+                message="CSV file is empty or invalid",
+                errors=["No data found in CSV file"]
+            )
+        
+        # Get headers from first row
+        headers = list(rows[0].keys()) if rows else []
+        
+        # Detect exchange format
+        detected_exchange = csv_import_service.detect_exchange_format(headers)
+        
+        if not detected_exchange:
+            return CSVUploadResponse(
+                success=False,
+                message="Could not detect exchange format. Please use a supported exchange or manually map columns.",
+                preview_data=rows[:5],  # Show first 5 rows
+                total_rows=len(rows),
+                errors=["No matching exchange template found"]
+            )
+        
+        # Get template
+        template = csv_import_service.get_template(detected_exchange)
+        
+        # Normalize and aggregate transactions
+        normalized_txns = []
+        errors = []
+        
+        for i, row in enumerate(rows, start=2):  # Start at 2 (row 1 is header)
+            txn = csv_import_service.normalize_transaction(row, template, detected_exchange)
+            if txn:
+                normalized_txns.append(txn)
+            else:
+                errors.append(f"Row {i}: Failed to parse transaction")
+        
+        if not normalized_txns:
+            return CSVUploadResponse(
+                success=False,
+                message="No valid transactions found in CSV",
+                detected_exchange=detected_exchange,
+                total_rows=len(rows),
+                errors=errors
+            )
+        
+        # Aggregate transactions by symbol
+        aggregated_items = csv_import_service.aggregate_transactions(normalized_txns)
+        
+        return CSVUploadResponse(
+            success=True,
+            message=f"Successfully parsed CSV file. Found {len(aggregated_items)} unique symbols from {len(normalized_txns)} transactions.",
+            detected_exchange=detected_exchange,
+            preview_data=normalized_txns[:10],  # First 10 transactions
+            total_rows=len(rows),
+            aggregated_items=aggregated_items,
+            errors=errors[:10] if errors else []
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading CSV file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process CSV file: {str(e)}")
+
+@app.post("/api/import/csv/execute")
+async def execute_csv_import(
+    file: UploadFile = File(...),
+    exchange: str = Form(...),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Execute CSV import and save to database"""
+    try:
+        logger.info(f"🔵 CSV execute import started by user {current_user['id']}")
+        logger.info(f"📊 Exchange parameter: {exchange}")
+        
+        logger.info(f"📊 Processing CSV import for exchange: {exchange}")
+        
+        # Read file content
+        content = await file.read()
+        logger.info(f"📁 Read {len(content)} bytes from CSV file")
+        
+        # Parse CSV
+        logger.info("🔄 Parsing CSV file...")
+        rows = csv_import_service.parse_csv_file(content)
+        logger.info(f"✅ Parsed {len(rows)} rows from CSV")
+        
+        if not rows:
+            logger.error("❌ CSV file is empty or invalid")
+            raise HTTPException(status_code=400, detail="CSV file sort is empty or invalid")
+        
+        # Get template
+        logger.info(f"🔍 Getting template for exchange: {exchange}")
+        template = csv_import_service.get_template(exchange)
+        if not template:
+            logger.error(f"❌ Unknown exchange: {exchange}")
+            raise HTTPException(status_code=400, detail=f"Unknown exchange: {exchange}")
+        
+        logger.info(f"✅ Template found for {exchange}")
+        
+        # Normalize transactions
+        logger.info("🔄 Normalizing transactions...")
+        normalized_txns = []
+        for idx, row in enumerate(rows):
+            txn = csv_import_service.normalize_transaction(row, template, exchange)
+            if txn:
+                normalized_txns.append(txn)
+            elif idx < 5:  # Log first 5 errors
+                logger.warning(f"⚠️ Failed to normalize transaction {idx}: {row}")
+        
+        logger.info(f"✅ Normalized {len(normalized_txns)} transactions")
+        
+        if not normalized_txns:
+            logger.error("❌ No valid transactions found in CSV")
+            raise HTTPException(status_code=400, detail="No valid transactions found in CSV")
+        
+        # Aggregate transactions
+        logger.info("🔄 Aggregating transactions...")
+        aggregated_items = csv_import_service.aggregate_transactions(normalized_txns)
+        logger.info(f"✅ Aggregated to {len(aggregated_items)} positions")
+        
+        if not aggregated_items:
+            logger.error("❌ No valid positions after aggregation")
+            raise HTTPException(status_code=400, detail="No valid positions after aggregation")
+        
+        # Save to database
+        logger.info("💾 Saving to database...")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        imported_count = 0
+        now = datetime.now().isoformat() + "Z"
+        
+        for item in aggregated_items:
+            try:
+                # Check for duplicate
+                cursor.execute('''
+                    SELECT id FROM portfolio_items 
+                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
+                ''', (current_user["id"], item['symbol'], item['quantity']))
+                
+                if cursor.fetchone():
+                    logger.info(f"Skipping duplicate: {item['symbol']}")
+                    continue
+                
+                # Convert to USD
+                currency = item.get('currency', 'USD')
+                currency_service.ensure_rates_initialized()
+                
+                if currency != 'USD':
+                    exchange_rate = currency_service.rates.get(currency, 1.0)
+                    price_usd = item['price'] / exchange_rate
+                    fees_usd = item['fees'] / exchange_rate if item['fees'] > 0 else 0.0
+                    value_usd = item.get('value', 0) / exchange_rate if item.get('value', 0) > 0 else 0.0
+                else:
+                    exchange_rate = None
+                    price_usd = item['price']
+                    fees_usd = item['fees']
+                    value_usd = item.get('value', 0)
+                
+                # Calculate total investment from SSR value field or calculate it
+                if item.get('value', 0) > 0:
+                    total_investment = item['value'] + item['fees']
+                else:
+                    total_investment = item['quantity'] * item['price'] + item['fees']
+                
+                # Format currency symbol for display
+                currency_symbols = {'USD': '$', 'EUR': '€', 'CZK': 'Kč', 'GBP': '£', 'JPY': '¥'}
+                currency_symbol = currency_symbols.get(currency, currency + ' ')
+                
+                total_investment_text = f"{currency_symbol}{total_investment:.2f}"
+                
+                cursor.execute('''
+                    INSERT INTO portfolio_items 
+                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission,
+                     total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    current_user["id"], item['symbol'], item['quantity'], item['price'],
+                    item['date'], currency, exchange.capitalize(), item['fees'],
+                    total_investment_text, now, now, price_usd, fees_usd, exchange_rate
+                ))
+                
+                imported_count += 1
+                
+            except Exception as e:
+                logger.warning(f"Failed to import item {item['symbol']}: {e}")
+                continue
+        
+        # Save column mapping
+        column_mapping_data = {
+            'column_mapping': template.get('column_mapping', {}),
+            'headers': list(rows[0].keys()) if rows else []
+        }
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO csv_import_mappings 
+            (user_id, exchange, column_mapping, created_at, updated_at, last_used)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+        ''', (current_user["id"], exchange.lower(), json.dumps(column_mapping_data)))
+        
+        # Record import history
+        cursor.execute('''
+            INSERT INTO import_history 
+            (user_id, source, import_date, items_imported, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            current_user["id"], exchange.capitalize(), now, imported_count, 
+            'success' if imported_count > 0 else 'partial', now
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ CSV import completed: {imported_count} items imported for user {current_user['id']}")
+        
+        return {
+            'success': True,
+            'message': f'Successfully imported {imported_count} portfolio items from CSV',
+            'items_imported': imported_count,
+            'total_found': len(aggregated_items)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing CSV import: {e}")
+        raise HTTPException(status_code=500, detail=f"Import execution failed: {str(e)}")
+
+@app.get("/api/import/csv/templates")
+async def get_csv_templates():
+    """Get available CSV import templates"""
+    try:
+        templates = []
+        for exchange, template in csv_import_service.templates.items():
+            templates.append({
+                'exchange': exchange,
+                'name': template.get('name', exchange),
+                'required_fields': template.get('required_fields', []),
+                'optional_fields': template.get('optional_fields', [])
+            })
+        return {'templates': templates}
+    except Exception as e:
+        logger.error(f"Error getting CSV templates: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get templates: {str(e)}")
+
+@app.get("/api/import/csv/mapping/{exchange}")
+async def get_csv_mapping(exchange: str, current_user: dict = Depends(get_current_active_user)):
+    """Get user's saved CSV column mapping"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT column_mapping FROM csv_import_mappings
+            WHERE user_id = ? AND exchange = ?
+        ''', (current_user["id"], exchange.lower()))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            return {'mapping': json.loads(result[0])}
+        else:
+            raise HTTPException(status_code=404, detail="Mapping not found")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting CSV mapping: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get mapping: {str(e)}")
+
+@app.post("/api/import/csv/mapping/{exchange}")
+async def save_csv_mapping(
+    exchange: str,
+    mapping_data: Dict[str, Any],
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Save custom CSV column mapping"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO csv_import_mappings 
+            (user_id, exchange, column_mapping, created_at, updated_at, last_used)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+        ''', (current_user["id"], exchange.lower(), json.dumps(mapping_data)))
+        
+        conn.commit()
+        conn.close()
+        
+        return {'message': 'Mapping saved successfully'}
+        
+    except Exception as e:
+        logger.error(f"Error saving CSV mapping: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save mapping: {str(e)}")
 
 @app.get("/health")
 async def health_check():

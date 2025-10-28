@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +17,9 @@ export default function ProfilePage() {
     fullName: '',
     preferredCurrency: 'USD',
     telegramBotToken: '',
-    telegramChatId: ''
+    telegramChatId: '',
+    defaultAlertPercentageAbove: '60',
+    defaultAlertPercentageBelow: '20'
   })
   const [binanceData, setBinanceData] = useState({
     apiKey: '',
@@ -58,6 +60,15 @@ export default function ProfilePage() {
   } | null>(null)
   const { user, updateProfile, changePassword, logout, deleteAccount, testTelegramConnection, loading } = useAuthStore()
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Set initial tab from URL parameter
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (tab && ['profile', 'password', 'telegram', 'binance', 'bitfinex', 'system'].includes(tab)) {
+      setActiveTab(tab as 'profile' | 'password' | 'telegram' | 'binance' | 'bitfinex' | 'system')
+    }
+  }, [searchParams])
 
   useEffect(() => {
     if (user) {
@@ -67,7 +78,9 @@ export default function ProfilePage() {
         fullName: user.full_name || '',
         preferredCurrency: user.preferred_currency || 'USD',
         telegramBotToken: user.telegram_bot_token || '',
-        telegramChatId: user.telegram_chat_id || ''
+        telegramChatId: user.telegram_chat_id || '',
+        defaultAlertPercentageAbove: (user.default_alert_percentage_above || 60).toString(),
+        defaultAlertPercentageBelow: (user.default_alert_percentage_below || 20).toString()
       })
     }
   }, [user])
@@ -98,7 +111,9 @@ export default function ProfilePage() {
         full_name: profileData.fullName || undefined,
         preferred_currency: profileData.preferredCurrency,
         telegram_bot_token: profileData.telegramBotToken || '',
-        telegram_chat_id: profileData.telegramChatId || ''
+        telegram_chat_id: profileData.telegramChatId || '',
+        default_alert_percentage_above: profileData.defaultAlertPercentageAbove ? parseFloat(profileData.defaultAlertPercentageAbove) : undefined,
+        default_alert_percentage_below: profileData.defaultAlertPercentageBelow ? parseFloat(profileData.defaultAlertPercentageBelow) : undefined
       })
       setSuccess('Profile updated successfully')
     } catch (error: any) {
@@ -556,6 +571,52 @@ export default function ProfilePage() {
                     <option value="EUR">EUR - Euro</option>
                     <option value="CZK">CZK - Czech Koruna</option>
                   </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6 items-start">
+                  <div className="space-y-2">
+                    <Label htmlFor="defaultAlertPercentageBelow">Default Alert Percentage (Below)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="defaultAlertPercentageBelow"
+                        name="defaultAlertPercentageBelow"
+                        type="number"
+                        min="0"
+                        max="1000"
+                        step="0.1"
+                        value={profileData.defaultAlertPercentageBelow}
+                        onChange={handleProfileChange}
+                        disabled={loading}
+                        className="w-24"
+                      />
+                      <span className="text-gray-500">%</span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      This percentage will be used when creating new "Below" price alerts
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="defaultAlertPercentageAbove">Default Alert Percentage (Above)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="defaultAlertPercentageAbove"
+                        name="defaultAlertPercentageAbove"
+                        type="number"
+                        min="0"
+                        max="1000"
+                        step="0.1"
+                        value={profileData.defaultAlertPercentageAbove}
+                        onChange={handleProfileChange}
+                        disabled={loading}
+                        className="w-24"
+                      />
+                      <span className="text-gray-500">%</span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      This percentage will be used when creating new "Above" price alerts
+                    </p>
+                  </div>
                 </div>
 
                 {error && (
