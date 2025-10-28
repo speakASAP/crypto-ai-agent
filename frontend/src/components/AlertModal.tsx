@@ -414,7 +414,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>
             {alert ? 'Edit Price Alert' : `Create Alert for ${presetSymbol || selectedSymbol || 'Crypto'}`}
@@ -449,7 +449,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
                         <div className="font-medium">{formatCurrency(currentPrice || 0)}</div>
                       </div>
                     </div>
-                    <div className={`px-6 py-1 rounded text-xs font-medium ${
+                    <div className={`ml-4 px-6 py-1 rounded text-xs font-medium ${
                       investment.isProfit ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
                       {investment.isProfit ? '📈' : '📉'} {formatCurrencyRounded(Math.abs(investment.currentPnL))} ({investment.currentPnLPercent.toFixed(1)}%)

@@ -5,6 +5,7 @@ import { usePortfolioStore } from '@/stores/portfolioStore'
 import { useAlertsStore } from '@/stores/alertsStore'
 import { useSymbolsStore } from '@/stores/symbolsStore'
 import { PriceUpdateMessage, AlertTriggeredMessage } from '@/types'
+import { useNotificationStore } from '@/stores/notificationStore'
 
 interface WebSocketContextType {
   isConnected: boolean
@@ -254,11 +255,14 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
   const handleAlertTriggered = useCallback((message: AlertTriggeredMessage) => {
     console.log('🚨 Alert triggered:', message.data)
     
-    // Show notification (you can integrate with a toast library)
+    // Show notification
     const alertData = message.data.alert
     if (alertData.message) {
-      // You can replace this with a proper notification system
-      window.alert(alertData.message)
+      useNotificationStore.getState().showNotification(
+        alertData.message,
+        'info',
+        10000 // 10 seconds for alert notifications
+      )
     }
     
     // Refresh alerts and history

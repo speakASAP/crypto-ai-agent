@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, Currency } from '@/types'
+import { useNotificationStore } from '@/stores/notificationStore'
 
 interface PortfolioModalProps {
   isOpen: boolean
@@ -148,7 +149,10 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
 
     // Validate: need either price_buy or total_investment_text
     if (!formData.price_buy && !formData.total_investment_text) {
-      alert('Please enter either Buy Price or Total Investment')
+      useNotificationStore.getState().showNotification(
+        'Please enter either Buy Price or Total Investment',
+        'error'
+      )
       return
     }
 

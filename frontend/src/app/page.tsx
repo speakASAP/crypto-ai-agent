@@ -9,6 +9,7 @@ import { useAlertsStore } from '@/stores/alertsStore'
 import { useSymbolsStore } from '@/stores/symbolsStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { useNotificationStore } from '@/stores/notificationStore'
 import { PortfolioModal } from '@/components/PortfolioModal'
 import { AlertModal } from '@/components/AlertModal'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PriceAlert, PriceAlertCreate, PriceAlertUpdate } from '@/types'
@@ -561,7 +562,10 @@ export default function Home() {
     const above = groupAbovePct !== '' ? parseFloat(groupAbovePct) : user.default_alert_percentage_above
     const below = groupBelowPct !== '' ? parseFloat(groupBelowPct) : user.default_alert_percentage_below
     if (above == null && below == null) {
-      alert('Please set at least one percentage (Above or Below) in the form or in your profile settings.')
+      useNotificationStore.getState().showNotification(
+        'Please set at least one percentage (Above or Below) in the form or in your profile settings.',
+        'warning'
+      )
       return
     }
 
@@ -844,18 +848,18 @@ export default function Home() {
           }
 
           // P&L range filter
-          if (filters.pnlMin !== undefined && item.pnl !== undefined && item.pnl < filters.pnlMin) {
+          if (filters.pnlMin !== undefined && item.pnl !== undefined && item.pnl !== null && item.pnl < filters.pnlMin) {
             return false
           }
-          if (filters.pnlMax !== undefined && item.pnl !== undefined && item.pnl > filters.pnlMax) {
+          if (filters.pnlMax !== undefined && item.pnl !== undefined && item.pnl !== null && item.pnl > filters.pnlMax) {
             return false
           }
 
           // P&L % range filter
-          if (filters.pnlPercentMin !== undefined && item.pnl_percent !== undefined && item.pnl_percent < filters.pnlPercentMin) {
+          if (filters.pnlPercentMin !== undefined && item.pnl_percent !== undefined && item.pnl_percent !== null && item.pnl_percent < filters.pnlPercentMin) {
             return false
           }
-          if (filters.pnlPercentMax !== undefined && item.pnl_percent !== undefined && item.pnl_percent > filters.pnlPercentMax) {
+          if (filters.pnlPercentMax !== undefined && item.pnl_percent !== undefined && item.pnl_percent !== null && item.pnl_percent > filters.pnlPercentMax) {
             return false
           }
 
@@ -1220,7 +1224,7 @@ export default function Home() {
                         </td>
                         <td className="px-4 py-3 text-sm text-muted-foreground">{item.source || 'N/A'}</td>
                         <td className="px-4 py-3 text-right">
-                          {item.pnl !== undefined ? (
+                          {item.pnl !== undefined && item.pnl !== null ? (
                             <div className={`text-sm font-medium ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                               {formatCurrencyAmount(item.pnl)}
                             </div>
@@ -1229,7 +1233,7 @@ export default function Home() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {item.pnl_percent !== undefined ? (
+                          {item.pnl_percent !== undefined && item.pnl_percent !== null ? (
                             <div className={`text-sm font-medium ${item.pnl_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                               {formatPercentAmount(item.pnl_percent)}
                             </div>
@@ -1457,11 +1461,11 @@ export default function Home() {
                   <div className="grid grid-cols-2 gap-2">
                   <label className={`flex items-center justify-center space-x-2 p-2 border rounded-lg cursor-pointer ${groupReference === 'investment' ? 'bg-blue-100 border-blue-300' : 'bg-gray-50 border-gray-300'}`}>
                       <input type="radio" checked={groupReference === 'investment'} onChange={() => setGroupReference('investment')} />
-                      <span className="text-sm">Investment cost/avg (blue value)</span>
+                      <span className="text-sm">Investment cost</span>
                     </label>
                     <label className={`flex items-center justify-center space-x-2 p-2 border rounded-lg cursor-pointer ${groupReference === 'current' ? 'bg-green-100 border-green-300' : 'bg-gray-50 border-gray-300'}`}>
                       <input type="radio" checked={groupReference === 'current'} onChange={() => setGroupReference('current')} />
-                      <span className="text-sm">Current price (green value)</span>
+                      <span className="text-sm">Current price</span>
                     </label>
                   </div>
                 </div>
