@@ -6,6 +6,9 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8100',
     NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8100/ws',
   },
+  experimental: {
+    tsconfigPaths: true,
+  },
   webpack: (config) => {
     config.resolve = config.resolve || {}
     config.resolve.alias = config.resolve.alias || {}
