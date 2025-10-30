@@ -1,0 +1,25 @@
+{
+  "exchange": "revolut",
+  "name": "Revolut",
+  "required_fields": ["Symbol", "Type", "Quantity", "Price", "Value"],
+  "optional_fields": ["Fees", "Date"],
+  "column_mapping": {
+    "symbol": ["Symbol", "Coin", "Asset", "Currency"],
+    "type": ["Type", "Side", "Transaction Type"],
+    "quantity": ["Quantity", "Amount", "Qty"],
+    "price": ["Price", "Rate", "Unit Price"],
+    "value": ["Value", "Total", "Total Value"],
+    "fees": ["Fees", "Fee", "Commission"],
+    "date": ["Date", "Timestamp", "Time", "Created At"]
+  },
+  "date_formats": ["%b %d, %Y, %I:%M:%S %p", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"],
+  "currency_mapping": {
+    "default": "USD",
+    "patterns": {
+      "CZK": ["CZK", "Kč"],
+      "EUR": ["EUR", "€"],
+      "USD": ["USD", "$"]
+    }
+  }
+}
+

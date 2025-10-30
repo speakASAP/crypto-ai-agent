@@ -216,6 +216,7 @@ models/
 !frontend/package-lock.json
 !frontend/jsconfig.json
 !frontend/tsconfig.json
+!backend/templates/*.json
 *.xlsx
 *.xls
 datasets/
