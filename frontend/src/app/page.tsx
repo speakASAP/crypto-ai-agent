@@ -356,6 +356,24 @@ export default function Home() {
   }
 
   const handleImportFromBinance = async () => {
+    // Check if credentials exist first
+    try {
+      const credentials = await apiClient.getBinanceCredentials()
+      if (!credentials || !credentials.has_credentials) {
+        // No credentials, show credential dialog directly
+        setCredentialDialogType('binance')
+        setCredentialDialogOpen(true)
+        return
+      }
+    } catch (error: any) {
+      // If error fetching credentials (e.g., 404), show credential dialog
+      console.error('Error checking Binance credentials:', error)
+      setCredentialDialogType('binance')
+      setCredentialDialogOpen(true)
+      return
+    }
+    
+    // Credentials exist, show confirmation dialog
     setImportConfirmType('binance')
     setImportConfirmOpen(true)
   }
@@ -402,6 +420,24 @@ export default function Home() {
   }
 
   const handleImportFromBitfinex = async () => {
+    // Check if credentials exist first
+    try {
+      const credentials = await apiClient.getBitfinexCredentials()
+      if (!credentials || !credentials.has_credentials) {
+        // No credentials, show credential dialog directly
+        setCredentialDialogType('bitfinex')
+        setCredentialDialogOpen(true)
+        return
+      }
+    } catch (error: any) {
+      // If error fetching credentials (e.g., 404), show credential dialog
+      console.error('Error checking Bitfinex credentials:', error)
+      setCredentialDialogType('bitfinex')
+      setCredentialDialogOpen(true)
+      return
+    }
+    
+    // Credentials exist, show confirmation dialog
     setImportConfirmType('bitfinex')
     setImportConfirmOpen(true)
   }
@@ -526,12 +562,26 @@ export default function Home() {
 
   // Alert handlers
   const handleAddAlert = () => {
+    // Check Telegram credentials before opening alert modal
+    if (user && (!user.telegram_bot_token || !user.telegram_chat_id)) {
+      setCredentialDialogType('telegram')
+      setCredentialDialogOpen(true)
+      return
+    }
+    
     setEditingAlert(null)
     setPresetAlertData(null) // Clear any preset data for generic alert creation
     setAlertModalOpen(true)
   }
 
   const handleAddAlertForCoin = (item: PortfolioItem) => {
+    // Check Telegram credentials before opening alert modal
+    if (user && (!user.telegram_bot_token || !user.telegram_chat_id)) {
+      setCredentialDialogType('telegram')
+      setCredentialDialogOpen(true)
+      return
+    }
+    
     setEditingAlert(null)
     setAlertModalOpen(true)
     // Store preset data in state to pass to modal
@@ -591,6 +641,14 @@ export default function Home() {
 
   const handleCreateGroupAlerts = async () => {
     if (!user) return
+    
+    // Check Telegram credentials before creating alerts
+    if (!user.telegram_bot_token || !user.telegram_chat_id) {
+      setCredentialDialogType('telegram')
+      setCredentialDialogOpen(true)
+      return
+    }
+    
     const above = groupAbovePct !== '' ? parseFloat(groupAbovePct) : user.default_alert_percentage_above
     const below = groupBelowPct !== '' ? parseFloat(groupBelowPct) : user.default_alert_percentage_below
     if (above == null && below == null) {
