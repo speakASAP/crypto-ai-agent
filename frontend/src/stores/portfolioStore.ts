@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { devtools, persist, createJSONStorage } from 'zustand/middleware'
-import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PortfolioSummary, Currency } from '@/types'
-import { User } from '@/types/auth'
-import { apiClient } from '@/lib/api'
-import { refreshCryptoPrices } from '@/lib/refreshUtils'
+import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PortfolioSummary, Currency } from '../types'
+import { User } from '../types/auth'
+import { apiClient } from '../lib/api'
+import { refreshCryptoPrices } from '../lib/refreshUtils'
 
 type ViewMode = 'cards' | 'table'
 type SortBy = 'symbol' | 'investment' | 'platform' | 'pnl' | 'pnl_percent' | 'current_value'

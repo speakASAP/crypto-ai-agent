@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, AlertHistory } from '@/types'
-import { apiClient } from '@/lib/api'
+import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, AlertHistory } from '../types'
+import { apiClient } from '../lib/api'
 
 interface AlertsState {
   alerts: PriceAlert[]

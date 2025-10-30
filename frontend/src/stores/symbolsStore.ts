@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import { TrackedSymbol, TrackedSymbolCreate, TrackedSymbolUpdate, CryptoSymbol, SymbolPrice } from '@/types'
-import { apiClient } from '@/lib/api'
+import { TrackedSymbol, TrackedSymbolCreate, TrackedSymbolUpdate, CryptoSymbol, SymbolPrice } from '../types'
+import { apiClient } from '../lib/api'
 
 interface SymbolsState {
   trackedSymbols: TrackedSymbol[]

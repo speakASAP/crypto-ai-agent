@@ -6,9 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { CryptoSearchSelect } from '@/components/CryptoSearchSelect'
-import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, Currency, CryptoSymbol } from '@/types'
-import { apiClient } from '@/lib/api'
+import { CryptoSearchSelect } from './CryptoSearchSelect'
+import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, Currency, CryptoSymbol } from '../types'
+import { apiClient } from '../lib/api'
 
 interface AlertModalProps {
   isOpen: boolean
