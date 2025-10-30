@@ -4,11 +4,10 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from ..core.config import settings
 import secrets
-import bcrypt
 
-# Password hashing context using bcrypt_sha256 to avoid bcrypt 72-byte limit
+# Password hashing context prioritizing bcrypt_sha256 (no 72-byte limit), with bcrypt for legacy hashes
 pwd_context = CryptContext(
-    schemes=["bcrypt_sha256"],
+    schemes=["bcrypt_sha256", "bcrypt"],
     deprecated="auto",
 )
 
@@ -19,21 +18,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = settings.jwt_refresh_token_expire_days
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash using bcrypt_sha256 (no 72-byte limit)."""
+    """Verify a password using passlib context (supports bcrypt_sha256 and bcrypt)."""
     try:
-        # Normalize to avoid backend-specific 72-byte limitations
-        if len(plain_password.encode('utf-8')) > 72:
-            plain_password = plain_password[:72]
         return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
         print(f"Password verification failed: {e}")
         return False
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt_sha256 (pre-hash then bcrypt)."""
-    # Avoid backend errors that may raise on >72 bytes by truncating
-    if len(password.encode('utf-8')) > 72:
-        password = password[:72]
+    """Hash a password (bcrypt_sha256 preferred)."""
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
