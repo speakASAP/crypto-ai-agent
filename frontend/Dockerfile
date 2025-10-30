@@ -5,6 +5,7 @@ RUN npm ci --no-audit --no-fund
 
 FROM node:18-alpine AS builder
 WORKDIR /app
+ENV NODE_PATH=/app/src
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
@@ -12,6 +13,7 @@ RUN npm run build
 FROM node:18-alpine AS runner
 ENV NODE_ENV=production
 ENV PORT=3100
+ENV NODE_PATH=/app/src
 WORKDIR /app
 COPY --from=builder /app .
 EXPOSE $PORT
