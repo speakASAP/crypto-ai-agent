@@ -5,7 +5,11 @@ import os
 
 
 class Settings(BaseSettings):
-    # Database Configuration (SQLite)
+    # Environment
+    environment: str = os.getenv("ENVIRONMENT", "development")
+    # Database Configuration
+    # Database: use PostgreSQL in production, SQLite in development
+    database_url: str | None = None
     database_file: str = "data/crypto_portfolio.db"
     
     # API Configuration
@@ -24,6 +28,9 @@ class Settings(BaseSettings):
     # Global keys are no longer used for security reasons
     currency_api_url: str = "https://api.exchangerate-api.com/v4/latest/USD"
     telegram_api_url: str = "https://api.telegram.org/bot"
+    
+    # Redis (optional, for caching/session)
+    redis_url: str | None = None
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     

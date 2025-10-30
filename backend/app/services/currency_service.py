@@ -3,10 +3,13 @@ import asyncio
 from typing import Dict, Optional
 import logging
 import sqlite3
+import psycopg
+import json
+import redis
 import os
 from datetime import datetime, timezone
-from app.core.config import settings
-from app.utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
+from ..core.config import settings
+from ..utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,12 @@ class CurrencyService:
         self.last_updated = None
         self.last_updated_timestamp = None
         self._db_path = self._get_db_path()
+        self._redis = None
+        if settings.redis_url:
+            try:
+                self._redis = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+            except Exception:
+                self._redis = None
         
     def _get_db_path(self) -> str:
         """Get database path relative to project root"""
@@ -28,21 +37,35 @@ class CurrencyService:
     def _save_rates_to_db(self, rates: Dict[str, float], timestamp: str):
         """Save exchange rates to database"""
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            
-            # Clear old rates
-            cursor.execute("DELETE FROM currency_rates")
-            
-            # Insert new rates
-            for currency, rate in rates.items():
-                cursor.execute("""
+            # Save to Redis if configured
+            if self._redis:
+                payload = {"rates": rates, "timestamp": timestamp}
+                self._redis.set("currency:USD", json.dumps(payload), ex=settings.currency_cache_duration)
+            if settings.environment.lower() == "production":
+                pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
+                with psycopg.connect(pg_url) as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute("DELETE FROM currency_rates")
+                        for currency, rate in rates.items():
+                            cursor.execute(
+                                "INSERT INTO currency_rates (from_currency, to_currency, rate, timestamp) VALUES (%s, %s, %s, %s)",
+                                ("USD", currency, rate, timestamp)
+                            )
+                        conn.commit()
+            else:
+                conn = sqlite3.connect(self._db_path)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM currency_rates")
+                for currency, rate in rates.items():
+                    cursor.execute(
+                        """
                     INSERT INTO currency_rates (from_currency, to_currency, rate, timestamp)
                     VALUES (?, ?, ?, ?)
-                """, ("USD", currency, rate, timestamp))
-            
-            conn.commit()
-            conn.close()
+                """,
+                        ("USD", currency, rate, timestamp),
+                    )
+                conn.commit()
+                conn.close()
             logger.info(f"Saved {len(rates)} currency rates to database")
             
         except Exception as e:
@@ -51,24 +74,41 @@ class CurrencyService:
     def _load_rates_from_db(self) -> Dict[str, float]:
         """Load exchange rates from database"""
         try:
-            conn = sqlite3.connect(self._db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
+            # Try Redis first
+            if self._redis:
+                cached = self._redis.get("currency:USD")
+                if cached:
+                    obj = json.loads(cached)
+                    self.last_updated = obj.get("timestamp")
+                    self.last_updated_timestamp = get_current_timestamp()
+                    return obj.get("rates", {})
+            if settings.environment.lower() == "production":
+                pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
+                with psycopg.connect(pg_url) as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT to_currency, rate, timestamp FROM currency_rates WHERE from_currency = 'USD' ORDER BY timestamp DESC"
+                        )
+                        rows = cursor.fetchall()
+            else:
+                conn = sqlite3.connect(self._db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
                 SELECT to_currency, rate, timestamp 
                 FROM currency_rates 
                 WHERE from_currency = 'USD'
                 ORDER BY created_at DESC
-            """)
-            
+            """
+                )
+                rows = cursor.fetchall()
+                conn.close()
+
             rates = {}
-            rows = cursor.fetchall()
             for currency, rate, timestamp in rows:
                 rates[currency] = rate
                 if not self.last_updated:
                     self.last_updated = timestamp
-            
-            conn.close()
             
             if rates:
                 logger.info(f"Loaded {len(rates)} currency rates from database")
@@ -83,6 +123,16 @@ class CurrencyService:
     async def get_exchange_rates(self) -> Dict[str, float]:
         """Fetch current exchange rates from a free API"""
         try:
+            # Cache hit from Redis
+            if self._redis:
+                cached = self._redis.get("currency:USD")
+                if cached:
+                    obj = json.loads(cached)
+                    self.rates = obj.get("rates", {})
+                    self.last_updated = obj.get("timestamp")
+                    self.last_updated_timestamp = get_current_timestamp()
+                    logger.info(f"Using cached exchange rates ({len(self.rates)}) from Redis")
+                    return self.rates
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # Using exchangerate-api.com (free tier: 1500 requests/month)
                 response = await client.get(settings.currency_api_url)

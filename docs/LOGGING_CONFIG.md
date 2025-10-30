@@ -80,6 +80,8 @@ logs/
 └── crypto_agent.log.2       # Older rotated log
 ```
 
+In Docker deployments, the backend writes logs to `/app/logs` which is bind-mounted to the host `./logs` directory via docker-compose.
+
 ## Log Format
 
 Each log entry follows this format:

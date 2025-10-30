@@ -34,6 +34,7 @@
 - [**Logging Configuration**](LOGGING_CONFIG.md) - Centralized logging system
 - [**Scripts Documentation**](SCRIPTS_README.md) - Available scripts and utilities
 - [**Migration Complete**](MIGRATION_COMPLETE.md) - Database migration status
+- [**Docker Deployment**](DEPLOYMENT_DOCKER.md) - Production deployment guide
 
 ## 📋 Quick Reference
 

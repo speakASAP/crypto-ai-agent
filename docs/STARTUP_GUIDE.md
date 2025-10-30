@@ -2,17 +2,50 @@
 
 ## Quick Start
 
-### Start the Application
+### Start the Application (development scripts)
 
 ```bash
 ./start.sh
 ```
 
+### Start the Application (production via Docker)
+
+```bash
+# Ensure .env contains ENVIRONMENT=production
+./start.sh --env production
+```
+
 ### Stop the Application
 
 ```bash
-./stop.sh
+./stop.sh                 # development
+./stop.sh --env production # production (docker compose down)
 ```
+ 
+### Restart
+
+```bash
+# Development
+./start.sh restart
+./start.sh restart --service backend
+
+# Production
+./start.sh --env production restart
+./start.sh --env production restart --service backend
+```
+
+### Per-service operations
+
+```bash
+# Start a single service
+./start.sh --service backend                    # development
+./start.sh --env production --service backend   # production (docker compose up backend)
+```
+
+### Environment selection
+
+- Set `ENVIRONMENT=development|production` in `.env` (default: development).
+- Override per command with `--env production`.
 
 ## What the Scripts Do
 
@@ -81,8 +114,9 @@ python3.12 -m streamlit run ui_dashboard/app.py --server.port 8501
 
 ## Production Deployment
 
-For production, use Docker Compose:
+For production, use the scripts (docker compose under the hood):
 
 ```bash
-docker compose up --build
+./start.sh --env production
+./status.sh --env production --logs 100
 ```

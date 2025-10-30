@@ -4,6 +4,7 @@ Service for managing user Binance API credentials
 import logging
 from typing import Optional, Dict, Any
 from ..dependencies.auth import get_db_connection
+from ..core.config import settings
 from ..utils.encryption import credential_encryption
 from .binance_import_service import BinanceImportService
 
@@ -35,11 +36,25 @@ class BinanceCredentialService:
             encrypted_credentials = self.encryption.encrypt_binance_credentials(api_key, api_secret)
             
             # Insert or update credentials
-            cursor.execute('''
-                INSERT OR REPLACE INTO user_api_credentials 
-                (user_id, exchange, encrypted_credentials, created_at, updated_at)
-                VALUES (?, ?, ?, datetime('now'), datetime('now'))
-            ''', (user_id, 'binance', encrypted_credentials))
+            if settings.environment.lower() == 'production':
+                cursor.execute(
+                    """
+                    INSERT INTO user_api_credentials (user_id, exchange, encrypted_credentials, created_at, updated_at)
+                    VALUES (%s, %s, %s, NOW(), NOW())
+                    ON CONFLICT (user_id, exchange)
+                    DO UPDATE SET encrypted_credentials = EXCLUDED.encrypted_credentials, updated_at = NOW()
+                    """,
+                    (user_id, 'binance', encrypted_credentials)
+                )
+            else:
+                cursor.execute(
+                    '''
+                    INSERT OR REPLACE INTO user_api_credentials 
+                    (user_id, exchange, encrypted_credentials, created_at, updated_at)
+                    VALUES (?, ?, ?, datetime('now'), datetime('now'))
+                    ''',
+                    (user_id, 'binance', encrypted_credentials)
+                )
             
             conn.commit()
             conn.close()
@@ -67,10 +82,16 @@ class BinanceCredentialService:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            cursor.execute('''
-                SELECT encrypted_credentials FROM user_api_credentials 
-                WHERE user_id = ? AND exchange = 'binance'
-            ''', (user_id,))
+            if settings.environment.lower() == 'production':
+                cursor.execute(
+                    "SELECT encrypted_credentials FROM user_api_credentials WHERE user_id = %s AND exchange = 'binance'",
+                    (user_id,)
+                )
+            else:
+                cursor.execute('''
+                    SELECT encrypted_credentials FROM user_api_credentials 
+                    WHERE user_id = ? AND exchange = 'binance'
+                ''', (user_id,))
             
             result = cursor.fetchone()
             conn.close()
@@ -104,10 +125,16 @@ class BinanceCredentialService:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            cursor.execute('''
-                DELETE FROM user_api_credentials 
-                WHERE user_id = ? AND exchange = 'binance'
-            ''', (user_id,))
+            if settings.environment.lower() == 'production':
+                cursor.execute(
+                    "DELETE FROM user_api_credentials WHERE user_id = %s AND exchange = 'binance'",
+                    (user_id,)
+                )
+            else:
+                cursor.execute('''
+                    DELETE FROM user_api_credentials 
+                    WHERE user_id = ? AND exchange = 'binance'
+                ''', (user_id,))
             
             conn.commit()
             conn.close()
@@ -135,10 +162,16 @@ class BinanceCredentialService:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            cursor.execute('''
-                SELECT COUNT(*) FROM user_api_credentials 
-                WHERE user_id = ? AND exchange = 'binance'
-            ''', (user_id,))
+            if settings.environment.lower() == 'production':
+                cursor.execute(
+                    "SELECT COUNT(*) FROM user_api_credentials WHERE user_id = %s AND exchange = 'binance'",
+                    (user_id,)
+                )
+            else:
+                cursor.execute('''
+                    SELECT COUNT(*) FROM user_api_credentials 
+                    WHERE user_id = ? AND exchange = 'binance'
+                ''', (user_id,))
             
             count = cursor.fetchone()[0]
             conn.close()

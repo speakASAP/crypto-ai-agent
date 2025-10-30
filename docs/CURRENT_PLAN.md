@@ -8,6 +8,42 @@
 **Priority**: HIGH - Enhanced user account management with secure account deletion
 **Impact**: Users can now safely delete their accounts with proper confirmation and complete data cleanup
 
+## RELEASE PACKAGING (Docker + Postgres/Redis)
+
+### ✅ Production Packaging
+
+- ✅ Added docker-compose stack (backend, frontend, postgres, redis)
+- ✅ Added backend and frontend Dockerfiles
+- ✅ Added deployment guide `docs/DEPLOYMENT_DOCKER.md`
+- ✅ Updated docs to reference containerized deployment and logs volume
+
+### ✅ Database & Caching Migration (COMPLETED)
+
+- ✅ Backend now supports PostgreSQL via `DATABASE_URL` environment variable
+- ✅ Backend falls back to SQLite when `DATABASE_URL` is not set (development mode)
+- ✅ Redis caching integrated for currency rates (30-minute TTL)
+- ✅ Data migration script created: `backend/scripts/sqlite_to_postgres.py`
+- ✅ Code updated to use `psycopg` for Postgres, `redis` for caching
+- ⚠️ SQLite → Postgres migration script needs to be executed manually during deployment
+
+### 🔐 Environment Management
+
+- `.env` remains production-only and uncommitted
+- `.env.example` must list all non-secret keys (ensure parity before release)
+
+### ✅ Postgres + CORS Hardening (COMPLETED)
+
+- ✅ Implemented SQL placeholder compatibility layer (SQLite `?` ↔ PostgreSQL `%s`)
+- ✅ Refactored portfolio and alerts inserts to use compatibility helpers
+- ✅ Updated Bitfinex credential service for PostgreSQL
+- ✅ Fixed PostgreSQL `alerts.id` sequence alignment
+- ✅ Verified portfolio item creation and alert creation via API in production stack
+- ✅ Normalized SQL across alerts, portfolio, auth, and prices routers
+- ✅ Tracked symbols endpoint fixed for PostgreSQL boolean (`active = TRUE`)
+- ℹ️ Note: If browser shows CORS on certain calls, verify backend responses are not 5xx; CORS middleware is configured globally.
+
+---
+
 ## COMPLETED FEATURES
 
 ### ✅ Binance Portfolio Import (COMPLETED)

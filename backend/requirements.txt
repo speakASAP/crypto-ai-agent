@@ -3,8 +3,9 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 websockets==12.0
 
-# Database (SQLite - built into Python)
-# No additional database dependencies needed
+# Database clients
+psycopg[binary]==3.2.3
+redis==5.0.1
 
 # HTTP client
 httpx==0.25.2
