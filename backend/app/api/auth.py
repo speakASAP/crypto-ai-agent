@@ -57,17 +57,13 @@ async def register(user_data: UserCreate):
         conn.close()
         raise HTTPException(status_code=400, detail="Email or username already registered")
 
-    # Hash password with clear error handling (e.g., bcrypt 72-byte limit)
+    # Hash password with clear error handling
     try:
         hashed_password = get_password_hash(user_data.password)
-    except ValueError as ve:
-        conn.close()
-        # Typical case: password too long for bcrypt backend (>72 bytes)
-        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"Error hashing password for {user_data.email}: {e}", exc_info=True)
         conn.close()
-        raise HTTPException(status_code=500, detail="Failed to process password. Please try a different one.")
+        raise HTTPException(status_code=400, detail="Invalid password")
     now = datetime.now().isoformat() + "Z"
     insert_sql = '''
         INSERT INTO users (email, username, hashed_password, full_name, is_active, is_verified, created_at, updated_at)
