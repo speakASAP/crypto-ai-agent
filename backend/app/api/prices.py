@@ -319,7 +319,10 @@ async def _refresh_crypto_symbols_helper():
             top_cryptos_to_check = {"BTC": False, "ETH": False, "USDT": False, "BNB": False, "SOL": False}
             inserted_symbols = []
             
-            # Process all coins
+            # Track symbols we've seen to handle duplicates (keep the one with best rank)
+            symbol_map = {}  # symbol -> (name, market_cap_rank, coin_data)
+            
+            # First pass: collect all coins and resolve duplicates by keeping best rank
             for coin in all_data:
                 try:
                     symbol = str(coin.get("symbol", "")).upper()
@@ -331,15 +334,42 @@ async def _refresh_crypto_symbols_helper():
                         skipped_count += 1
                         continue
                     
-                    # Track top cryptos
-                    if symbol in top_cryptos_to_check:
-                        top_cryptos_to_check[symbol] = True
-                    
                     # Validate and convert market_cap_rank
                     try:
                         market_cap_rank = int(market_cap_rank) if market_cap_rank is not None else None
                     except (ValueError, TypeError):
                         market_cap_rank = None
+                    
+                    # Handle duplicates: keep the entry with the best (lowest) market_cap_rank
+                    if symbol in symbol_map:
+                        existing_rank = symbol_map[symbol][1]
+                        # If new entry has better rank (lower number), or existing has no rank, replace it
+                        if market_cap_rank is not None:
+                            if existing_rank is None or market_cap_rank < existing_rank:
+                                symbol_map[symbol] = (name, market_cap_rank, coin)
+                                logger.debug(f"Replacing {symbol} entry: rank {existing_rank} -> {market_cap_rank}")
+                        # If new entry has no rank but existing has rank, keep existing
+                        elif existing_rank is None:
+                            # Both have no rank, keep the first one
+                            pass
+                    else:
+                        symbol_map[symbol] = (name, market_cap_rank, coin)
+                    
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"Error processing coin {coin.get('symbol', 'unknown')}: {e}", exc_info=True)
+                    continue
+            
+            logger.info(f"Processed {len(all_data)} coins, resolved to {len(symbol_map)} unique symbols")
+            
+            # Second pass: insert resolved symbols into database
+            for symbol, (name, market_cap_rank, coin) in symbol_map.items():
+                try:
+                    # Track top cryptos
+                    if symbol in top_cryptos_to_check:
+                        top_cryptos_to_check[symbol] = True
+                        if symbol == "BTC" and market_cap_rank != 1:
+                            logger.warning(f"⚠️ BTC found with rank {market_cap_rank}, expected 1")
                     
                     current_time_str = str(current_time)
                     
@@ -366,7 +396,7 @@ async def _refresh_crypto_symbols_helper():
                     
                 except Exception as e:
                     error_count += 1
-                    logger.error(f"Error inserting coin {coin.get('symbol', 'unknown')}: {e}", exc_info=True)
+                    logger.error(f"Error inserting coin {symbol}: {e}", exc_info=True)
                     # In Postgres, ensure we clear error state and continue
                     if is_pg:
                         try:

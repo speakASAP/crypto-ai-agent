@@ -1156,7 +1156,7 @@ export default function ProfilePage() {
                   <div className="text-sm text-blue-700 space-y-2">
                     <p>Refresh the cryptocurrency symbols database to ensure you have access to the latest cryptocurrencies for creating price alerts.</p>
                     <p className="text-xs text-blue-600">
-                      <strong>Note:</strong> This will fetch the top 500 cryptocurrencies by market cap from CoinGecko API and update the local database.
+                      <strong>Note:</strong> This will fetch the top 750 cryptocurrencies by market cap from CoinGecko API and update the local database.
                     </p>
                   </div>
                 </div>
@@ -1217,7 +1217,7 @@ export default function ProfilePage() {
                     <p><strong>Database:</strong> {dbType ? (dbType === 'postgres' ? 'PostgreSQL' : 'SQLite') : '...'}</p>
                     <p><strong>API Source:</strong> CoinGecko API</p>
                     <p><strong>Update Frequency:</strong> Manual (on-demand)</p>
-                    <p><strong>Symbols Limit:</strong> 500 cryptocurrencies</p>
+                    <p><strong>Symbols Limit:</strong> 750 cryptocurrencies</p>
                   </div>
                 </div>
               </div>
