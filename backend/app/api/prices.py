@@ -195,8 +195,10 @@ async def search_crypto_symbols(q: str, limit: int = 50, current_user: dict = De
     return symbols
 
 
-@router.post("/api/crypto-symbols/refresh")
-async def refresh_crypto_symbols(current_user: dict = Depends(get_current_active_user)):
+async def _refresh_crypto_symbols_helper():
+    """Helper function to refresh crypto symbols without requiring authentication.
+    This is used both by the API endpoint and by background tasks (e.g., after registration).
+    """
     try:
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
@@ -211,14 +213,15 @@ async def refresh_crypto_symbols(current_user: dict = Depends(get_current_active
                     data_page1 = await response.json()
                     all_data.extend(data_page1)
                 else:
-                    raise HTTPException(status_code=500, detail="Failed to fetch first page from CoinGecko API")
+                    logger.error(f"Failed to fetch first page from CoinGecko API: {response.status}")
+                    return
             params_page2 = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": 2, "sparkline": "false"}
             async with session.get(url, params=params_page2) as response:
                 if response.status == 200:
                     data_page2 = await response.json()
                     all_data.extend(data_page2)
                 else:
-                    raise HTTPException(status_code=500, detail="Failed to fetch second page from CoinGecko API")
+                    logger.warning(f"Failed to fetch second page from CoinGecko API: {response.status}, proceeding with first page")
 
             # Optional third page to improve coverage when rate limits allow
             params_page3 = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": 3, "sparkline": "false"}
@@ -276,7 +279,17 @@ async def refresh_crypto_symbols(current_user: dict = Depends(get_current_active
                     continue
             conn.commit()
             conn.close()
-            return {"message": f"Successfully refreshed {inserted_count} cryptocurrency symbols", "count": inserted_count, "last_updated": current_time}
+            logger.info(f"Successfully refreshed {inserted_count} cryptocurrency symbols")
+    except Exception as e:
+        logger.error(f"Error refreshing crypto symbols: {e}", exc_info=True)
+
+
+@router.post("/api/crypto-symbols/refresh")
+async def refresh_crypto_symbols(current_user: dict = Depends(get_current_active_user)):
+    """API endpoint to refresh crypto symbols (requires authentication)."""
+    try:
+        await _refresh_crypto_symbols_helper()
+        return {"message": "Successfully refreshed cryptocurrency symbols", "last_updated": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
         logger.error(f"Error refreshing crypto symbols: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to refresh crypto symbols: {str(e)}")
