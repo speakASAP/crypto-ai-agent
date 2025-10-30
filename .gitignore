@@ -300,3 +300,6 @@ prod/
 # Staging files
 staging/
 stage/
+
+!frontend/src/lib/
+!frontend/src/lib/.ts
