@@ -4,11 +4,10 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from ..core.config import settings
 import secrets
-import hashlib
 
-# Password hashing context prioritizing bcrypt_sha256 (no 72-byte limit), with bcrypt for legacy hashes
+# Password hashing context using pbkdf2_sha256 (no 72-byte limit, no bcrypt init issues), with bcrypt_sha256 and bcrypt for legacy hashes
 pwd_context = CryptContext(
-    schemes=["bcrypt_sha256", "bcrypt"],
+    schemes=["pbkdf2_sha256", "bcrypt_sha256", "bcrypt"],
     deprecated="auto",
 )
 
@@ -19,16 +18,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = settings.jwt_refresh_token_expire_days
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password using passlib context (supports bcrypt_sha256 and bcrypt)."""
-    try:
-        # Try new method: pre-hash with SHA256 (avoids bcrypt 72-byte limit)
-        sha256_hash = hashlib.sha256(plain_password.encode('utf-8')).hexdigest()
-        if pwd_context.verify(sha256_hash, hashed_password):
-            return True
-    except Exception:
-        pass
-    
-    # Fallback: try direct verification (for legacy bcrypt hashes)
+    """Verify a password using passlib context (supports pbkdf2_sha256, bcrypt_sha256, and bcrypt)."""
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
@@ -36,11 +26,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 def get_password_hash(password: str) -> str:
-    """Hash a password (bcrypt_sha256 preferred). Pre-hash with SHA256 to avoid bcrypt 72-byte limit during passlib init."""
-    # Pre-hash with SHA256 to ensure fixed 64-byte hex string (avoids bcrypt 72-byte limit in passlib init)
-    sha256_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
-    # Pass the hex digest to bcrypt_sha256 (it will hash again internally, but length is now fixed)
-    return pwd_context.hash(sha256_hash)
+    """Hash a password using pbkdf2_sha256 (no 72-byte limit)."""
+    return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token with expiration"""
