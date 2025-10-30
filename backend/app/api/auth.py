@@ -117,6 +117,13 @@ async def login(user_data: UserLogin):
     access_token = create_access_token(data={"sub": str(user[0])})
     refresh_token = create_refresh_token(data={"sub": str(user[0])})
 
+    # Convert datetime to ISO format string if needed
+    created_at = user[7]
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat() + "Z"
+    elif created_at is not None:
+        created_at = str(created_at)
+
     user_response = UserResponse(
         id=user[0],
         email=user[1],
@@ -124,7 +131,7 @@ async def login(user_data: UserLogin):
         full_name=user[4],
         preferred_currency=user[5],
         is_active=bool(user[6]),
-        created_at=str(user[7]),
+        created_at=created_at,
     )
     conn.close()
 
@@ -173,9 +180,16 @@ async def refresh_token(refresh_token: Optional[str] = None, current_user: dict 
     new_access_token = create_access_token(data={"sub": str(user[0])})
     new_refresh_token = create_refresh_token(data={"sub": str(user[0])})
 
+    # Convert datetime to ISO format string if needed
+    created_at = user[6]
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat() + "Z"
+    elif created_at is not None:
+        created_at = str(created_at)
+
     user_response = UserResponse(
         id=user[0], email=user[1], username=user[2], full_name=user[3],
-        preferred_currency=user[4], is_active=bool(user[5]), created_at=str(user[6]),
+        preferred_currency=user[4], is_active=bool(user[5]), created_at=created_at,
     )
     return TokenResponse(access_token=new_access_token, refresh_token=new_refresh_token, user=user_response)
 
@@ -262,10 +276,15 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
         )
         cursor.execute(sql, (current_user["id"],))
         user = cursor.fetchone()
-        created_at_value = str(user[6]) if is_pg else user[6]
+        # Convert datetime to ISO format string if needed
+        created_at = user[6]
+        if isinstance(created_at, datetime):
+            created_at = created_at.isoformat() + "Z"
+        elif created_at is not None:
+            created_at = str(created_at)
         return UserResponse(
             id=user[0], email=user[1], username=user[2], full_name=user[3], preferred_currency=user[4],
-            is_active=bool(user[5]), created_at=created_at_value, telegram_bot_token=user[7], telegram_chat_id=user[8],
+            is_active=bool(user[5]), created_at=created_at, telegram_bot_token=user[7], telegram_chat_id=user[8],
             default_alert_percentage_above=user[9] if user[9] is not None else 60.0,
             default_alert_percentage_below=user[10] if user[10] is not None else 20.0,
         )
