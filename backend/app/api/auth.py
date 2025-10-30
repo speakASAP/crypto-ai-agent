@@ -194,9 +194,15 @@ async def get_me(current_user: dict = Depends(get_current_active_user)):
     conn.close()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    # Convert datetime to ISO format string if needed
+    created_at = user[6]
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat() + "Z"
+    elif created_at is not None:
+        created_at = str(created_at)
     return UserResponse(
         id=user[0], email=user[1], username=user[2], full_name=user[3], preferred_currency=user[4],
-        is_active=bool(user[5]), created_at=user[6], telegram_bot_token=user[7], telegram_chat_id=user[8],
+        is_active=bool(user[5]), created_at=created_at, telegram_bot_token=user[7], telegram_chat_id=user[8],
         default_alert_percentage_above=user[9] if user[9] is not None else 60.0,
         default_alert_percentage_below=user[10] if user[10] is not None else 20.0,
     )
