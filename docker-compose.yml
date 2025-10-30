@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${API_PORT:-8100}:8100"
+      - "127.0.0.1:${API_PORT:-8100}:${API_PORT:-8100}"
     depends_on:
       - postgres
       - redis
@@ -29,7 +29,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3100}:3100"
+      - "127.0.0.1:${FRONTEND_PORT:-3100}:${FRONTEND_PORT:-3100}"
     depends_on:
       - backend
     environment:
