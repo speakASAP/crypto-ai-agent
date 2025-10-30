@@ -322,7 +322,7 @@ JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 DATABASE_FILE=data/crypto_portfolio.db
 
 # CORS
-CORS_ORIGINS=http://localhost:3000,https://yourdomain.com
+CORS_ORIGINS=http://localhost:3100,https://yourdomain.com
 ```
 
 ### Backend Configuration
@@ -347,7 +347,7 @@ class Settings(BaseSettings):
    ./start.sh
    
    # Navigate to registration
-   open http://localhost:3000/register
+   open http://localhost:3100/register
    
    # Test with different users
    # Verify data isolation
@@ -381,17 +381,17 @@ class Settings(BaseSettings):
 
 ```bash
 # Test registration
-curl -X POST http://localhost:8000/api/auth/register \
+curl -X POST http://localhost:8100/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","username":"testuser","password":"password123"}'
 
 # Test login
-curl -X POST http://localhost:8000/api/auth/login \
+curl -X POST http://localhost:8100/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"password123"}'
 
 # Test protected endpoint
-curl -X GET http://localhost:8000/api/portfolio/ \
+curl -X GET http://localhost:8100/api/portfolio/ \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 

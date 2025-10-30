@@ -8,8 +8,8 @@ This directory contains scripts to easily manage the Crypto AI Agent application
 
 Starts the entire application stack:
 
-- **Backend (FastAPI)** on port 8000
-- **Frontend (Next.js)** on port 3000
+- **Backend (FastAPI)** on port 8100
+- **Frontend (Next.js)** on port 3100
 - **Database (SQLite)** initialization
 - **Dependencies** installation
 
@@ -43,7 +43,7 @@ Stops all running services and cleans up processes.
 
 - Stops backend (FastAPI) service
 - Stops frontend (Next.js) service
-- Kills any processes on ports 3000 and 8000
+- Kills any processes on ports 3100 and 8100
 - Cleans up process files
 - Optionally cleans up log files
 
@@ -92,9 +92,9 @@ Checks the status of all services and provides detailed information.
 
 Once started, you can access:
 
-- **Frontend**: <http://localhost:3000>
-- **Backend API**: <http://localhost:8000>
-- **API Documentation**: <http://localhost:8000/docs>
+- **Frontend**: <http://localhost:3100>
+- **Backend API**: <http://localhost:8100>
+- **API Documentation**: <http://localhost:8100/docs>
 
 ## Logs
 

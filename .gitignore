@@ -212,6 +212,8 @@ models/
 # Data files
 *.csv
 *.json
+!frontend/package.json
+!frontend/package-lock.json
 *.xlsx
 *.xls
 datasets/

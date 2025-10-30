@@ -54,7 +54,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       return
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws'
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8100/ws'
     console.log(`🔌 [${new Date().toISOString()}] Connecting to WebSocket:`, wsUrl)
     console.log(`📊 [${new Date().toISOString()}] Reconnect attempt: ${reconnectAttemptsRef.current + 1}`)
     

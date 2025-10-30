@@ -14,7 +14,7 @@ This document defines the exact steps to execute the tasks from `data/notepad.md
 ## Key Components and Endpoints
 
 - Frontend (Next.js): `frontend/`
-  - Port: 3000 (`frontend/package.json` → `next dev -p 3000`)
+  - Port: 3100 (`frontend/package.json` → `next dev -p 3100`)
   - API base: `NEXT_PUBLIC_API_URL` (`frontend/next.config.js`)
   - WebSocket: `NEXT_PUBLIC_WS_URL` (`frontend/next.config.js`)
   - Login page: `frontend/src/app/login/page.tsx`
@@ -56,10 +56,10 @@ This document defines the exact steps to execute the tasks from `data/notepad.md
 
 1. Confirm `.env` is present and valid: `cat .env` (do not expose content in outputs).
 2. Start services using provided scripts:
-   - `./start.sh` (expects backend on 8000, frontend on 3000 per defaults).
+   - `./start.sh` (expects backend on 8100, frontend on 3100 per defaults).
 3. Verify health:
-   - Backend: GET `http://localhost:8000/api/health` (`backend/app/api/health.py`).
-   - Frontend: open `http://localhost:3000/`.
+   - Backend: GET `http://localhost:8100/api/health` (`backend/app/api/health.py`).
+   - Frontend: open `http://localhost:3100/`.
 4. Tail logs in parallel during test execution:
    - `tail -n 200 -f logs/crypto_agent.log` (observe for errors/warnings/info).
 
@@ -69,7 +69,7 @@ This document defines the exact steps to execute the tasks from `data/notepad.md
 
 ## Browser Execution Steps
 
-1. Navigate to login page: `http://localhost:3000/login`.
+1. Navigate to login page: `http://localhost:3100/login`.
 2. Perform login via form fields on `frontend/src/app/login/page.tsx`:
    - Fill email and password.
    - Submit and wait for successful redirect or token acquisition (frontend likely stores token in zustand store `frontend/src/stores/authStore.ts`).
@@ -88,7 +88,7 @@ This document defines the exact steps to execute the tasks from `data/notepad.md
    - `logs/crypto_agent.log` for backend activity and errors.
    - `logs/status.txt` and `logs/agent.log` for ancillary entries if any.
 7. Open profile and verify Bitfinex settings:
-   - Navigate to `http://localhost:3000/profile`.
+   - Navigate to `http://localhost:3100/profile`.
    - Page component `frontend/src/app/profile/page.tsx` loads `/api/auth/me` and Bitfinex status endpoints (`/api/auth/bitfinex-credentials`).
    - Confirm whether credentials status is displayed and that test endpoints return expected results (`/api/auth/test-bitfinex-connection`).
 8. Final console and logs check to ensure no unhandled errors.
@@ -98,7 +98,7 @@ This document defines the exact steps to execute the tasks from `data/notepad.md
 - Frontend Network tab:
   - Successful `POST /api/auth/login` (200) with `TokenResponse` shape.
   - Alert creation `POST /api/alerts` responses (200/201).
-  - WebSocket connected to `ws://localhost:8000/ws` and receiving price updates.
+  - WebSocket connected to `ws://localhost:8100/ws` and receiving price updates.
 - Backend logs (`logs/crypto_agent.log`):
   - Startup entries (app, DB init, currency service, background tasks).
   - Login-related info and no 5xx traces.
@@ -122,14 +122,14 @@ This document defines the exact steps to execute the tasks from `data/notepad.md
 3. Scan codebase for hardcoded secrets/URLs; document findings.
 4. Replace any found hardcoded values with env variables; update code to use `process.env.*` (frontend) or `settings`/`os.getenv` (backend).
 5. Start services with `./start.sh`.
-6. Verify backend health at `/api/health` and frontend at `http://localhost:3000/`.
-7. Open `http://localhost:3000/login` and log in.
+6. Verify backend health at `/api/health` and frontend at `http://localhost:3100/`.
+7. Open `http://localhost:3100/login` and log in.
 8. Confirm successful login (200 response, tokens stored, no console errors).
 9. Add a test crypto in UI and confirm prices stream via WebSocket.
 10. Create two alerts: Above 0.1%, Below 0.1%.
 11. Verify alerts persisted and visible in UI; check backend logs for processing.
 12. Re-check browser console for warnings/errors.
 13. Review `logs/crypto_agent.log` and `logs/status.txt` for issues.
-14. Open `http://localhost:3000/profile` and review Bitfinex settings/status.
+14. Open `http://localhost:3100/profile` and review Bitfinex settings/status.
 15. Run Bitfinex test connection endpoint from profile UI; confirm response.
 16. Final pass: ensure no 4xx/5xx in Network tab, no errors in logs.

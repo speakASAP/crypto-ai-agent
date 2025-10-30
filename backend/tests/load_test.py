@@ -13,7 +13,7 @@ import argparse
 class LoadTester:
     """Load testing class for API endpoints"""
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "http://localhost:8100"):
         self.base_url = base_url
         self.results: List[Dict[str, Any]] = []
     
@@ -302,7 +302,7 @@ async def run_stress_test(base_url: str, max_concurrency: int = 100):
 def main():
     """Main function to run load tests"""
     parser = argparse.ArgumentParser(description="Load test Crypto AI Agent API")
-    parser.add_argument("--url", default="http://localhost:8000", help="Base URL of the API")
+    parser.add_argument("--url", default="http://localhost:8100", help="Base URL of the API")
     parser.add_argument("--concurrency", type=int, default=10, help="Number of concurrent connections")
     parser.add_argument("--requests", type=int, default=100, help="Number of requests per endpoint")
     parser.add_argument("--stress-test", action="store_true", help="Run stress test")

@@ -92,10 +92,10 @@ crypto-ai-agent/
 docker-compose up --build
 
 # Access the application
-# Frontend: http://localhost:3000
-# Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
-# Performance Dashboard: http://localhost:8000/api/v2/performance/summary
+# Frontend: http://localhost:3100
+# Backend API: http://localhost:8100
+# API Docs: http://localhost:8100/docs
+# Performance Dashboard: http://localhost:8100/api/v2/performance/summary
 ```
 
 ### **Production Deployment**

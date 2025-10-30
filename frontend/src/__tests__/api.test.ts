@@ -29,7 +29,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockResponse)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/health',
+        'http://localhost:8100/health',
         expect.objectContaining({
           method: 'GET',
           headers: expect.objectContaining({
@@ -64,7 +64,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockPortfolio)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/portfolio/',
+        'http://localhost:8100/api/portfolio/',
         expect.objectContaining({
           method: 'GET'
         })
@@ -94,7 +94,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockPortfolio)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/portfolio/?currency=EUR',
+        'http://localhost:8100/api/portfolio/?currency=EUR',
         expect.objectContaining({
           method: 'GET'
         })
@@ -128,7 +128,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(createdItem)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/portfolio/',
+        'http://localhost:8100/api/portfolio/',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify(newItem)
@@ -160,7 +160,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(updatedItem)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/portfolio/1',
+        'http://localhost:8100/api/portfolio/1',
         expect.objectContaining({
           method: 'PUT',
           body: JSON.stringify(updateData)
@@ -182,7 +182,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(deleteResponse)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/portfolio/1',
+        'http://localhost:8100/api/portfolio/1',
         expect.objectContaining({
           method: 'DELETE'
         })
@@ -209,7 +209,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockSummary)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/portfolio/summary',
+        'http://localhost:8100/api/portfolio/summary',
         expect.objectContaining({
           method: 'GET'
         })
@@ -240,7 +240,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockAlerts)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/alerts/?active_only=true',
+        'http://localhost:8100/api/alerts/?active_only=true',
         expect.objectContaining({
           method: 'GET'
         })
@@ -278,7 +278,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockAlerts)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/alerts/?active_only=false',
+        'http://localhost:8100/api/alerts/?active_only=false',
         expect.objectContaining({
           method: 'GET'
         })
@@ -312,7 +312,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(createdAlert)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/alerts/',
+        'http://localhost:8100/api/alerts/',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify(newAlert)
@@ -345,7 +345,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockSymbols)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/symbols/tracked?active_only=true',
+        'http://localhost:8100/api/symbols/tracked?active_only=true',
         expect.objectContaining({
           method: 'GET'
         })
@@ -377,7 +377,7 @@ describe('API Client', () => {
 
       expect(result).toEqual(mockPrices)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/api/symbols/prices?symbols=BTC,ETH',
+        'http://localhost:8100/api/symbols/prices?symbols=BTC,ETH',
         expect.objectContaining({
           method: 'GET'
         })
