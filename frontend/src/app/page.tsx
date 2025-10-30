@@ -97,6 +97,10 @@ export default function Home() {
   const [importingBitfinex, setImportingBitfinex] = useState(false)
   const [importBitfinexMessage, setImportBitfinexMessage] = useState<string>('')
   
+  // Import confirmation dialog state
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false)
+  const [importConfirmType, setImportConfirmType] = useState<'binance' | 'bitfinex' | null>(null)
+  
   // CSV import states
   const [csvImportOpen, setCsvImportOpen] = useState(false)
   const [csvFile, setCsvFile] = useState<File | null>(null)
@@ -339,9 +343,13 @@ export default function Home() {
   }
 
   const handleImportFromBinance = async () => {
-    if (!window.confirm('This will import your entire Binance portfolio. Continue?')) {
-      return
-    }
+    setImportConfirmType('binance')
+    setImportConfirmOpen(true)
+  }
+
+  const handleImportFromBinanceConfirmed = async () => {
+    setImportConfirmOpen(false)
+    setImportConfirmType(null)
 
     setImportingBinance(true)
     setImportMessage('')
@@ -381,9 +389,13 @@ export default function Home() {
   }
 
   const handleImportFromBitfinex = async () => {
-    if (!window.confirm('This will import your entire Bitfinex portfolio. Continue?')) {
-      return
-    }
+    setImportConfirmType('bitfinex')
+    setImportConfirmOpen(true)
+  }
+
+  const handleImportFromBitfinexConfirmed = async () => {
+    setImportConfirmOpen(false)
+    setImportConfirmType(null)
 
     setImportingBitfinex(true)
     setImportBitfinexMessage('')
@@ -1615,6 +1627,71 @@ export default function Home() {
           </Card>
         </div>
       )}
+
+      {/* Import Confirmation Dialog */}
+      <Dialog open={importConfirmOpen} onOpenChange={setImportConfirmOpen}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3 text-xl">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900">
+                <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <span>Confirm Import</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-4">
+              <p className="text-base text-gray-700 dark:text-gray-300 leading-relaxed">
+                {importConfirmType === 'binance' && (
+                  <>This will import your entire <span className="font-semibold text-orange-600 dark:text-orange-400">Binance</span> portfolio. Continue?</>
+                )}
+                {importConfirmType === 'bitfinex' && (
+                  <>This will import your entire <span className="font-semibold text-purple-600 dark:text-purple-400">Bitfinex</span> portfolio. Continue?</>
+                )}
+              </p>
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="text-sm text-amber-800 dark:text-amber-200">
+                    <p className="font-medium mb-1">Note:</p>
+                    <p>All existing portfolio items will be replaced with imported data.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => {
+                setImportConfirmOpen(false)
+                setImportConfirmType(null)
+              }}
+              className="flex-1 sm:flex-none"
+            >
+              Cancel
+            </Button>
+            <Button 
+              type="button"
+              onClick={() => {
+                if (importConfirmType === 'binance') {
+                  handleImportFromBinanceConfirmed()
+                } else if (importConfirmType === 'bitfinex') {
+                  handleImportFromBitfinexConfirmed()
+                }
+              }}
+              className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Credential Check Dialog */}
       <Dialog open={credentialDialogOpen} onOpenChange={setCredentialDialogOpen}>
