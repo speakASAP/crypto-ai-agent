@@ -20,20 +20,21 @@ from .services.csv_import_service import CSVImportService
 from .dependencies.auth import get_current_active_user, get_db_connection
 from .utils.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, generate_reset_token
 from .core.config import settings
+try:
+    from utils.logger import get_logger  # root-level utils when available
+except Exception:  # pragma: no cover
+    from .utils.logger import get_logger  # fallback to app-local logger
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
+# Centralized logger
+logger = get_logger("backend.app.main")
 
-logger = logging.getLogger(__name__)
+from .utils.db import (
+    normalize_placeholders as _normalize_placeholders,
+    execute_insert_and_get_id as _execute_insert_and_get_id,
+)
 
 # Database file - resolve to absolute path
 import os
@@ -46,102 +47,7 @@ DB_FILE = os.path.join(project_root, settings.database_file)
 # Initialize services
 price_service = PriceService()
 
-# WebSocket connection management
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.price_subscribers: Dict[str, Set[WebSocket]] = {}
-        self.alert_subscribers: Set[WebSocket] = set()
-        # In-memory price cache: {symbol: {"price": float, "timestamp": str}}
-        self.price_cache: Dict[str, Dict] = {}
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        
-        # Remove from price subscribers
-        for symbol, subscribers in self.price_subscribers.items():
-            subscribers.discard(websocket)
-        
-        # Remove from alert subscribers
-        self.alert_subscribers.discard(websocket)
-        
-        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        try:
-            await websocket.send_text(message)
-        except Exception as e:
-            logger.error(f"Error sending message: {e}")
-            self.disconnect(websocket)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections.copy():
-            try:
-                await connection.send_text(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting message: {e}")
-                self.disconnect(connection)
-
-    async def send_price_update(self, symbol: str, price: float):
-        current_time = datetime.now(timezone.utc)
-        message = json.dumps({
-            "type": "price_update",
-            "data": {
-                "symbol": symbol,
-                "price": price,
-                "timestamp": current_time.isoformat(),
-                "timestamp_formatted": current_time.strftime("%Y-%m-%d %H:%M:%S UTC")
-            }
-        })
-        
-        # Send to subscribers of this symbol
-        if symbol in self.price_subscribers:
-            for connection in self.price_subscribers[symbol].copy():
-                try:
-                    await connection.send_text(message)
-                except Exception as e:
-                    logger.error(f"Error sending price update: {e}")
-                    self.disconnect(connection)
-
-    async def broadcast_price_update(self, symbol: str, price: float):
-        """Broadcast price update to all subscribers of this symbol"""
-        await self.send_price_update(symbol, price)
-
-    async def send_alert_triggered(self, alert_data: dict):
-        message = json.dumps({
-            "type": "alert_triggered",
-            "data": {
-                "alert": alert_data,
-                "timestamp": datetime.now().isoformat()
-            }
-        })
-        
-        # Send to alert subscribers
-        for connection in self.alert_subscribers.copy():
-            try:
-                await connection.send_text(message)
-            except Exception as e:
-                logger.error(f"Error sending alert: {e}")
-                self.disconnect(connection)
-
-    def subscribe_to_prices(self, websocket: WebSocket, symbols: List[str]):
-        for symbol in symbols:
-            if symbol not in self.price_subscribers:
-                self.price_subscribers[symbol] = set()
-            self.price_subscribers[symbol].add(websocket)
-        logger.info(f"Subscribed to price updates for: {symbols}")
-
-    def subscribe_to_alerts(self, websocket: WebSocket):
-        self.alert_subscribers.add(websocket)
-        logger.info("Subscribed to alert notifications")
-
-manager = ConnectionManager()
+from .api.ws import manager
 
 # Background price fetching
 async def fetch_prices_for_symbols(symbols: List[str]):
@@ -286,117 +192,12 @@ async def background_currency_fetcher():
         # Wait 30 minutes before next fetch
         await asyncio.sleep(1800)
 
-async def send_telegram_notification(message: str):
-    """Send notification to Telegram bot"""
-    try:
-        telegram_token = os.getenv('TELEGRAM_TOKEN')
-        telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        
-        if not telegram_token or not telegram_chat_id:
-            logger.warning("Telegram credentials not found in environment variables")
-            return False
-            
-        url = f"{settings.telegram_api_url}{telegram_token}/sendMessage"
-        data = {
-            "chat_id": telegram_chat_id,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        
-        # Create SSL context that doesn't verify certificates (for development)
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(url, json=data) as response:
-                if response.status == 200:
-                    logger.info(f"Telegram notification sent successfully: {message[:50]}...")
-                    return True
-                else:
-                    response_text = await response.text()
-                    logger.error(f"Failed to send Telegram notification: {response.status} - {response_text}")
-                    return False
-                    
-    except Exception as e:
-        logger.error(f"Error sending Telegram notification: {e}")
-        return False
-
-def get_user_telegram_credentials(user_id: int) -> Optional[dict]:
-    """Get user's personal Telegram credentials from database"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT telegram_bot_token, telegram_chat_id FROM users WHERE id = ?", 
-            (user_id,)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result and result[0] and result[1]:
-            return {
-                'bot_token': result[0],
-                'chat_id': result[1]
-            }
-        return None
-    except Exception as e:
-        logger.error(f"Error getting user Telegram credentials: {e}")
-        return None
-
-async def send_telegram_notification_with_credentials(message: str, bot_token: str, chat_id: str):
-    """Send notification to Telegram bot using specific credentials"""
-    try:
-        url = f"{settings.telegram_api_url}{bot_token}/sendMessage"
-        data = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        
-        # Create SSL context that doesn't verify certificates (for development)
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(url, json=data) as response:
-                if response.status == 200:
-                    logger.info(f"Telegram notification sent successfully: {message[:50]}...")
-                    return True
-                else:
-                    response_text = await response.text()
-                    logger.error(f"Failed to send Telegram notification: {response.status} - {response_text}")
-                    return False
-                    
-    except Exception as e:
-        logger.error(f"Error sending Telegram notification: {e}")
-        return False
-
-async def send_user_telegram_notification(user_id: int, message: str):
-    """Send Telegram notification using user-specific credentials with .env fallback"""
-    try:
-        # Try to get user's personal Telegram credentials
-        user_credentials = get_user_telegram_credentials(user_id)
-        
-        if user_credentials and user_credentials['bot_token'] and user_credentials['chat_id']:
-            # Use user's personal settings
-            logger.info(f"Using user-specific Telegram credentials for user {user_id}")
-            return await send_telegram_notification_with_credentials(
-                message, 
-                user_credentials['bot_token'], 
-                user_credentials['chat_id']
-            )
-        else:
-            # Fall back to global .env settings
-            logger.info(f"Using global Telegram credentials for user {user_id} (no user settings)")
-            return await send_telegram_notification(message)  # Uses .env
-            
-    except Exception as e:
-        logger.error(f"Error sending Telegram notification for user {user_id}: {e}")
-        return False
+from .services.notification_service import (
+    send_telegram_notification,
+    get_user_telegram_credentials,
+    send_telegram_notification_with_credentials,
+    send_user_telegram_notification,
+)
 
 async def check_missed_alerts_on_startup():
     """Check for alerts that may have been missed during downtime"""
@@ -405,7 +206,10 @@ async def check_missed_alerts_on_startup():
         cursor = conn.cursor()
         
         # Get all active alerts
-        cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
+        if settings.database_url:
+            cursor.execute("SELECT * FROM alerts WHERE is_active = TRUE")
+        else:
+            cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
         alerts = cursor.fetchall()
         
         if not alerts:
@@ -416,13 +220,33 @@ async def check_missed_alerts_on_startup():
         logger.info(f"Checking {len(alerts)} active alerts for missed triggers")
         
         for alert in alerts:
-            alert_id, user_id, symbol, threshold_price, alert_type, message, is_active, created_at, threshold_price_usd, base_currency, exchange_rate_at_creation = alert
+            # Handle both schemas: SQLite may include extended columns, Postgres has core columns only
+            alert_id = alert[0]
+            user_id = alert[1]
+            symbol = alert[2]
+            threshold_price = alert[3]
+            alert_type = alert[4]
+            message = alert[5]
+            # Optional fields that may not exist in Postgres schema
+            base_currency = None
+            threshold_price_usd = None
+            exchange_rate_at_creation = None
+            if len(alert) > 10:
+                threshold_price_usd = alert[8]
+                base_currency = alert[9]
+                exchange_rate_at_creation = alert[10]
             
             # Get last price check for this symbol
-            cursor.execute(
-                "SELECT last_check_timestamp, last_check_price FROM price_check_tracking WHERE symbol = ?",
-                (symbol,)
-            )
+            if settings.database_url:
+                cursor.execute(
+                    "SELECT last_check_timestamp, last_check_price FROM price_check_tracking WHERE symbol = %s",
+                    (symbol,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT last_check_timestamp, last_check_price FROM price_check_tracking WHERE symbol = ?",
+                    (symbol,)
+                )
             tracking = cursor.fetchone()
             
             if not tracking:
@@ -650,7 +474,10 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
             ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
         
         # Get all active alerts
-        cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
+        if settings.database_url:
+            cursor.execute("SELECT * FROM alerts WHERE is_active = TRUE")
+        else:
+            cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
         alerts = cursor.fetchall()
         
         triggered_count = 0
@@ -720,317 +547,27 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
         if conn:
             conn.close()
 
-# Pydantic models
-class PortfolioItem(BaseModel):
-    id: int
-    symbol: str
-    amount: float
-    price_buy: float
-    purchase_date: Optional[str] = None
-    base_currency: str
-    purchase_price_eur: Optional[float] = None
-    purchase_price_czk: Optional[float] = None
-    source: Optional[str] = None
-    commission: float = 0.0
-    total_investment_text: Optional[str] = None
-    created_at: str
-    updated_at: str
-    current_price: Optional[float] = None
-    current_value: Optional[float] = None
-    pnl: Optional[float] = None
-    pnl_percent: Optional[float] = None
-    # New USD-based fields for calculations
-    price_buy_usd: Optional[float] = None
-    commission_usd: Optional[float] = None
-    current_price_usd: Optional[float] = None
-    current_value_usd: Optional[float] = None
-    pnl_usd: Optional[float] = None
-    pnl_percent_usd: Optional[float] = None
-    exchange_rate_at_purchase: Optional[float] = None
-
-    class Config:
-        json_encoders = {
-            float: lambda v: round(v, 8) if v is not None else None
-        }
-
-class PortfolioCreate(BaseModel):
-    symbol: str
-    amount: float
-    price_buy: float
-    purchase_date: Optional[str] = None
-    base_currency: str
-    source: Optional[str] = None
-    commission: float = 0.0
-    total_investment_text: Optional[str] = None
-
-    class Config:
-        json_encoders = {
-            float: lambda v: round(v, 8) if v is not None else None
-        }
-
-class PortfolioUpdate(BaseModel):
-    symbol: Optional[str] = None
-    amount: Optional[float] = None
-    price_buy: Optional[float] = None
-    purchase_date: Optional[str] = None
-    base_currency: Optional[str] = None
-    source: Optional[str] = None
-    commission: Optional[float] = None
-    total_investment_text: Optional[str] = None
-
-    class Config:
-        json_encoders = {
-            float: lambda v: round(v, 8) if v is not None else None
-        }
-
-class PriceAlert(BaseModel):
-    id: int
-    symbol: str
-    threshold_price: float
-    alert_type: str
-    message: Optional[str] = None
-    is_active: bool = True
-    created_at: str
-    # New USD-based fields for calculations
-    threshold_price_usd: Optional[float] = None
-    base_currency: Optional[str] = None
-    exchange_rate_at_creation: Optional[float] = None
-
-class PriceAlertCreate(BaseModel):
-    symbol: str
-    threshold_price: float
-    alert_type: str
-    message: Optional[str] = None
-    base_currency: Optional[str] = None
-
-class PriceAlertUpdate(BaseModel):
-    symbol: Optional[str] = None
-    threshold_price: Optional[float] = None
-    alert_type: Optional[str] = None
-    message: Optional[str] = None
-    is_active: Optional[bool] = None
-
-class TrackedSymbol(BaseModel):
-    symbol: str
-    name: str
-    active: bool = True
-    last_updated: str
-
-class CryptoSymbol(BaseModel):
-    symbol: str
-    name: str
-    market_cap_rank: Optional[int] = None
-    last_updated: str
-
-class CryptoSymbolSearch(BaseModel):
-    query: str
-    limit: int = 50
-
-# Authentication Models
-class UserCreate(BaseModel):
-    email: EmailStr
-    username: str
-    password: str
-    full_name: Optional[str] = None
-
-    @validator('password')
-    def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters')
-        return v
-
-    @validator('username')
-    def validate_username(cls, v):
-        if len(v) < 3:
-            raise ValueError('Username must be at least 3 characters')
-        return v
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class UserResponse(BaseModel):
-    id: int
-    email: str
-    username: str
-    full_name: Optional[str]
-    preferred_currency: str
-    is_active: bool
-    created_at: str
-    telegram_bot_token: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    default_alert_percentage_above: Optional[float] = 60.0
-    default_alert_percentage_below: Optional[float] = 20.0
-
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    user: UserResponse
-
-class PasswordResetRequest(BaseModel):
-    email: EmailStr
-
-class PasswordResetConfirm(BaseModel):
-    token: str
-    new_password: str
-
-    @validator('new_password')
-    def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters')
-        return v
-
-class UserProfileUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    username: Optional[str] = None
-    full_name: Optional[str] = None
-    preferred_currency: Optional[str] = None
-    telegram_bot_token: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    binance_api_key: Optional[str] = None
-    binance_api_secret: Optional[str] = None
-    default_alert_percentage_above: Optional[float] = None
-    default_alert_percentage_below: Optional[float] = None
-
-    @validator('username')
-    def validate_username(cls, v):
-        if v is not None:
-            if len(v) < 3:
-                raise ValueError('Username must be at least 3 characters')
-        return v
-    
-    @validator('default_alert_percentage_above', 'default_alert_percentage_below')
-    def validate_percentage(cls, v):
-        if v is not None:
-            if v < 0 or v > 1000:
-                raise ValueError('Percentage must be between 0 and 1000')
-        return v
-
-    @validator('preferred_currency')
-    def validate_preferred_currency(cls, v):
-        if v is not None:
-            if v not in ['USD', 'EUR', 'CZK']:
-                raise ValueError('Preferred currency must be USD, EUR, or CZK')
-        return v
-
-    @validator('telegram_bot_token')
-    def validate_telegram_bot_token(cls, v):
-        if v is not None and v.strip():
-            # Basic validation for Telegram bot token format
-            if not v.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) or ':' not in v:
-                raise ValueError('Invalid Telegram bot token format. Should be like: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz')
-        return v.strip() if v else ''
-
-    @validator('telegram_chat_id')
-    def validate_telegram_chat_id(cls, v):
-        if v is not None and v.strip():
-            # Basic validation for Telegram chat ID format (should be numeric)
-            if not v.strip().isdigit():
-                raise ValueError('Invalid Telegram chat ID format. Should be a numeric value like: 123456789')
-        return v.strip() if v else ''
-    
-    @validator('binance_api_key')
-    def validate_binance_api_key(cls, v):
-        if v is not None and v.strip():
-            if len(v.strip()) < 10:
-                raise ValueError('Binance API key must be at least 10 characters')
-        return v.strip() if v else ''
-    
-    @validator('binance_api_secret')
-    def validate_binance_api_secret(cls, v):
-        if v is not None and v.strip():
-            if len(v.strip()) < 10:
-                raise ValueError('Binance API secret must be at least 10 characters')
-        return v.strip() if v else ''
-
-class PasswordChange(BaseModel):
-    current_password: str
-    new_password: str
-
-    @validator('new_password')
-    def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters')
-        return v
-
-class AccountDeletionConfirm(BaseModel):
-    confirmation_text: str = "DELETE"
-    
-    @validator('confirmation_text')
-    def validate_confirmation(cls, v):
-        if v != "DELETE":
-            raise ValueError('Confirmation text must be exactly "DELETE"')
-        return v
-
-class BinanceCredentials(BaseModel):
-    api_key: str
-    api_secret: str
-    
-    @validator('api_key')
-    def validate_api_key(cls, v):
-        if not v or len(v.strip()) < 10:
-            raise ValueError('Binance API key is required and must be at least 10 characters')
-        return v.strip()
-    
-    @validator('api_secret')
-    def validate_api_secret(cls, v):
-        if not v or len(v.strip()) < 10:
-            raise ValueError('Binance API secret is required and must be at least 10 characters')
-        return v.strip()
-
-class BitfinexCredentials(BaseModel):
-    api_key: str
-    api_secret: str
-    
-    @validator('api_key')
-    def validate_api_key(cls, v):
-        if not v or len(v.strip()) < 10:
-            raise ValueError('Bitfinex API key is required and must be at least 10 characters')
-        return v.strip()
-    
-    @validator('api_secret')
-    def validate_api_secret(cls, v):
-        if not v or len(v.strip()) < 10:
-            raise ValueError('Bitfinex API secret is required and must be at least 10 characters')
-        return v.strip()
-
-class BitfinexCredentialsResponse(BaseModel):
-    has_credentials: bool
-    message: str
-    account_info: Optional[Dict[str, Any]] = None
-
-class BitfinexTestResponse(BaseModel):
-    success: bool
-    message: str
-    account_info: Optional[Dict[str, Any]] = None
-    error_code: Optional[str] = None
-    troubleshooting: Optional[str] = None
-
-class BinanceCredentialsResponse(BaseModel):
-    has_credentials: bool
-    message: str
-    account_info: Optional[Dict[str, Any]] = None
-
-class BinanceTestResponse(BaseModel):
-    success: bool
-    message: str
-    account_info: Optional[Dict[str, Any]] = None
-    error_code: Optional[str] = None
-    troubleshooting: Optional[str] = None
-
-class CSVUploadResponse(BaseModel):
-    success: bool
-    message: str
-    detected_exchange: Optional[str] = None
-    preview_data: List[Dict[str, Any]] = []
-    total_rows: int = 0
-    aggregated_items: List[Dict[str, Any]] = []
-    errors: List[str] = []
-
-class CSVExecuteRequest(BaseModel):
-    exchange: str
-    column_mapping: Optional[Dict[str, str]] = None
+from .schemas.portfolio import PortfolioItem, PortfolioCreate, PortfolioUpdate
+from .schemas.alerts import PriceAlert, PriceAlertCreate, PriceAlertUpdate
+from .schemas.common import TrackedSymbol, CryptoSymbol, CryptoSymbolSearch
+from .schemas.auth import (
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    TokenResponse,
+    PasswordResetRequest,
+    PasswordResetConfirm,
+    UserProfileUpdate,
+    PasswordChange,
+    AccountDeletionConfirm,
+    BinanceCredentials,
+    BitfinexCredentials,
+    BitfinexCredentialsResponse,
+    BitfinexTestResponse,
+    BinanceCredentialsResponse,
+    BinanceTestResponse,
+)
+from .schemas.csv_import import CSVUploadResponse, CSVExecuteRequest
 
 def init_database():
     """Initialize SQLite database with user management tables"""
@@ -1419,11 +956,17 @@ def load_migration_data():
             logger.error(f"Error loading migration data: {e}")
 
 def get_db_connection():
-    """Get database connection with timeout and WAL mode for better concurrency"""
+    """Get database connection: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
+    use_postgres = settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))
+    if use_postgres:
+        import psycopg
+        # Remove +psycopg suffix if present for connection
+        pg_url = settings.database_url.replace("+psycopg", "") if settings.database_url and "+psycopg" in settings.database_url else settings.database_url
+        return psycopg.connect(pg_url)
     conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging for better concurrency
-    conn.execute("PRAGMA synchronous=NORMAL")  # Balance between safety and performance
-    conn.execute("PRAGMA cache_size=10000")  # Increase cache size for better performance
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=10000")
     return conn
 
 def format_total_investment_text(amount: float, currency: str) -> str:
@@ -1505,17 +1048,230 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
         return item
 
 
+def init_postgres_database():
+    """Initialize PostgreSQL database schema"""
+    import psycopg
+    pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
+    conn = psycopg.connect(pg_url)
+    cur = conn.cursor()
+    
+    # Create users table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            hashed_password TEXT NOT NULL,
+            full_name TEXT,
+            preferred_currency TEXT DEFAULT 'USD',
+            is_active BOOLEAN DEFAULT TRUE,
+            is_verified BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            telegram_bot_token TEXT,
+            telegram_chat_id TEXT,
+            default_alert_percentage_above REAL DEFAULT 0.10,
+            default_alert_percentage_below REAL DEFAULT 0.10
+        )
+    ''')
+    
+    # Create password reset tokens table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            token TEXT UNIQUE NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Create user sessions table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            token TEXT UNIQUE NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Create portfolio_items table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS portfolio_items (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            symbol TEXT NOT NULL,
+            amount REAL NOT NULL,
+            price_buy REAL NOT NULL,
+            purchase_date TIMESTAMP,
+            base_currency TEXT NOT NULL,
+            purchase_price_eur REAL,
+            purchase_price_czk REAL,
+            source TEXT,
+            commission REAL DEFAULT 0.0,
+            total_investment_text TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            current_price REAL,
+            current_value REAL,
+            pnl REAL,
+            pnl_percent REAL,
+            price_buy_usd REAL,
+            commission_usd REAL,
+            current_price_usd REAL,
+            current_value_usd REAL,
+            pnl_usd REAL,
+            pnl_percent_usd REAL,
+            exchange_rate_at_purchase REAL
+        )
+    ''')
+    
+    # Create alerts table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS alerts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            symbol TEXT NOT NULL,
+            threshold_price REAL NOT NULL,
+            alert_type TEXT NOT NULL,
+            message TEXT,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Ensure alerts.id has a working sequence and default nextval (simple, robust approach)
+    cur.execute("""
+        CREATE SEQUENCE IF NOT EXISTS alerts_id_seq;
+    """)
+    cur.execute("""
+        ALTER TABLE alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq');
+    """)
+    cur.execute("""
+        SELECT setval('alerts_id_seq', COALESCE((SELECT MAX(id) FROM alerts), 0) + 1, false);
+    """)
+    
+    # Create tracked_symbols table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS tracked_symbols (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            symbol TEXT NOT NULL,
+            name TEXT NOT NULL,
+            active BOOLEAN DEFAULT TRUE,
+            last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, symbol)
+        )
+    ''')
+    
+    # Create alert_history table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS alert_history (
+            id SERIAL PRIMARY KEY,
+            alert_id INTEGER REFERENCES alerts(id),
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            triggered_price REAL NOT NULL,
+            triggered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            was_missed BOOLEAN DEFAULT FALSE,
+            check_type TEXT DEFAULT 'realtime'
+        )
+    ''')
+    
+    # Create price_check_tracking table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS price_check_tracking (
+            symbol TEXT PRIMARY KEY,
+            last_check_timestamp TEXT NOT NULL,
+            last_check_price REAL NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    ''')
+    
+    # Create import_history table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS import_history (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            source TEXT NOT NULL,
+            import_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            items_imported INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Create currency_rates table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS currency_rates (
+            id SERIAL PRIMARY KEY,
+            from_currency TEXT NOT NULL,
+            to_currency TEXT NOT NULL,
+            rate REAL NOT NULL,
+            timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Create price_check_tracking table (used for missed-alert logic)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS price_check_tracking (
+            symbol TEXT PRIMARY KEY,
+            last_check_timestamp TIMESTAMP,
+            last_check_price REAL
+        )
+    ''')
+
+    # Create crypto_symbols table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS crypto_symbols (
+            id SERIAL PRIMARY KEY,
+            symbol TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            market_cap_rank INTEGER,
+            last_updated TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Create user_api_credentials table (encrypted storage)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS user_api_credentials (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            exchange TEXT NOT NULL,
+            encrypted_credentials TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, exchange)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+    logger.info("PostgreSQL schema initialized")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🚀 Starting Crypto AI Agent API v2.0 (SQLite Mode)")
+    if settings.database_url:
+        logger.info("🚀 Starting Crypto AI Agent API v2.0 (PostgreSQL Mode)")
+        init_postgres_database()
+        logger.info("✅ Database initialized")
+    else:
+        logger.info("🚀 Starting Crypto AI Agent API v2.0 (SQLite Mode)")
     
-    # Initialize database
-    init_database()
-    logger.info("✅ Database initialized")
+    # Initialize database (only for SQLite)
+    if not settings.database_url:
+        init_database()
+        logger.info("✅ Database initialized")
     
-    # Load migration data if exists
-    load_migration_data()
+    # Load migration data if exists (SQLite only)
+    if not settings.database_url:
+        load_migration_data()
     
     # Initialize currency service
     await currency_service.get_exchange_rates()
@@ -1559,2050 +1315,42 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Authentication endpoints
-@app.post("/api/auth/register", response_model=TokenResponse)
-async def register(user_data: UserCreate):
-    """Register a new user"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Check if email or username already exists
-    cursor.execute("SELECT id FROM users WHERE email = ? OR username = ?", (user_data.email, user_data.username))
-    if cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail="Email or username already registered")
-    
-    # Hash password
-    hashed_password = get_password_hash(user_data.password)
-    
-    # Create user
-    now = datetime.now().isoformat() + "Z"
-    cursor.execute('''
-        INSERT INTO users (email, username, hashed_password, full_name, is_active, is_verified, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (user_data.email, user_data.username, hashed_password, user_data.full_name, True, False, now, now))
-    
-    user_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    # Generate tokens
-    access_token = create_access_token(data={"sub": str(user_id)})
-    refresh_token = create_refresh_token(data={"sub": str(user_id)})
-    
-    # Return user data and tokens
-    user_response = UserResponse(
-        id=user_id,
-        email=user_data.email,
-        username=user_data.username,
-        full_name=user_data.full_name,
-        preferred_currency='USD',  # Default for new users
-        is_active=True,
-        created_at=now
-    )
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=user_response
-    )
+from .utils.db import (
+    is_postgres_connection as _is_postgres_connection,
+    normalize_placeholders as _normalize_placeholders,
+    execute_insert_and_get_id as _execute_insert_and_get_id,
+)
 
-@app.post("/api/auth/login", response_model=TokenResponse)
-async def login(credentials: UserLogin):
-    """Login user with email and password"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get user by email
-    cursor.execute("SELECT id, email, username, hashed_password, full_name, preferred_currency, is_active, created_at FROM users WHERE email = ?", (credentials.email,))
-    user = cursor.fetchone()
-    conn.close()
-    
-    if not user or not verify_password(credentials.password, user[3]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    if not user[6]:  # is_active
-        raise HTTPException(status_code=400, detail="Inactive user")
-    
-    # Generate tokens
-    access_token = create_access_token(data={"sub": str(user[0])})
-    refresh_token = create_refresh_token(data={"sub": str(user[0])})
-    
-    # Return user data and tokens
-    user_response = UserResponse(
-        id=user[0],
-        email=user[1],
-        username=user[2],
-        full_name=user[4],
-        preferred_currency=user[5],
-        is_active=user[6],
-        created_at=user[7]
-    )
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=user_response
-    )
-
-@app.post("/api/auth/refresh", response_model=TokenResponse)
-async def refresh_token(refresh_token: str = None):
-    """Refresh access token using refresh token"""
-    if not refresh_token:
-        raise HTTPException(status_code=400, detail="Refresh token required")
-    
-    # Decode refresh token
-    from .utils.auth import decode_token
-    payload = decode_token(refresh_token)
-    if not payload or payload.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    
-    # Get user
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE id = ?", (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-    
-    if not user or not user[5]:  # is_active
-        raise HTTPException(status_code=401, detail="User not found or inactive")
-    
-    # Generate new tokens
-    access_token = create_access_token(data={"sub": str(user_id)})
-    new_refresh_token = create_refresh_token(data={"sub": str(user_id)})
-    
-    # Return user data and tokens
-    user_response = UserResponse(
-        id=user[0],
-        email=user[1],
-        username=user[2],
-        full_name=user[3],
-        preferred_currency=user[4],
-        is_active=user[5],
-        created_at=user[6]
-    )
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=new_refresh_token,
-        user=user_response
-    )
-
-@app.get("/api/auth/me", response_model=UserResponse)
-async def get_current_user_info(current_user: dict = Depends(get_current_active_user)):
-    """Get current user information"""
-    return UserResponse(
-        id=current_user["id"],
-        email=current_user["email"],
-        username=current_user["username"],
-        full_name=current_user["full_name"],
-        preferred_currency=current_user["preferred_currency"],
-        is_active=current_user["is_active"],
-        created_at=current_user["created_at"],
-        telegram_bot_token=current_user.get("telegram_bot_token"),
-        telegram_chat_id=current_user.get("telegram_chat_id"),
-        default_alert_percentage_above=current_user.get("default_alert_percentage_above"),
-        default_alert_percentage_below=current_user.get("default_alert_percentage_below")
-    )
-
-@app.put("/api/auth/profile", response_model=UserResponse)
-async def update_profile(update_data: UserProfileUpdate, current_user: dict = Depends(get_current_active_user)):
-    """Update user profile"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Check if email or username already exists (excluding current user)
-    if update_data.email or update_data.username:
-        email_check = update_data.email or current_user["email"]
-        username_check = update_data.username or current_user["username"]
-        cursor.execute("SELECT id FROM users WHERE (email = ? OR username = ?) AND id != ?", 
-                      (email_check, username_check, current_user["id"]))
-        if cursor.fetchone():
-            conn.close()
-            raise HTTPException(status_code=400, detail="Email or username already in use")
-    
-    # Update fields
-    update_fields = []
-    update_values = []
-    
-    if update_data.email is not None:
-        update_fields.append("email = ?")
-        update_values.append(update_data.email)
-    if update_data.username is not None:
-        update_fields.append("username = ?")
-        update_values.append(update_data.username)
-    if update_data.full_name is not None:
-        update_fields.append("full_name = ?")
-        update_values.append(update_data.full_name)
-    if update_data.preferred_currency is not None:
-        update_fields.append("preferred_currency = ?")
-        update_values.append(update_data.preferred_currency)
-    if update_data.telegram_bot_token is not None:
-        update_fields.append("telegram_bot_token = ?")
-        update_values.append(update_data.telegram_bot_token)
-    if update_data.telegram_chat_id is not None:
-        update_fields.append("telegram_chat_id = ?")
-        update_values.append(update_data.telegram_chat_id)
-    if update_data.default_alert_percentage_above is not None:
-        update_fields.append("default_alert_percentage_above = ?")
-        update_values.append(update_data.default_alert_percentage_above)
-    if update_data.default_alert_percentage_below is not None:
-        update_fields.append("default_alert_percentage_below = ?")
-        update_values.append(update_data.default_alert_percentage_below)
-    
-    if update_fields:
-        update_fields.append("updated_at = ?")
-        update_values.append(datetime.now().isoformat() + "Z")
-        update_values.append(current_user["id"])
-        
-        cursor.execute(f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?", update_values)
-        conn.commit()
-    
-    # Handle Binance credentials separately (encrypted storage)
-    if update_data.binance_api_key is not None and update_data.binance_api_secret is not None:
-        from .services.binance_credential_service import binance_credential_service
-        binance_credential_service.save_user_credentials(
-            current_user["id"], 
-            update_data.binance_api_key, 
-            update_data.binance_api_secret
-        )
-    
-    # Get updated user
-    cursor.execute("SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = ?", (current_user["id"],))
-    user = cursor.fetchone()
-    conn.close()
-    
-    return UserResponse(
-        id=user[0],
-        email=user[1],
-        username=user[2],
-        full_name=user[3],
-        preferred_currency=user[4],
-        is_active=user[5],
-        created_at=user[6],
-        telegram_bot_token=user[7],
-        telegram_chat_id=user[8],
-        default_alert_percentage_above=user[9] if user[9] is not None else 60.0,
-        default_alert_percentage_below=user[10] if user[10] is not None else 20.0
-    )
-
-@app.post("/api/auth/change-password")
-async def change_password(password_change: PasswordChange, current_user: dict = Depends(get_current_active_user)):
-    """Change user password"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get current password hash
-    cursor.execute("SELECT hashed_password FROM users WHERE id = ?", (current_user["id"],))
-    user = cursor.fetchone()
-    
-    if not user or not verify_password(password_change.current_password, user[0]):
-        conn.close()
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    
-    # Update password
-    new_hashed_password = get_password_hash(password_change.new_password)
-    cursor.execute("UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?", 
-                  (new_hashed_password, datetime.now().isoformat() + "Z", current_user["id"]))
-    conn.commit()
-    conn.close()
-    
-    return {"message": "Password changed successfully"}
-
-@app.post("/api/auth/test-telegram")
-async def test_telegram_connection(current_user: dict = Depends(get_current_active_user)):
-    """Test Telegram connection for current user"""
-    try:
-        test_message = f"🧪 <b>Test Message</b>\n\nHello {current_user['username']}! This is a test message from your Crypto AI Agent.\n\n✅ Your Telegram integration is working correctly!"
-        
-        success = await send_user_telegram_notification(current_user["id"], test_message)
-        
-        if success:
-            return {"message": "Telegram test message sent successfully!", "success": True}
-        else:
-            return {"message": "Failed to send Telegram test message. Please check your credentials.", "success": False}
-            
-    except Exception as e:
-        logger.error(f"Error testing Telegram connection for user {current_user['id']}: {e}")
-        return {"message": f"Error testing Telegram connection: {str(e)}", "success": False}
-
-@app.post("/api/auth/password-reset-request")
-async def request_password_reset(request: PasswordResetRequest):
-    """Request password reset (logs token to console)"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get user by email
-    cursor.execute("SELECT id FROM users WHERE email = ?", (request.email,))
-    user = cursor.fetchone()
-    
-    if user:
-        # Generate reset token
-        reset_token = generate_reset_token()
-        expires_at = (datetime.now() + timedelta(hours=1)).isoformat() + "Z"
-        now = datetime.now().isoformat() + "Z"
-        
-        # Store reset token
-        cursor.execute('''
-            INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (user[0], reset_token, expires_at, False, now))
-        conn.commit()
-        
-        # Log token to console (for development)
-        logger.info(f"Password reset token for {request.email}: {reset_token}")
-        logger.info(f"Token expires at: {expires_at}")
-    
-    conn.close()
-    
-    # Always return success to prevent email enumeration
-    return {"message": "If the email exists, a password reset token has been generated. Check the server logs for the token."}
-
-@app.post("/api/auth/password-reset-confirm")
-async def confirm_password_reset(confirm: PasswordResetConfirm):
-    """Confirm password reset with token"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get reset token
-    cursor.execute('''
-        SELECT user_id, expires_at, used FROM password_reset_tokens 
-        WHERE token = ? AND used = 0
-    ''', (confirm.token,))
-    token_data = cursor.fetchone()
-    
-    if not token_data:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
-    
-    user_id, expires_at, used = token_data
-    
-    # Check if token is expired
-    if datetime.now() > datetime.fromisoformat(expires_at.replace('Z', '+00:00')):
-        conn.close()
-        raise HTTPException(status_code=400, detail="Reset token has expired")
-    
-    # Update password
-    new_hashed_password = get_password_hash(confirm.new_password)
-    cursor.execute("UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?", 
-                  (new_hashed_password, datetime.now().isoformat() + "Z", user_id))
-    
-    # Mark token as used
-    cursor.execute("UPDATE password_reset_tokens SET used = 1 WHERE token = ?", (confirm.token,))
-    
-    conn.commit()
-    conn.close()
-    
-    return {"message": "Password reset successfully"}
-
-@app.delete("/api/auth/delete-account")
-async def delete_account(confirmation: AccountDeletionConfirm, current_user: dict = Depends(get_current_active_user)):
-    """Delete user account and all associated data"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    user_id = current_user["id"]
-    
-    try:
-        # Delete all user-related data in the correct order to respect foreign key constraints
-        
-        # 1. Delete alert history
-        cursor.execute("DELETE FROM alert_history WHERE user_id = ?", (user_id,))
-        
-        # 2. Delete alerts
-        cursor.execute("DELETE FROM alerts WHERE user_id = ?", (user_id,))
-        
-        # 3. Delete tracked symbols
-        cursor.execute("DELETE FROM tracked_symbols WHERE user_id = ?", (user_id,))
-        
-        # 4. Delete portfolio items
-        cursor.execute("DELETE FROM portfolio_items WHERE user_id = ?", (user_id,))
-        
-        # 5. Delete password reset tokens
-        cursor.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
-        
-        # 6. Delete user sessions
-        cursor.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
-        
-        # 7. Finally, delete the user account
-        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"User account {user_id} ({current_user['email']}) has been permanently deleted")
-        
-        return {"message": "Account deleted successfully"}
-        
-    except Exception as e:
-        conn.rollback()
-        conn.close()
-        logger.error(f"Error deleting account for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete account")
-
-# Binance Credential Management endpoints
-@app.post("/api/auth/binance-credentials", response_model=BinanceCredentialsResponse)
-async def save_binance_credentials(credentials: BinanceCredentials, current_user: dict = Depends(get_current_active_user)):
-    """Save user's Binance API credentials"""
-    from .services.binance_credential_service import binance_credential_service
-    
-    user_id = current_user["id"]
-    
-    # Save credentials
-    success = binance_credential_service.save_user_credentials(
-        user_id, credentials.api_key, credentials.api_secret
-    )
-    
-    if success:
-        # Test the credentials
-        test_result = await binance_credential_service.test_user_credentials(user_id)
-        
-        return BinanceCredentialsResponse(
-            has_credentials=True,
-            message="Binance credentials saved successfully",
-            account_info=test_result.get('account_info') if test_result.get('success') else None
-        )
-    else:
-        raise HTTPException(status_code=500, detail="Failed to save Binance credentials")
-
-@app.get("/api/auth/binance-credentials", response_model=BinanceCredentialsResponse)
-async def get_binance_credentials_status(current_user: dict = Depends(get_current_active_user)):
-    """Get user's Binance credentials status"""
-    from .services.binance_credential_service import binance_credential_service
-    
-    user_id = current_user["id"]
-    has_credentials = binance_credential_service.has_user_credentials(user_id)
-    
-    if has_credentials:
-        # Test the credentials to get account info
-        test_result = await binance_credential_service.test_user_credentials(user_id)
-        
-        return BinanceCredentialsResponse(
-            has_credentials=True,
-            message="Binance credentials are configured",
-            account_info=test_result.get('account_info') if test_result.get('success') else None
-        )
-    else:
-        return BinanceCredentialsResponse(
-            has_credentials=False,
-            message="No Binance credentials configured"
-        )
-
-@app.post("/api/auth/test-binance-connection", response_model=BinanceTestResponse)
-async def test_binance_connection(current_user: dict = Depends(get_current_active_user)):
-    """Test user's Binance API connection"""
-    from .services.binance_credential_service import binance_credential_service
-    
-    user_id = current_user["id"]
-    result = await binance_credential_service.test_user_credentials(user_id)
-    
-    return BinanceTestResponse(
-        success=result.get('success', False),
-        message=result.get('message', 'Unknown error'),
-        account_info=result.get('account_info'),
-        error_code=str(result.get('error_code')) if result.get('error_code') is not None else None,
-        troubleshooting=result.get('troubleshooting')
-    )
-
-@app.delete("/api/auth/binance-credentials")
-async def delete_binance_credentials(current_user: dict = Depends(get_current_active_user)):
-    """Delete user's Binance API credentials"""
-    from .services.binance_credential_service import binance_credential_service
-    
-    user_id = current_user["id"]
-    success = binance_credential_service.delete_user_credentials(user_id)
-    
-    if success:
-        return {"message": "Binance credentials deleted successfully"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to delete Binance credentials")
-
-# Bitfinex Credential Management endpoints
-@app.post("/api/auth/bitfinex-credentials", response_model=BitfinexCredentialsResponse)
-async def save_bitfinex_credentials(credentials: BitfinexCredentials, current_user: dict = Depends(get_current_active_user)):
-    """Save user's Bitfinex API credentials"""
-    from .services.bitfinex_credential_service import bitfinex_credential_service
-    
-    user_id = current_user["id"]
-    
-    # Save credentials
-    success = bitfinex_credential_service.save_user_credentials(
-        user_id, credentials.api_key, credentials.api_secret
-    )
-    
-    if success:
-        # Test the credentials
-        test_result = await bitfinex_credential_service.test_user_credentials(user_id)
-        
-        return BitfinexCredentialsResponse(
-            has_credentials=True,
-            message="Bitfinex credentials saved successfully",
-            account_info=test_result.get('account_info') if test_result.get('success') else None
-        )
-    else:
-        raise HTTPException(status_code=500, detail="Failed to save Bitfinex credentials")
-
-@app.get("/api/auth/bitfinex-credentials", response_model=BitfinexCredentialsResponse)
-async def get_bitfinex_credentials_status(current_user: dict = Depends(get_current_active_user)):
-    """Get user's Bitfinex credentials status"""
-    from .services.bitfinex_credential_service import bitfinex_credential_service
-    
-    user_id = current_user["id"]
-    has_credentials = bitfinex_credential_service.has_user_credentials(user_id)
-    
-    if has_credentials:
-        # Test the credentials to get account info
-        test_result = await bitfinex_credential_service.test_user_credentials(user_id)
-        
-        return BitfinexCredentialsResponse(
-            has_credentials=True,
-            message="Bitfinex credentials are configured",
-            account_info=test_result.get('account_info') if test_result.get('success') else None
-        )
-    else:
-        return BitfinexCredentialsResponse(
-            has_credentials=False,
-            message="No Bitfinex credentials configured"
-        )
-
-@app.post("/api/auth/test-bitfinex-connection", response_model=BitfinexTestResponse)
-async def test_bitfinex_connection(current_user: dict = Depends(get_current_active_user)):
-    """Test user's Bitfinex API connection"""
-    from .services.bitfinex_credential_service import bitfinex_credential_service
-    
-    user_id = current_user["id"]
-    result = await bitfinex_credential_service.test_user_credentials(user_id)
-    
-    return BitfinexTestResponse(
-        success=result.get('success', False),
-        message=result.get('message', 'Unknown error'),
-        account_info=result.get('account_info'),
-        error_code=str(result.get('error_code')) if result.get('error_code') is not None else None,
-        troubleshooting=result.get('troubleshooting')
-    )
-
-@app.delete("/api/auth/bitfinex-credentials")
-async def delete_bitfinex_credentials(current_user: dict = Depends(get_current_active_user)):
-    """Delete user's Bitfinex API credentials"""
-    from .services.bitfinex_credential_service import bitfinex_credential_service
-    
-    user_id = current_user["id"]
-    success = bitfinex_credential_service.delete_user_credentials(user_id)
-    
-    if success:
-        return {"message": "Bitfinex credentials deleted successfully"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to delete Bitfinex credentials")
+from .api.auth import router as auth_router
+app.include_router(auth_router)
 
 # Portfolio endpoints
-@app.get("/api/portfolio/", response_model=List[PortfolioItem])
-async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
-    """Get all portfolio items converted to target currency"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM portfolio_items WHERE user_id = ? ORDER BY created_at DESC", (current_user["id"],))
-    rows = cursor.fetchall()
-    conn.close()
-    
-    # Convert to dict format
-    items = []
-    for row in rows:
-        item = {
-            "id": row[0],           # id
-            "user_id": row[1],      # user_id
-            "symbol": row[2],       # symbol
-            "amount": row[3],       # amount
-            "price_buy": row[4],    # price_buy
-            "purchase_date": row[5], # purchase_date
-            "base_currency": row[6], # base_currency
-            "purchase_price_eur": row[7], # purchase_price_eur
-            "purchase_price_czk": row[8],  # purchase_price_czk
-            "source": row[9],              # source
-            "commission": row[10],         # commission
-            "total_investment_text": row[11], # total_investment_text
-            "created_at": row[12],         # created_at
-            "updated_at": row[13],         # updated_at
-            "current_price": row[14],      # current_price
-            "current_value": row[15],      # current_value
-            "pnl": row[16],                # pnl
-            "pnl_percent": row[17],        # pnl_percent
-            # New USD-based fields
-            "price_buy_usd": row[18] if len(row) > 18 else None,
-            "commission_usd": row[19] if len(row) > 19 else None,
-            "current_price_usd": row[20] if len(row) > 20 else None,
-            "current_value_usd": row[21] if len(row) > 21 else None,
-            "pnl_usd": row[22] if len(row) > 22 else None,
-            "pnl_percent_usd": row[23] if len(row) > 23 else None,
-            "exchange_rate_at_purchase": row[24] if len(row) > 24 else None
-        }
-        
-        # Convert currency if needed
-        converted_item = convert_portfolio_item(item, currency)
-        items.append(converted_item)
-    
-    return items
+from .api.portfolio import router as portfolio_router
+app.include_router(portfolio_router)
 
-@app.get("/api/portfolio/summary")
-async def get_portfolio_summary(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
-    """Get portfolio summary converted to target currency"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM portfolio_items WHERE user_id = ?", (current_user["id"],))
-    rows = cursor.fetchall()
-    conn.close()
-    
-    total_value = 0
-    total_pnl = 0
-    total_investment = 0
-    
-    for row in rows:
-        item = {
-            "base_currency": row[6],    # base_currency
-            "current_value": row[15],   # current_value
-            "pnl": row[16],             # pnl
-            "amount": row[3],           # amount
-            "price_buy": row[4],        # price_buy
-            "commission": row[10]       # commission
-        }
-        
-        # Convert to target currency
-        converted_item = convert_portfolio_item(item, currency)
-        
-        total_value += converted_item["current_value"] or 0
-        total_pnl += converted_item["pnl"] or 0
-        total_investment += (converted_item["amount"] * converted_item["price_buy"] + converted_item["commission"])
-    
-    total_pnl_percent = (total_pnl / total_investment * 100) if total_investment > 0 else 0
-    item_count = len(rows)
-    
-    return {
-        "total_value": round(total_value, 8),
-        "total_invested": round(total_investment, 8),
-        "total_pnl": round(total_pnl, 8),
-        "total_pnl_percent": round(total_pnl_percent, 8),
-        "currency": currency,
-        "item_count": item_count
-    }
+from .api.alerts import router as alerts_router
+app.include_router(alerts_router)
 
-@app.post("/api/portfolio/", response_model=PortfolioItem)
-async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depends(get_current_active_user)):
-    """Create a new portfolio item"""
-    # Validate numeric fields to prevent database corruption
-    if not isinstance(item.amount, (int, float)) or item.amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be a positive number")
-    if not isinstance(item.price_buy, (int, float)) or item.price_buy <= 0:
-        raise HTTPException(status_code=400, detail="Price must be a positive number")
-    if not isinstance(item.commission, (int, float)) or item.commission < 0:
-        raise HTTPException(status_code=400, detail="Commission must be a non-negative number")
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    now = datetime.now().isoformat() + "Z"
-    
-    # Get current exchange rate for the base currency
-    exchange_rate = 1.0
-    if item.base_currency != "USD":
-        exchange_rate = currency_service.get_rate(item.base_currency)
-    
-    # Convert to USD for calculations
-    price_buy_usd = item.price_buy / exchange_rate if item.base_currency != "USD" else item.price_buy
-    commission_usd = item.commission / exchange_rate if item.base_currency != "USD" else item.commission
-    
-    # Format total investment text if not provided or improperly formatted
-    total_investment = (item.amount * item.price_buy) + item.commission
-    formatted_total_investment = item.total_investment_text
-    if not formatted_total_investment or not any(symbol in formatted_total_investment for symbol in ["$", "€", "Kč", "£", "¥"]):
-        formatted_total_investment = format_total_investment_text(total_investment, item.base_currency)
-    
-    cursor.execute('''
-        INSERT INTO portfolio_items 
-        (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
-         total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
-         price_buy_usd, commission_usd, current_price_usd, current_value_usd, pnl_usd, pnl_percent_usd,
-         exchange_rate_at_purchase)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        current_user["id"], item.symbol, item.amount, item.price_buy, item.purchase_date, item.base_currency,
-        item.source, item.commission, formatted_total_investment, now, now,
-        round(item.price_buy, 8), round(item.amount * item.price_buy, 8), 0.0, 0.0,
-        round(price_buy_usd, 8), round(commission_usd, 8), round(price_buy_usd, 8), 
-        round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate
-    ))
-    
-    item_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    # Return the created item - frontend will handle price refresh
-    return PortfolioItem(
-        id=item_id,
-        symbol=item.symbol,
-        amount=item.amount,
-        price_buy=item.price_buy,
-        purchase_date=item.purchase_date,
-        base_currency=item.base_currency,
-        source=item.source,
-        commission=item.commission,
-        total_investment_text=formatted_total_investment,
-        created_at=now,
-        updated_at=now,
-        current_price=round(item.price_buy, 8),
-        current_value=round(item.amount * item.price_buy, 8),
-        pnl=0.0,
-        pnl_percent=0.0,
-        price_buy_usd=round(price_buy_usd, 8),
-        commission_usd=round(commission_usd, 8),
-        current_price_usd=round(price_buy_usd, 8),
-        current_value_usd=round(item.amount * price_buy_usd, 8),
-        pnl_usd=0.0,
-        pnl_percent_usd=0.0,
-        exchange_rate_at_purchase=exchange_rate
-    )
+from .api.prices import router as prices_router
+app.include_router(prices_router)
 
-@app.put("/api/portfolio/{item_id}", response_model=PortfolioItem)
-async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_user: dict = Depends(get_current_active_user)):
-    """Update a portfolio item"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get existing item and verify ownership
-    cursor.execute("SELECT * FROM portfolio_items WHERE id = ? AND user_id = ?", (item_id, current_user["id"]))
-    row = cursor.fetchone()
-    
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Portfolio item not found")
-    
-    # Update only provided fields
-    update_fields = []
-    update_values = []
-    
-    if item.symbol is not None:
-        update_fields.append("symbol = ?")
-        update_values.append(item.symbol)
-    if item.amount is not None:
-        update_fields.append("amount = ?")
-        update_values.append(item.amount)
-    if item.price_buy is not None:
-        update_fields.append("price_buy = ?")
-        update_values.append(item.price_buy)
-    if item.purchase_date is not None:
-        update_fields.append("purchase_date = ?")
-        update_values.append(item.purchase_date)
-    if item.base_currency is not None:
-        update_fields.append("base_currency = ?")
-        update_values.append(item.base_currency)
-    if item.source is not None:
-        update_fields.append("source = ?")
-        update_values.append(item.source)
-    if item.commission is not None:
-        update_fields.append("commission = ?")
-        update_values.append(item.commission)
-    if item.total_investment_text is not None:
-        update_fields.append("total_investment_text = ?")
-        update_values.append(item.total_investment_text)
-    
-    if update_fields:
-        # If total_investment_text is being updated, ensure it's properly formatted
-        if "total_investment_text" in [field.split(" = ")[0] for field in update_fields]:
-            total_investment_text_idx = None
-            for i, field in enumerate(update_fields):
-                if field.startswith("total_investment_text = ?"):
-                    total_investment_text_idx = i
-                    break
-            
-            if total_investment_text_idx is not None:
-                total_investment_text = update_values[total_investment_text_idx]
-                if not total_investment_text or not any(symbol in total_investment_text for symbol in ["$", "€", "Kč", "£", "¥"]):
-                    # Get current item data to calculate proper total investment
-                    cursor.execute("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", (item_id,))
-                    current_data = cursor.fetchone()
-                    if current_data:
-                        amount, price_buy, commission, base_currency = current_data
-                        total_investment = (amount * price_buy) + commission
-                        update_values[total_investment_text_idx] = format_total_investment_text(total_investment, base_currency)
-        
-        # Recalculate USD values if price_buy, amount, commission, or base_currency are being updated
-        needs_usd_recalc = any(field in update_fields for field in ["price_buy = ?", "amount = ?", "commission = ?", "base_currency = ?"])
-        if needs_usd_recalc:
-            # Get current values before update for comparison
-            cursor.execute("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", (item_id,))
-            old_data = cursor.fetchone()
-            
-            # Perform the update first
-            update_fields.append("updated_at = ?")
-            update_values.append(datetime.now().isoformat() + "Z")
-            update_values.append(item_id)
-            
-            cursor.execute(f'''
-                UPDATE portfolio_items 
-                SET {', '.join(update_fields)}
-                WHERE id = ?
-            ''', update_values)
-            conn.commit()
-            
-            # Get updated values for USD recalculation
-            cursor.execute("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", (item_id,))
-            new_data = cursor.fetchone()
-            if new_data:
-                amount, price_buy, commission, base_currency = new_data
-                
-                # Get current exchange rate
-                exchange_rate = 1.0
-                if base_currency != "USD":
-                    exchange_rate = currency_service.get_rate(base_currency)
-                
-                # Convert to USD
-                price_buy_usd = price_buy / exchange_rate if base_currency != "USD" else price_buy
-                commission_usd = commission / exchange_rate if base_currency != "USD" else commission
-                
-                # Update USD values and trigger price recalculation
-                cursor.execute('''
-                    UPDATE portfolio_items 
-                    SET price_buy_usd = ?, commission_usd = ?, exchange_rate_at_purchase = ?,
-                        current_value = ?, current_value_usd = ?, pnl = ?, pnl_percent = ?, pnl_usd = ?, pnl_percent_usd = ?
-                    WHERE id = ?
-                ''', (
-                    round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate,
-                    round(amount * price_buy, 8), round(amount * price_buy_usd, 8),
-                    0.0, 0.0, 0.0, 0.0,
-                    item_id
-                ))
-                conn.commit()
-                
-                # Trigger price update to recalculate P&L
-                cursor.execute("SELECT symbol FROM portfolio_items WHERE id = ?", (item_id,))
-                symbol_row = cursor.fetchone()
-                if symbol_row:
-                    symbol = symbol_row[0]
-                    # Schedule price update in background
-                    try:
-                        asyncio.create_task(fetch_prices_for_symbols([symbol]))
-                    except:
-                        pass  # If asyncio.create_task fails, price update will happen on next scheduled run
-        else:
-            update_fields.append("updated_at = ?")
-            update_values.append(datetime.now().isoformat() + "Z")
-            update_values.append(item_id)
-            
-            cursor.execute(f'''
-                UPDATE portfolio_items 
-                SET {', '.join(update_fields)}
-                WHERE id = ?
-            ''', update_values)
-            
-            conn.commit()
-    
-    conn.close()
-    
-    # Return updated item
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM portfolio_items WHERE id = ?", (item_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    return PortfolioItem(
-        id=row[0], symbol=row[2], amount=row[3], price_buy=row[4],
-        purchase_date=row[5], base_currency=row[6], purchase_price_eur=row[7],
-        purchase_price_czk=row[8], source=row[9], commission=row[10],
-        total_investment_text=row[11], created_at=row[12], updated_at=row[13],
-        current_price=row[14], current_value=row[15], pnl=row[16], pnl_percent=row[17],
-        # USD-based fields for proper calculations
-        price_buy_usd=row[18] if len(row) > 18 else None,
-        commission_usd=row[19] if len(row) > 19 else None,
-        current_price_usd=row[20] if len(row) > 20 else None,
-        current_value_usd=row[21] if len(row) > 21 else None,
-        pnl_usd=row[22] if len(row) > 22 else None,
-        pnl_percent_usd=row[23] if len(row) > 23 else None,
-        exchange_rate_at_purchase=row[24] if len(row) > 24 else None
-    )
+from .api.csv_import import router as csv_import_router
+app.include_router(csv_import_router)
 
-@app.delete("/api/portfolio/{item_id}")
-async def delete_portfolio_item(item_id: int, current_user: dict = Depends(get_current_active_user)):
-    """Delete a portfolio item"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("DELETE FROM portfolio_items WHERE id = ? AND user_id = ?", (item_id, current_user["id"]))
-    deleted = cursor.rowcount
-    conn.commit()
-    conn.close()
-    
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="Portfolio item not found")
-    
-    return {"message": "Portfolio item deleted successfully"}
+from .api.exchange_imports import router as exchange_imports_router
+app.include_router(exchange_imports_router)
 
-# Alerts endpoints
-@app.get("/api/alerts/", response_model=List[PriceAlert])
-async def get_alerts(active_only: bool = False, current_user: dict = Depends(get_current_active_user)):
-    """Get all alerts"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    if active_only:
-        cursor.execute("SELECT * FROM alerts WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC", (current_user["id"],))
-    else:
-        cursor.execute("SELECT * FROM alerts WHERE user_id = ? ORDER BY created_at DESC", (current_user["id"],))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    alerts = []
-    for row in rows:
-        alerts.append(PriceAlert(
-            id=row[0], symbol=row[2], threshold_price=row[3],
-            alert_type=row[4], message=row[5], is_active=bool(row[6]),
-            created_at=row[7], threshold_price_usd=row[8] if len(row) > 8 else None,
-            base_currency=row[9] if len(row) > 9 else None,
-            exchange_rate_at_creation=row[10] if len(row) > 10 else None
-        ))
-    
-    return alerts
+from .api.ws import router as ws_router
+app.include_router(ws_router)
 
-@app.post("/api/alerts/", response_model=PriceAlert)
-async def create_alert(alert: PriceAlertCreate, current_user: dict = Depends(get_current_active_user)):
-    """Create a new alert"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    now = datetime.now().isoformat() + "Z"
-    
-    # Get current exchange rate for the base currency (default to USD if not specified)
-    base_currency = alert.base_currency or "USD"
-    exchange_rate = 1.0
-    if base_currency != "USD":
-        exchange_rate = currency_service.get_rate(base_currency)
-    
-    # Convert threshold price to USD for calculations
-    threshold_price_usd = alert.threshold_price / exchange_rate if base_currency != "USD" else alert.threshold_price
-    
-    cursor.execute('''
-        INSERT INTO alerts (user_id, symbol, threshold_price, alert_type, message, is_active, created_at,
-                           threshold_price_usd, base_currency, exchange_rate_at_creation)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (current_user["id"], alert.symbol, alert.threshold_price, alert.alert_type, alert.message, True, now,
-          threshold_price_usd, base_currency, exchange_rate))
-    
-    alert_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    return PriceAlert(
-        id=alert_id, symbol=alert.symbol, threshold_price=alert.threshold_price,
-        alert_type=alert.alert_type, message=alert.message, is_active=True,
-        created_at=now, threshold_price_usd=threshold_price_usd, 
-        base_currency=base_currency, exchange_rate_at_creation=exchange_rate
-    )
+# All endpoints have been moved to modular routers in app/api/
+# Import endpoints: app/api/exchange_imports.py
+# CSV import endpoints: app/api/csv_import.py
 
-@app.put("/api/alerts/{alert_id}", response_model=PriceAlert)
-async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dict = Depends(get_current_active_user)):
-    """Update an alert"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get existing alert and verify ownership
-    cursor.execute("SELECT * FROM alerts WHERE id = ? AND user_id = ?", (alert_id, current_user["id"]))
-    row = cursor.fetchone()
-    
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Alert not found")
-    
-    # Update only provided fields
-    update_fields = []
-    update_values = []
-    
-    if alert.symbol is not None:
-        update_fields.append("symbol = ?")
-        update_values.append(alert.symbol)
-    if alert.threshold_price is not None:
-        update_fields.append("threshold_price = ?")
-        update_values.append(alert.threshold_price)
-    if alert.alert_type is not None:
-        update_fields.append("alert_type = ?")
-        update_values.append(alert.alert_type)
-    if alert.message is not None:
-        update_fields.append("message = ?")
-        update_values.append(alert.message)
-    if alert.is_active is not None:
-        update_fields.append("is_active = ?")
-        update_values.append(alert.is_active)
-    
-    if update_fields:
-        update_values.append(alert_id)
-        cursor.execute(f'''
-            UPDATE alerts 
-            SET {', '.join(update_fields)}
-            WHERE id = ?
-        ''', update_values)
-        conn.commit()
-    
-    conn.close()
-    
-    # Return updated alert
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    return PriceAlert(
-        id=row[0], symbol=row[2], threshold_price=row[3],
-        alert_type=row[4], message=row[5], is_active=bool(row[6]),
-        created_at=row[7]
-    )
-
-@app.delete("/api/alerts/{alert_id}")
-async def delete_alert(alert_id: int, current_user: dict = Depends(get_current_active_user)):
-    """Delete an alert"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("DELETE FROM alerts WHERE id = ? AND user_id = ?", (alert_id, current_user["id"]))
-    deleted = cursor.rowcount
-    conn.commit()
-    conn.close()
-    
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="Alert not found")
-    
-    return {"message": "Alert deleted successfully"}
-
-@app.get("/api/alerts/history")
-async def get_alert_history(limit: int = 100, current_user: dict = Depends(get_current_active_user)):
-    """Get alert history"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("""
-            SELECT 
-                ah.id,
-                ah.alert_id,
-                ah.symbol,
-                ah.triggered_price,
-                ah.triggered_at
-            FROM alert_history ah
-            WHERE ah.user_id = ?
-            ORDER BY ah.triggered_at DESC
-            LIMIT ?
-        """, (current_user["id"], limit))
-        
-        history = []
-        for row in cursor.fetchall():
-            history.append({
-                "id": row[0],
-                "alert_id": row[1],
-                "symbol": row[2],
-                "triggered_price": row[3],
-                "triggered_at": row[4]
-            })
-        
-        return history
-        
-    except Exception as e:
-        logger.error(f"Error fetching alert history: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch alert history")
-    finally:
-        conn.close()
-
-# Tracked symbols endpoints
-@app.get("/api/symbols/tracked", response_model=List[TrackedSymbol])
-async def get_tracked_symbols(active_only: bool = False, current_user: dict = Depends(get_current_active_user)):
-    """Get all tracked symbols"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    if active_only:
-        cursor.execute("SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = ? AND active = 1 ORDER BY symbol", (current_user["id"],))
-    else:
-        cursor.execute("SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = ? ORDER BY symbol", (current_user["id"],))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    symbols = []
-    for row in rows:
-        symbols.append(TrackedSymbol(
-            symbol=row[0], name=row[1], active=bool(row[2]), last_updated=row[3]
-        ))
-    
-    return symbols
-
-@app.get("/api/symbols/prices")
-async def get_symbol_prices(symbols: str = None, current_user: dict = Depends(get_current_active_user)):
-    """Get current prices for multiple symbols from in-memory cache (batch endpoint)"""
-    try:
-        if not symbols:
-            return []
-        
-        # Parse comma-separated symbols
-        symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
-        
-        if not symbol_list:
-            return []
-        
-        # Get prices from in-memory cache
-        result = []
-        for symbol in symbol_list:
-            if symbol in manager.price_cache:
-                cache_entry = manager.price_cache[symbol]
-                result.append({
-                    "symbol": symbol,
-                    "price": cache_entry["price"],
-                    "timestamp": cache_entry["timestamp"]
-                })
-        
-        return result
-            
-    except Exception as e:
-        logger.error(f"Error fetching cached prices: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch prices")
-
-@app.get("/api/symbols/{symbol}/price")
-async def get_symbol_price(symbol: str, current_user: dict = Depends(get_current_active_user)):
-    """Get current price for a specific symbol"""
-    try:
-        # Get current price from the price service
-        prices = await multi_exchange_price_service.get_current_prices([symbol.upper()])
-        
-        if symbol.upper() in prices:
-            return {
-                "symbol": symbol.upper(),
-                "price": prices[symbol.upper()],
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-        else:
-            # Price not found - return 404 instead of 500
-            logger.warning(f"Price not found for symbol {symbol.upper()}")
-            raise HTTPException(status_code=404, detail=f"Price not found for symbol {symbol}")
-            
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 404)
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching price for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch price")
-
-# Currency endpoints
-@app.post("/api/currency/refresh")
-async def refresh_currency_rates():
-    """Refresh currency exchange rates"""
-    await currency_service.refresh_rates()
-    return {
-        "message": "Currency rates refreshed successfully",
-        "rates_count": len(currency_service.rates),
-        "last_updated": currency_service.last_updated_timestamp.isoformat() + "Z" if currency_service.last_updated_timestamp else currency_service.last_updated
-    }
-
-@app.post("/api/crypto/refresh")
-async def refresh_crypto_prices():
-    """Refresh crypto prices for all tracked symbols"""
-    try:
-        # Get all tracked symbols from the database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Get all unique symbols from portfolio items
-        cursor.execute("SELECT DISTINCT symbol FROM portfolio_items")
-        portfolio_symbols = [row[0] for row in cursor.fetchall()]
-        
-        # Get all active tracked symbols
-        cursor.execute("SELECT symbol FROM tracked_symbols WHERE active = 1")
-        tracked_symbols = [row[0] for row in cursor.fetchall()]
-        
-        # Combine and deduplicate symbols
-        all_symbols = list(set(portfolio_symbols + tracked_symbols))
-        conn.close()
-        
-        if not all_symbols:
-            return {
-                "message": "No symbols to refresh",
-                "symbols_count": 0,
-                "last_updated": datetime.now().isoformat() + "Z"
-            }
-        
-        # Fetch prices for all symbols
-        await fetch_prices_for_symbols(all_symbols)
-        
-        return {
-            "message": "Crypto prices refreshed successfully",
-            "symbols_count": len(all_symbols),
-            "symbols": all_symbols,
-            "last_updated": datetime.now().isoformat() + "Z"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error refreshing crypto prices: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to refresh crypto prices: {str(e)}")
-
-@app.get("/api/currency/rates")
-async def get_currency_rates():
-    """Get current currency exchange rates"""
-    return {
-        "base_currency": currency_service.base_currency,
-        "rates": currency_service.rates,
-        "last_updated": currency_service.last_updated,
-        "last_updated_timestamp": currency_service.get_timestamp_iso(),
-        "last_updated_formatted": currency_service.get_formatted_timestamp()
-    }
-
-@app.get("/api/symbols/last-updated")
-async def get_symbol_last_updated():
-    """Get last update timestamps for crypto symbols"""
-    return {
-        "last_bulk_update": price_service.get_timestamp_iso(),
-        "last_bulk_update_formatted": price_service.get_formatted_timestamp(),
-        "symbol_timestamps": price_service.get_all_symbol_timestamps()
-    }
-
-# Crypto symbols endpoints
-@app.get("/api/crypto-symbols", response_model=List[CryptoSymbol])
-async def get_crypto_symbols(limit: int = 500, current_user: dict = Depends(get_current_active_user)):
-    """Get all available cryptocurrency symbols"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT symbol, name, market_cap_rank, last_updated 
-        FROM crypto_symbols 
-        ORDER BY market_cap_rank ASC, symbol ASC 
-        LIMIT ?
-    """, (limit,))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    symbols = []
-    for row in rows:
-        symbols.append(CryptoSymbol(
-            symbol=row[0],
-            name=row[1],
-            market_cap_rank=row[2],
-            last_updated=row[3]
-        ))
-    
-    return symbols
-
-@app.get("/api/crypto-symbols/search", response_model=List[CryptoSymbol])
-async def search_crypto_symbols(q: str, limit: int = 50, current_user: dict = Depends(get_current_active_user)):
-    """Search cryptocurrency symbols by name or symbol"""
-    if not q or len(q) < 2:
-        return []
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    search_term = f"%{q.upper()}%"
-    cursor.execute("""
-        SELECT symbol, name, market_cap_rank, last_updated 
-        FROM crypto_symbols 
-        WHERE symbol LIKE ? OR name LIKE ?
-        ORDER BY market_cap_rank ASC, symbol ASC 
-        LIMIT ?
-    """, (search_term, search_term, limit))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    symbols = []
-    for row in rows:
-        symbols.append(CryptoSymbol(
-            symbol=row[0],
-            name=row[1],
-            market_cap_rank=row[2],
-            last_updated=row[3]
-        ))
-    
-    return symbols
-
-@app.post("/api/crypto-symbols/refresh")
-async def refresh_crypto_symbols(current_user: dict = Depends(get_current_active_user)):
-    """Refresh cryptocurrency symbols from external API"""
-    try:
-        # Use CoinGecko API to get top cryptocurrencies
-        # Create SSL context that doesn't verify certificates
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            # Get top 500 cryptocurrencies by market cap (2 pages of 250 each)
-            url = "https://api.coingecko.com/api/v3/coins/markets"
-            all_data = []
-            
-            # Fetch first 250 cryptocurrencies
-            params_page1 = {
-                "vs_currency": "usd",
-                "order": "market_cap_desc",
-                "per_page": 250,
-                "page": 1,
-                "sparkline": "false"
-            }
-            
-            async with session.get(url, params=params_page1) as response:
-                if response.status == 200:
-                    data_page1 = await response.json()
-                    all_data.extend(data_page1)
-                    logger.info(f"Fetched {len(data_page1)} cryptocurrencies from page 1")
-                else:
-                    raise HTTPException(status_code=500, detail="Failed to fetch first page from CoinGecko API")
-            
-            # Fetch next 250 cryptocurrencies
-            params_page2 = {
-                "vs_currency": "usd",
-                "order": "market_cap_desc",
-                "per_page": 250,
-                "page": 2,
-                "sparkline": "false"
-            }
-            
-            async with session.get(url, params=params_page2) as response:
-                if response.status == 200:
-                    data_page2 = await response.json()
-                    all_data.extend(data_page2)
-                    logger.info(f"Fetched {len(data_page2)} cryptocurrencies from page 2")
-                else:
-                    raise HTTPException(status_code=500, detail="Failed to fetch second page from CoinGecko API")
-            
-            data = all_data
-            
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Clear existing data
-            cursor.execute("DELETE FROM crypto_symbols")
-            
-            # Insert new data
-            current_time = datetime.now(timezone.utc).isoformat()
-            inserted_count = 0
-            
-            for coin in data:
-                try:
-                    # Safely extract and convert data
-                    symbol = str(coin.get("symbol", "")).upper()
-                    name = str(coin.get("name", ""))
-                    market_cap_rank = coin.get("market_cap_rank")
-                    
-                    # Skip if symbol or name is empty
-                    if not symbol or not name:
-                        continue
-                    
-                    # Convert market_cap_rank to int or None
-                    if market_cap_rank is not None:
-                        try:
-                            market_cap_rank = int(market_cap_rank)
-                        except (ValueError, TypeError):
-                            market_cap_rank = None
-                    else:
-                        market_cap_rank = None
-                    
-                    # Ensure all values are proper types for SQLite
-                    symbol = str(symbol) if symbol else ""
-                    name = str(name) if name else ""
-                    current_time_str = str(current_time)
-                    
-                    cursor.execute("""
-                        INSERT INTO crypto_symbols (symbol, name, market_cap_rank, last_updated, created_at)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (
-                        symbol,
-                        name,
-                        market_cap_rank,
-                        current_time_str,
-                        current_time_str
-                    ))
-                    inserted_count += 1
-                    
-                except Exception as e:
-                    logger.error(f"Error inserting coin {coin.get('symbol', 'unknown')}: {e}")
-                    continue
-            
-            conn.commit()
-            conn.close()
-            
-            return {
-                "message": f"Successfully refreshed {inserted_count} cryptocurrency symbols",
-                "count": inserted_count,
-                "last_updated": current_time
-            }
-                    
-    except Exception as e:
-        logger.error(f"Error refreshing crypto symbols: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to refresh crypto symbols: {str(e)}")
-
-# WebSocket endpoint
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates"""
-    await manager.connect(websocket)
-    
-    try:
-        while True:
-            try:
-                # Receive message from client with timeout
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
-                message = json.loads(data)
-                
-                if message.get("type") == "subscribe":
-                    # Subscribe to price updates for specific symbols
-                    symbols = message.get("symbols", [])
-                    manager.subscribe_to_prices(websocket, symbols)
-                    
-                    # Send confirmation
-                    await manager.send_personal_message(json.dumps({
-                        "type": "connection_status",
-                        "data": f"Subscribed to {len(symbols)} symbols"
-                    }), websocket)
-                    
-                elif message.get("type") == "subscribe_alerts":
-                    # Subscribe to alert notifications
-                    manager.subscribe_to_alerts(websocket)
-                    
-                    # Send confirmation
-                    await manager.send_personal_message(json.dumps({
-                        "type": "connection_status",
-                        "data": "Subscribed to alert notifications"
-                    }), websocket)
-                    
-            except asyncio.TimeoutError:
-                # Send a ping to keep connection alive
-                try:
-                    await manager.send_personal_message(json.dumps({
-                        "type": "ping",
-                        "data": "Connection alive"
-                    }), websocket)
-                except:
-                    # Connection is dead, break the loop
-                    break
-                
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        manager.disconnect(websocket)
-
-# Health check
-# Binance Import Endpoints
-@app.post("/api/import/binance/test-connection")
-async def test_binance_connection(current_user: dict = Depends(get_current_active_user)):
-    """Test Binance API connection using user credentials"""
-    try:
-        from .services.binance_credential_service import binance_credential_service
-        
-        result = await binance_credential_service.test_user_credentials(current_user["id"])
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error testing Binance connection: {e}")
-        raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
-
-@app.post("/api/import/binance/preview")
-async def preview_binance_import(current_user: dict = Depends(get_current_active_user)):
-    """Preview Binance portfolio import without saving using user credentials"""
-    try:
-        from .services.binance_credential_service import binance_credential_service
-        
-        result = await binance_credential_service.import_user_portfolio(current_user["id"])
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error previewing Binance import: {e}")
-        raise HTTPException(status_code=500, detail=f"Import preview failed: {str(e)}")
-
-@app.post("/api/import/binance/execute")
-async def execute_binance_import(current_user: dict = Depends(get_current_active_user)):
-    """Execute Binance portfolio import and save to database using user credentials"""
-    try:
-        from .services.binance_credential_service import binance_credential_service
-        
-        result = await binance_credential_service.import_user_portfolio(current_user["id"])
-        
-        if not result['success']:
-            raise HTTPException(status_code=400, detail=result['message'])
-        
-        # Save portfolio items to database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        imported_count = 0
-        now = datetime.now().isoformat() + "Z"
-        
-        for item in result['portfolio_items']:
-            try:
-                # Check if item already exists (same symbol and similar amount)
-                cursor.execute('''
-                    SELECT id FROM portfolio_items 
-                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
-                ''', (current_user["id"], item['symbol'], item['amount']))
-                
-                if cursor.fetchone():
-                    logger.info(f"Skipping duplicate item: {item['symbol']}")
-                    continue
-                
-                # Ensure currency rates are loaded for conversion
-                currency_service.ensure_rates_initialized()
-                
-                # Convert prices to USD if needed
-                base_currency = item.get('base_currency', 'USD')
-                price_buy = item['price_buy']
-                commission = item.get('commission', 0.0)
-                
-                if base_currency != 'USD' and price_buy > 0:
-                    # Convert to USD
-                    price_buy_usd = currency_service.convert_amount(price_buy, base_currency, 'USD')
-                    commission_usd = currency_service.convert_amount(commission, base_currency, 'USD')
-                    exchange_rate = currency_service.rates.get(base_currency, 1.0) if base_currency in currency_service.rates else 1.0
-                else:
-                    # Already in USD or price is 0
-                    price_buy_usd = price_buy
-                    commission_usd = commission
-                    exchange_rate = None
-                
-                # Insert new portfolio item with USD values
-                cursor.execute('''
-                    INSERT INTO portfolio_items 
-                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
-                     total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
-                     price_buy_usd, commission_usd, exchange_rate_at_purchase)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    current_user["id"], item['symbol'], item['amount'], price_buy,
-                    item['purchase_date'], base_currency, item['source'], commission,
-                    item['total_investment_text'], now, now,
-                    round(price_buy, 8), round(item['amount'] * price_buy, 8), 0.0, 0.0,
-                    round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate
-                ))
-                imported_count += 1
-                
-            except Exception as e:
-                logger.warning(f"Failed to import item {item['symbol']}: {e}")
-                continue
-        
-        # Record import history
-        cursor.execute('''
-            INSERT INTO import_history 
-            (user_id, source, import_date, items_imported, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            current_user["id"], 'binance', now, imported_count, 
-            'success' if imported_count > 0 else 'partial', now
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"✅ Binance import completed: {imported_count} items imported for user {current_user['id']}")
-        
-        return {
-            'success': True,
-            'message': f'Successfully imported {imported_count} portfolio items from Binance',
-            'items_imported': imported_count,
-            'total_found': len(result['portfolio_items'])
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error executing Binance import: {e}")
-        raise HTTPException(status_code=500, detail=f"Import execution failed: {str(e)}")
-
-# Bitfinex Import Endpoints
-@app.post("/api/import/bitfinex/test-connection")
-async def test_bitfinex_import_connection(current_user: dict = Depends(get_current_active_user)):
-    """Test Bitfinex API connection using user credentials"""
-    try:
-        from .services.bitfinex_credential_service import bitfinex_credential_service
-        
-        result = await bitfinex_credential_service.test_user_credentials(current_user["id"])
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error testing Bitfinex connection: {e}")
-        raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
-
-@app.post("/api/import/bitfinex/preview")
-async def preview_bitfinex_import(current_user: dict = Depends(get_current_active_user)):
-    """Preview Bitfinex portfolio import without saving using user credentials"""
-    try:
-        from .services.bitfinex_credential_service import bitfinex_credential_service
-        
-        result = await bitfinex_credential_service.import_user_portfolio(current_user["id"])
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error previewing Bitfinex import: {e}")
-        raise HTTPException(status_code=500, detail=f"Import preview failed: {str(e)}")
-
-@app.post("/api/import/bitfinex/execute")
-async def execute_bitfinex_import(current_user: dict = Depends(get_current_active_user)):
-    """Execute Bitfinex portfolio import and save to database using user credentials"""
-    try:
-        from .services.bitfinex_credential_service import bitfinex_credential_service
-        
-        result = await bitfinex_credential_service.import_user_portfolio(current_user["id"])
-        
-        if not result['success']:
-            raise HTTPException(status_code=400, detail=result['message'])
-        
-        # Save portfolio items to database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        imported_count = 0
-        now = datetime.now().isoformat() + "Z"
-        
-        for item in result['portfolio_items']:
-            try:
-                # Check if item already exists (same symbol and similar amount)
-                cursor.execute('''
-                    SELECT id FROM portfolio_items 
-                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
-                ''', (current_user["id"], item['symbol'], item['amount']))
-                
-                if cursor.fetchone():
-                    logger.info(f"Skipping duplicate item: {item['symbol']}")
-                    continue
-                
-                # Ensure currency rates are loaded for conversion
-                currency_service.ensure_rates_initialized()
-                
-                # Convert prices to USD if needed
-                base_currency = item.get('base_currency', 'USD')
-                price_buy = item['price_buy']
-                commission = item.get('commission', 0.0)
-                
-                if base_currency != 'USD' and price_buy > 0:
-                    # Convert to USD
-                    price_buy_usd = currency_service.convert_amount(price_buy, base_currency, 'USD')
-                    commission_usd = currency_service.convert_amount(commission, base_currency, 'USD')
-                    exchange_rate = currency_service.rates.get(base_currency, 1.0) if base_currency in currency_service.rates else 1.0
-                else:
-                    # Already in USD or price is 0
-                    price_buy_usd = price_buy
-                    commission_usd = commission
-                    exchange_rate = None
-                
-                # Insert new portfolio item with USD values
-                cursor.execute('''
-                    INSERT INTO portfolio_items 
-                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
-                     total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
-                     price_buy_usd, commission_usd, exchange_rate_at_purchase)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    current_user["id"], item['symbol'], item['amount'], price_buy,
-                    item['purchase_date'], base_currency, item['source'], commission,
-                    item['total_investment_text'], now, now,
-                    round(price_buy, 8), round(item['amount'] * price_buy, 8), 0.0, 0.0,
-                    round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate
-                ))
-                imported_count += 1
-                
-            except Exception as e:
-                logger.warning(f"Failed to import item {item['symbol']}: {e}")
-                continue
-        
-        # Record import history
-        cursor.execute('''
-            INSERT INTO import_history 
-            (user_id, source, import_date, items_imported, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            current_user["id"], 'Bitfinex', now, imported_count, 
-            'success' if imported_count > 0 else 'partial', now
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"✅ Bitfinex import completed: {imported_count} items imported for user {current_user['id']}")
-        
-        return {
-            'success': True,
-            'message': f'Successfully imported {imported_count} portfolio items from Bitfinex',
-            'items_imported': imported_count,
-            'total_found': len(result['portfolio_items'])
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error executing Bitfinex import: {e}")
-        raise HTTPException(status_code=500, detail=f"Import execution failed: {str(e)}")
-
-@app.get("/api/import/history")
-async def get_import_history(current_user: dict = Depends(get_current_active_user)):
-    """Get import history for the user"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT source, import_date, items_imported, status, error_message, created_at
-            FROM import_history 
-            WHERE user_id = ? 
-            ORDER BY created_at DESC
-        ''', (current_user["id"],))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        history = []
-        for row in rows:
-            history.append({
-                'source': row[0],
-                'import_date': row[1],
-                'items_imported': row[2],
-                'status': row[3],
-                'error_message': row[4],
-                'created_at': row[5]
-            })
-        
-        return {'import_history': history}
-        
-    except Exception as e:
-        logger.error(f"Error getting import history: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get import history: {str(e)}")
-
-# CSV Import Endpoints
-csv_import_service = CSVImportService()
-
-@app.post("/api/import/csv/upload", response_model=CSVUploadResponse)
-async def upload_csv_file(
-    file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_active_user)
-):
-    """Upload and preview CSV file"""
-    try:
-        # Validate file
-        if not file.filename.endswith('.csv'):
-            raise HTTPException(status_code=400, detail="File must be a CSV file")
-        
-        # Read file content
-        content = await file.read()
-        
-        if len(content) > 10 * 1024 * 1024:  # 10MB limit
-            raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
-        
-        # Parse CSV
-        rows = csv_import_service.parse_csv_file(content)
-        
-        if not rows:
-            return CSVUploadResponse(
-                success=False,
-                message="CSV file is empty or invalid",
-                errors=["No data found in CSV file"]
-            )
-        
-        # Get headers from first row
-        headers = list(rows[0].keys()) if rows else []
-        
-        # Detect exchange format
-        detected_exchange = csv_import_service.detect_exchange_format(headers)
-        
-        if not detected_exchange:
-            return CSVUploadResponse(
-                success=False,
-                message="Could not detect exchange format. Please use a supported exchange or manually map columns.",
-                preview_data=rows[:5],  # Show first 5 rows
-                total_rows=len(rows),
-                errors=["No matching exchange template found"]
-            )
-        
-        # Get template
-        template = csv_import_service.get_template(detected_exchange)
-        
-        # Normalize and aggregate transactions
-        normalized_txns = []
-        errors = []
-        
-        for i, row in enumerate(rows, start=2):  # Start at 2 (row 1 is header)
-            txn = csv_import_service.normalize_transaction(row, template, detected_exchange)
-            if txn:
-                normalized_txns.append(txn)
-            else:
-                errors.append(f"Row {i}: Failed to parse transaction")
-        
-        if not normalized_txns:
-            return CSVUploadResponse(
-                success=False,
-                message="No valid transactions found in CSV",
-                detected_exchange=detected_exchange,
-                total_rows=len(rows),
-                errors=errors
-            )
-        
-        # Aggregate transactions by symbol
-        aggregated_items = csv_import_service.aggregate_transactions(normalized_txns)
-        
-        return CSVUploadResponse(
-            success=True,
-            message=f"Successfully parsed CSV file. Found {len(aggregated_items)} unique symbols from {len(normalized_txns)} transactions.",
-            detected_exchange=detected_exchange,
-            preview_data=normalized_txns[:10],  # First 10 transactions
-            total_rows=len(rows),
-            aggregated_items=aggregated_items,
-            errors=errors[:10] if errors else []
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading CSV file: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process CSV file: {str(e)}")
-
-@app.post("/api/import/csv/execute")
-async def execute_csv_import(
-    file: UploadFile = File(...),
-    exchange: str = Form(...),
-    current_user: dict = Depends(get_current_active_user)
-):
-    """Execute CSV import and save to database"""
-    try:
-        logger.info(f"🔵 CSV execute import started by user {current_user['id']}")
-        logger.info(f"📊 Exchange parameter: {exchange}")
-        
-        logger.info(f"📊 Processing CSV import for exchange: {exchange}")
-        
-        # Read file content
-        content = await file.read()
-        logger.info(f"📁 Read {len(content)} bytes from CSV file")
-        
-        # Parse CSV
-        logger.info("🔄 Parsing CSV file...")
-        rows = csv_import_service.parse_csv_file(content)
-        logger.info(f"✅ Parsed {len(rows)} rows from CSV")
-        
-        if not rows:
-            logger.error("❌ CSV file is empty or invalid")
-            raise HTTPException(status_code=400, detail="CSV file sort is empty or invalid")
-        
-        # Get template
-        logger.info(f"🔍 Getting template for exchange: {exchange}")
-        template = csv_import_service.get_template(exchange)
-        if not template:
-            logger.error(f"❌ Unknown exchange: {exchange}")
-            raise HTTPException(status_code=400, detail=f"Unknown exchange: {exchange}")
-        
-        logger.info(f"✅ Template found for {exchange}")
-        
-        # Normalize transactions
-        logger.info("🔄 Normalizing transactions...")
-        normalized_txns = []
-        for idx, row in enumerate(rows):
-            txn = csv_import_service.normalize_transaction(row, template, exchange)
-            if txn:
-                normalized_txns.append(txn)
-            elif idx < 5:  # Log first 5 errors
-                logger.warning(f"⚠️ Failed to normalize transaction {idx}: {row}")
-        
-        logger.info(f"✅ Normalized {len(normalized_txns)} transactions")
-        
-        if not normalized_txns:
-            logger.error("❌ No valid transactions found in CSV")
-            raise HTTPException(status_code=400, detail="No valid transactions found in CSV")
-        
-        # Aggregate transactions
-        logger.info("🔄 Aggregating transactions...")
-        aggregated_items = csv_import_service.aggregate_transactions(normalized_txns)
-        logger.info(f"✅ Aggregated to {len(aggregated_items)} positions")
-        
-        if not aggregated_items:
-            logger.error("❌ No valid positions after aggregation")
-            raise HTTPException(status_code=400, detail="No valid positions after aggregation")
-        
-        # Save to database
-        logger.info("💾 Saving to database...")
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        imported_count = 0
-        now = datetime.now().isoformat() + "Z"
-        
-        for item in aggregated_items:
-            try:
-                # Check for duplicate
-                cursor.execute('''
-                    SELECT id FROM portfolio_items 
-                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
-                ''', (current_user["id"], item['symbol'], item['quantity']))
-                
-                if cursor.fetchone():
-                    logger.info(f"Skipping duplicate: {item['symbol']}")
-                    continue
-                
-                # Convert to USD
-                currency = item.get('currency', 'USD')
-                currency_service.ensure_rates_initialized()
-                
-                if currency != 'USD':
-                    exchange_rate = currency_service.rates.get(currency, 1.0)
-                    price_usd = item['price'] / exchange_rate
-                    fees_usd = item['fees'] / exchange_rate if item['fees'] > 0 else 0.0
-                    value_usd = item.get('value', 0) / exchange_rate if item.get('value', 0) > 0 else 0.0
-                else:
-                    exchange_rate = None
-                    price_usd = item['price']
-                    fees_usd = item['fees']
-                    value_usd = item.get('value', 0)
-                
-                # Calculate total investment from SSR value field or calculate it
-                if item.get('value', 0) > 0:
-                    total_investment = item['value'] + item['fees']
-                else:
-                    total_investment = item['quantity'] * item['price'] + item['fees']
-                
-                # Format currency symbol for display
-                currency_symbols = {'USD': '$', 'EUR': '€', 'CZK': 'Kč', 'GBP': '£', 'JPY': '¥'}
-                currency_symbol = currency_symbols.get(currency, currency + ' ')
-                
-                total_investment_text = f"{currency_symbol}{total_investment:.2f}"
-                
-                cursor.execute('''
-                    INSERT INTO portfolio_items 
-                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission,
-                     total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    current_user["id"], item['symbol'], item['quantity'], item['price'],
-                    item['date'], currency, exchange.capitalize(), item['fees'],
-                    total_investment_text, now, now, price_usd, fees_usd, exchange_rate
-                ))
-                
-                imported_count += 1
-                
-            except Exception as e:
-                logger.warning(f"Failed to import item {item['symbol']}: {e}")
-                continue
-        
-        # Save column mapping
-        column_mapping_data = {
-            'column_mapping': template.get('column_mapping', {}),
-            'headers': list(rows[0].keys()) if rows else []
-        }
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO csv_import_mappings 
-            (user_id, exchange, column_mapping, created_at, updated_at, last_used)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
-        ''', (current_user["id"], exchange.lower(), json.dumps(column_mapping_data)))
-        
-        # Record import history
-        cursor.execute('''
-            INSERT INTO import_history 
-            (user_id, source, import_date, items_imported, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            current_user["id"], exchange.capitalize(), now, imported_count, 
-            'success' if imported_count > 0 else 'partial', now
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"✅ CSV import completed: {imported_count} items imported for user {current_user['id']}")
-        
-        return {
-            'success': True,
-            'message': f'Successfully imported {imported_count} portfolio items from CSV',
-            'items_imported': imported_count,
-            'total_found': len(aggregated_items)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error executing CSV import: {e}")
-        raise HTTPException(status_code=500, detail=f"Import execution failed: {str(e)}")
-
-@app.get("/api/import/csv/templates")
-async def get_csv_templates():
-    """Get available CSV import templates"""
-    try:
-        templates = []
-        for exchange, template in csv_import_service.templates.items():
-            templates.append({
-                'exchange': exchange,
-                'name': template.get('name', exchange),
-                'required_fields': template.get('required_fields', []),
-                'optional_fields': template.get('optional_fields', [])
-            })
-        return {'templates': templates}
-    except Exception as e:
-        logger.error(f"Error getting CSV templates: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get templates: {str(e)}")
-
-@app.get("/api/import/csv/mapping/{exchange}")
-async def get_csv_mapping(exchange: str, current_user: dict = Depends(get_current_active_user)):
-    """Get user's saved CSV column mapping"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT column_mapping FROM csv_import_mappings
-            WHERE user_id = ? AND exchange = ?
-        ''', (current_user["id"], exchange.lower()))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            return {'mapping': json.loads(result[0])}
-        else:
-            raise HTTPException(status_code=404, detail="Mapping not found")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting CSV mapping: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get mapping: {str(e)}")
-
-@app.post("/api/import/csv/mapping/{exchange}")
-async def save_csv_mapping(
-    exchange: str,
-    mapping_data: Dict[str, Any],
-    current_user: dict = Depends(get_current_active_user)
-):
-    """Save custom CSV column mapping"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO csv_import_mappings 
-            (user_id, exchange, column_mapping, created_at, updated_at, last_used)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
-        ''', (current_user["id"], exchange.lower(), json.dumps(mapping_data)))
-        
-        conn.commit()
-        conn.close()
-        
-        return {'message': 'Mapping saved successfully'}
-        
-    except Exception as e:
-        logger.error(f"Error saving CSV mapping: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save mapping: {str(e)}")
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "database": "sqlite", "version": "2.0.0", "websocket_connections": len(manager.active_connections)}
+from .api.health import router as health_router
+app.include_router(health_router)
 
 if __name__ == "__main__":
+    pass
     import uvicorn
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)

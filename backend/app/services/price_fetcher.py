@@ -5,10 +5,10 @@ Automatically fetches crypto prices and currency rates
 import asyncio
 import logging
 from typing import List, Dict
-from app.services.price_service import PriceService
-from app.services.multi_exchange_price_service import multi_exchange_price_service
-from app.services.currency_service import currency_service
-from app.api.websocket import manager
+from ..services.price_service import PriceService
+from ..services.multi_exchange_price_service import multi_exchange_price_service
+from ..services.currency_service import currency_service
+from ..api.ws import manager
 
 logger = logging.getLogger(__name__)
 

@@ -45,11 +45,46 @@ else
     exit 1
 fi
 
+# Defaults and CLI overrides
+ENVIRONMENT_DEFAULT="development"
+SERVICE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --env)
+            shift
+            ENVIRONMENT_OVERRIDE="$1"
+            ;;
+        --service)
+            shift
+            SERVICE="$1"
+            ;;
+        *)
+            print_warning "Unknown argument: $1"
+            ;;
+    esac
+    shift || true
+done
+
 # Set default values if not provided
 BACKEND_PORT=${BACKEND_PORT:-8000}
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
 LOG_DIR=${LOG_DIR:-logs}
 DATA_DIR=${DATA_DIR:-data}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-crypto_ai_agent}
+ENVIRONMENT=${ENVIRONMENT_OVERRIDE:-${ENVIRONMENT:-$ENVIRONMENT_DEFAULT}}
+
+VALID_SERVICES_DEV=(backend frontend)
+VALID_SERVICES_PROD=(backend frontend postgres redis)
+is_valid_service() {
+    local name="$1"; shift
+    for s in "$@"; do
+        if [ "$s" = "$name" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 # Function to check if a port is in use
 port_in_use() {
@@ -83,35 +118,55 @@ kill_port() {
     fi
 }
 
-print_status "Stopping Crypto AI Agent services..."
+print_status "Selected environment: $ENVIRONMENT"
 
-# Stop backend
-print_status "Stopping Backend (FastAPI)..."
-kill_pid "$LOG_DIR/backend.pid"
-kill_port $BACKEND_PORT
-
-# Stop frontend
-print_status "Stopping Frontend (Next.js)..."
-kill_pid "$LOG_DIR/frontend.pid"
-kill_port $FRONTEND_PORT
-
-# Kill any remaining processes that might be related
-print_status "Cleaning up any remaining processes..."
-
-# Kill any uvicorn processes (including from virtual environment)
-pkill -f "uvicorn app.main:app" 2>/dev/null || true
-pkill -f "venv/bin/uvicorn" 2>/dev/null || true
-
-# Kill any next.js processes
-pkill -f "next dev" 2>/dev/null || true
-
-# Kill any node processes running on our ports
-for port in $FRONTEND_PORT $BACKEND_PORT; do
-    if port_in_use $port; then
-        print_warning "Port $port still in use, force killing..."
-        lsof -ti :$port | xargs kill -9 2>/dev/null || true
+if [ "$ENVIRONMENT" = "production" ]; then
+    print_status "Stopping services via docker compose (project: $COMPOSE_PROJECT_NAME)"
+    if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+        print_error "Docker or docker compose not available."
+        exit 1
     fi
-done
+    if [ -n "$SERVICE" ]; then
+        if ! is_valid_service "$SERVICE" "${VALID_SERVICES_PROD[@]}"; then
+            print_error "Invalid service: $SERVICE (allowed: backend, frontend, postgres, redis)"
+            exit 1
+        fi
+        docker compose -p "$COMPOSE_PROJECT_NAME" stop "$SERVICE"
+    else
+        docker compose -p "$COMPOSE_PROJECT_NAME" down
+    fi
+else
+    print_status "Stopping Crypto AI Agent services (development)..."
+    if [ -n "$SERVICE" ]; then
+        if ! is_valid_service "$SERVICE" "${VALID_SERVICES_DEV[@]}"; then
+            print_error "Invalid service: $SERVICE (allowed: backend, frontend)"
+            exit 1
+        fi
+    fi
+
+    if [ -z "$SERVICE" ] || [ "$SERVICE" = "backend" ]; then
+        print_status "Stopping Backend (FastAPI)..."
+        kill_pid "$LOG_DIR/backend.pid"
+        kill_port $BACKEND_PORT
+        pkill -f "uvicorn app.main:app" 2>/dev/null || true
+        pkill -f "venv/bin/uvicorn" 2>/dev/null || true
+    fi
+
+    if [ -z "$SERVICE" ] || [ "$SERVICE" = "frontend" ]; then
+        print_status "Stopping Frontend (Next.js)..."
+        kill_pid "$LOG_DIR/frontend.pid"
+        kill_port $FRONTEND_PORT
+        pkill -f "next dev" 2>/dev/null || true
+    fi
+
+    # Kill any node/uvicorn still bound
+    for port in $FRONTEND_PORT $BACKEND_PORT; do
+        if port_in_use $port; then
+            print_warning "Port $port still in use, force killing..."
+            lsof -ti :$port | xargs kill -9 2>/dev/null || true
+        fi
+    done
+fi
 
 # Wait a moment for processes to fully stop
 sleep 2

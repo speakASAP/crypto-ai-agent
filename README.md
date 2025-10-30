@@ -366,12 +366,8 @@ crypto-ai-agent/
 │   │   ├── schemas/        # Pydantic schemas
 │   │   ├── services/       # Business logic
 │   │   └── utils/          # Utilities
-│   ├── alembic/            # Database migrations
 │   └── requirements.txt
-├── nginx/                   # Nginx configuration
-├── docker-compose.yml      # Development environment
-├── docker-compose.prod.yml # Production environment
-├── deploy.sh               # Deployment script
+├── docker-compose.yml      # Docker compose stack (production-compatible)
 └── README.md
 ```
 
@@ -424,88 +420,30 @@ crypto-ai-agent/
 - **API Requests**: 1000+ requests/minute (vs 100)
 - **Database Connections**: 50+ concurrent (vs 1)
 
-## Migration Status - COMPLETE! 🎉
+## Deployment
 
-### Phase 1: Project Setup & Infrastructure ✅
+### Production (Docker)
 
-- [x] Project structure setup
-- [x] PostgreSQL database schema
-- [x] Redis cache configuration
-- [x] Docker development environment
-- [x] Environment configuration
-
-### Phase 2: Backend Development ✅
-
-- [x] FastAPI application implementation
-- [x] Database models and services
-- [x] API routes and WebSocket support
-- [x] Caching layer implementation
-
-### Phase 3: Frontend Development ✅
-
-- [x] Next.js application setup
-- [x] UI components and state management
-- [x] Real-time updates integration
-- [x] Portfolio management interface
-
-### Phase 4: Performance Optimization ✅
-
-- [x] Caching strategy implementation
-- [x] Database query optimization
-- [x] Performance monitoring
-- [x] Error handling and logging
-
-### Phase 5: Testing & Deployment ✅
-
-- [x] Unit and integration tests
-- [x] CI/CD pipeline setup
-- [x] Production deployment
-- [x] Performance testing
-
-## 🎉 Migration Complete
-
-The Crypto AI Agent has been successfully migrated from Streamlit to a modern, high-performance architecture:
-
-- **Frontend**: Next.js 14+ with TypeScript and Tailwind CSS
-- **Backend**: FastAPI with async Python 3.12+
-- **Database**: PostgreSQL with comprehensive indexing
-- **Caching**: Redis with multi-level caching strategy
-- **Real-time**: WebSocket support for live updates
-- **Performance**: 10x faster than the original Streamlit version
-- **Testing**: Comprehensive test suite with 85%+ coverage
-- **Deployment**: Production-ready Docker configuration
-
-### Quick Start for Application
+See `docs/DEPLOYMENT_DOCKER.md` for docker-compose deployment with external Nginx.
 
 ```bash
-# Start the application
-docker-compose up --build
+# Build and start
+docker compose up -d --build
 
-# Access the application
+# Access
 # Frontend: http://localhost:3000
 # Backend API: http://localhost:8000
 # API Docs: http://localhost:8000/docs
-# Performance Dashboard: http://localhost:8000/api/v2/performance/summary
-```
-
-### Production Deployment
-
-```bash
-# Deploy to production
-./deploy.sh
-
-# Monitor the application
-./monitor.sh
 ```
 
 ## Environment Variables
 
-See `.env.example` for all available configuration options. Key variables include:
+Use `.env` (not committed) and refer to `.env.example` for keys. Important:
 
 - `DATABASE_URL`: PostgreSQL connection string
 - `REDIS_URL`: Redis connection string
 - `BINANCE_API_URL`: Binance API endpoint
-- `TELEGRAM_BOT_TOKEN`: Telegram bot token
+- `JWT_SECRET`: JWT signing secret
 - `CORS_ORIGINS`: Allowed CORS origins
 
 ## Telegram Notifications Setup
@@ -583,4 +521,3 @@ For support and questions:
 
 - Create an issue in the repository
 - Check the documentation
-- Review the migration plan in [REFACTORING.md](../REFACTORING.md)

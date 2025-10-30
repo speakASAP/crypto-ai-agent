@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from decimal import Decimal
 from binance.client import Client as BinanceClient
-from app.core.config import settings
-from app.utils.time_utils import get_current_timestamp
-from app.services.currency_service import currency_service
+from ..core.config import settings
+from ..utils.time_utils import get_current_timestamp
+from ..services.currency_service import currency_service
 
 logger = logging.getLogger(__name__)
 
