@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Copy app
 COPY app /app/app
 
+# Copy templates directory for CSV import
+COPY templates /app/templates
+
 # Create logs directory (mounted in compose as a volume)
 RUN mkdir -p /app/logs
 
