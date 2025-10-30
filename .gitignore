@@ -278,6 +278,9 @@ local_settings.py
 *.tiff
 *.svg
 *.ico
+# But allow frontend public assets
+!frontend/public/**
+!frontend/public/**/*
 
 # Documentation build
 docs/_build/

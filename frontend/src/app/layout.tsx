@@ -9,6 +9,11 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata = {
   title: 'Crypto AI Agent v2.0',
   description: 'High-performance crypto portfolio management dashboard',
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+    apple: '/apple-touch-icon.png',
+  },
 }
 
 export default function RootLayout({
