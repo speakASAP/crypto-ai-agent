@@ -83,28 +83,28 @@ BINANCE_API_URL=https://api.binance.com/api/v3
 #### Test Connection
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/binance/test-connection" \
+curl -X POST "http://localhost:8100/api/import/binance/test-connection" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 #### Preview Import
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/binance/preview" \
+curl -X POST "http://localhost:8100/api/import/binance/preview" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 #### Execute Import
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/binance/execute" \
+curl -X POST "http://localhost:8100/api/import/binance/execute" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 #### View Import History
 
 ```bash
-curl -X GET "http://localhost:8000/api/import/history" \
+curl -X GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 

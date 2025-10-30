@@ -475,7 +475,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+      baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8100',
       timeout: 10000,
     })
 
@@ -906,8 +906,8 @@ POSTGRES_USER=crypto
 POSTGRES_PASSWORD=crypto_pass
 
 # API configuration
-API_PORT=8000
-FRONTEND_PORT=3000
+API_PORT=8100
+FRONTEND_PORT=3100
 ```
 
 ### Docker Compose Deployment
@@ -921,7 +921,7 @@ services:
     container_name: crypto-ai-backend
     env_file: .env
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8100}:8100"
     depends_on:
       - postgres
       - redis
@@ -1017,7 +1017,7 @@ docker compose exec -T postgres psql -U crypto crypto_ai_agent < backup.sql
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/docs"]
+  test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8100}/docs"]
   interval: 30s
   timeout: 5s
   retries: 5
@@ -1050,6 +1050,6 @@ healthcheck:
 ### CORS
 
 - Confirmed `CORSMiddleware` is initialized immediately after `app = FastAPI(...)` with:
-  - `allow_origins` from `CORS_ORIGINS` env (e.g., `http://localhost:3000`)
+  - `allow_origins` from `CORS_ORIGINS` env (e.g., `http://localhost:3100`)
   - `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`
 - Note: If any endpoint still shows CORS in browser, it usually indicates an upstream 5xx response. After SQL fixes, portfolio and alerts are functional via API; the UI should reflect success upon refresh.

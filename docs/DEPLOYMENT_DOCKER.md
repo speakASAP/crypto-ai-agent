@@ -4,8 +4,8 @@
 
 - Single host using docker-compose
 - External Nginx reverse proxy handles TLS and routing to:
-  - Frontend: <http://127.0.0.1:3000>
-  - Backend API + WebSocket: <http://127.0.0.1:8000> (including `/ws`)
+  - Frontend: <http://127.0.0.1:3100>
+  - Backend API + WebSocket: <http://127.0.0.1:8100> (including `/ws`)
 - Persistent volumes for Postgres/Redis, bind-mount `./logs` for backend logs
 
 ## Prerequisites
@@ -33,15 +33,15 @@ echo "ENVIRONMENT=production" >> .env
 
 ```bash
 # Backend
-curl -f http://127.0.0.1:8000/docs
+curl -f http://127.0.0.1:8100/docs
 # Frontend
-curl -f http://127.0.0.1:3000
+curl -f http://127.0.0.1:3100
 ```
 
 4. Configure external Nginx
 
-- Point `app.example.com` to 127.0.0.1:3000
-- Point `api.example.com` to 127.0.0.1:8000
+- Point `app.example.com` to 127.0.0.1:3100
+- Point `api.example.com` to 127.0.0.1:8100
 - Enable WebSocket proxying for `/ws`
 
 ## Nginx snippets
@@ -54,7 +54,7 @@ server {
     server_name api.example.com;
 
     location /ws {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8100;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -62,7 +62,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8100;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -79,7 +79,7 @@ server {
     server_name app.example.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3100;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;

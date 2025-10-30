@@ -92,28 +92,28 @@ The Bitfinex Portfolio Import feature allows users to automatically import their
 #### Test Connection
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/bitfinex/test-connection" \
+curl -X POST "http://localhost:8100/api/import/bitfinex/test-connection" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 #### Preview Import
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/bitfinex/preview" \
+curl -X POST "http://localhost:8100/api/import/bitfinex/preview" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 #### Execute Import
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/bitfinex/execute" \
+curl -X POST "http://localhost:8100/api/import/bitfinex/execute" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 #### View Import History
 
 ```bash
-curl -X GET "http://localhost:8000/api/import/history" \
+curl -X GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -289,7 +289,7 @@ CREATE TABLE portfolio_items (
 #### Test API Credentials
 
 ```bash
-curl -X POST "http://localhost:8000/api/auth/test-bitfinex-connection" \
+curl -X POST "http://localhost:8100/api/auth/test-bitfinex-connection" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 

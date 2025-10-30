@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8100}:8100"
     depends_on:
       - postgres
       - redis
@@ -14,10 +14,10 @@ services:
       - ./logs:/app/logs
     environment:
       - DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@postgres:5432/crypto_ai_agent
-      - API_PORT=${API_PORT:-8000}
+      - API_PORT=${API_PORT:-8100}
       - REDIS_URL=redis://redis:6379/0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8100}/docs"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -29,13 +29,13 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3100}:3100"
     depends_on:
       - backend
     environment:
-      - PORT=${FRONTEND_PORT:-3000}
+      - PORT=${FRONTEND_PORT:-3100}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${FRONTEND_PORT:-3000}"]
+      test: ["CMD", "curl", "-f", "http://localhost:${FRONTEND_PORT:-3100}"]
       interval: 30s
       timeout: 5s
       retries: 5

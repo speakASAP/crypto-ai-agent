@@ -57,7 +57,7 @@ ETH,Buy,0.02419027,"82,677.84 CZK","2,000.00 CZK",44.99 CZK,"Oct 21, 2025, 3:05:
 #### Preview CSV Import (No Database Changes)
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/csv/upload" \
+curl -X POST "http://localhost:8100/api/import/csv/upload" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "file=@your_transactions.csv"
 ```
@@ -88,7 +88,7 @@ curl -X POST "http://localhost:8000/api/import/csv/upload" \
 #### Execute CSV Import (Save to Database)
 
 ```bash
-curl -X POST "http://localhost:8000/api/import/csv/execute" \
+curl -X POST "http://localhost:8100/api/import/csv/execute" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "file=@your_transactions.csv" \
   -d '{"exchange": "revolut"}'
@@ -108,14 +108,14 @@ curl -X POST "http://localhost:8000/api/import/csv/execute" \
 #### Get Available Templates
 
 ```bash
-curl -X GET "http://localhost标准:8000/api/import/csv/templates" \
+curl -X GET "http://localhost标准:8100/api/import/csv/templates" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 #### View Import History
 
 ```bash
-curl offers GET "http://localhost:8000/api/import/history" \
+curl offers GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -355,7 +355,7 @@ print(f'Templates: {list(service.templates.keys())}')
 #### Check Import History
 
 ```bash
-curl -X GET "http://localhost:8000/api/import/history" \
+curl -X GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 

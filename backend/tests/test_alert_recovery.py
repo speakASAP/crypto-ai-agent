@@ -105,7 +105,7 @@ async def test_missed_alert_detection(temp_db, mock_price_service):
         {
             'timestamp': int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp() * 1000),
             'high': 51000.0,  # Above threshold
-            'low': 48000.0,
+            'low': 48100.0,
             'open': 49000.0,
             'close': 50000.0,
             'volume': 1000.0
@@ -155,7 +155,7 @@ async def test_no_missed_alerts_when_threshold_not_crossed(temp_db, mock_price_s
         {
             'timestamp': int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp() * 1000),
             'high': 49000.0,  # Below threshold
-            'low': 48000.0,
+            'low': 48100.0,
             'open': 48500.0,
             'close': 48800.0,
             'volume': 1000.0
@@ -214,7 +214,7 @@ async def test_startup_recovery_with_multiple_alerts(temp_db, mock_price_service
             return [{
                 'timestamp': int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp() * 1000),
                 'high': 51000.0,  # Above threshold
-                'low': 48000.0,
+                'low': 48100.0,
                 'open': 49000.0,
                 'close': 50000.0,
                 'volume': 1000.0

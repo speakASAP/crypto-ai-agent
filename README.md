@@ -91,7 +91,7 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 
    ```bash
    cd backend
-   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8100
    ```
 
 5. **Start the frontend (in a new terminal):**
@@ -102,12 +102,12 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
    ```
 
 6. **Access the application:**
-   - Frontend: <http://localhost:3000>
-   - Backend API: <http://localhost:8000>
-   - API Docs: <http://localhost:8000/docs>
+   - Frontend: <http://localhost:3100>
+   - Backend API: <http://localhost:8100>
+   - API Docs: <http://localhost:8100/docs>
 
 7. **First Time Setup:**
-   - Navigate to <http://localhost:3000/register>
+   - Navigate to <http://localhost:3100/register>
    - Create your account
    - Login and start managing your portfolio
 
@@ -176,12 +176,12 @@ The Crypto AI Agent now features a complete multi-user authentication system tha
    ```
 
 2. **Register a new account:**
-   - Navigate to <http://localhost:3000/register>
+   - Navigate to <http://localhost:3100/register>
    - Fill in your email, username, and password
    - Click "Register" to create your account
 
 3. **Login to your account:**
-   - Navigate to <http://localhost:3000/login>
+   - Navigate to <http://localhost:3100/login>
    - Enter your credentials
    - You'll be redirected to your personal dashboard
 
@@ -301,7 +301,7 @@ The system includes the following user-related tables:
    - Add `JWT_SECRET=your-secret-key` to `.env` file
 
 2. **Authentication errors:**
-   - Check if backend is running on port 8000
+   - Check if backend is running on port 8100
    - Verify JWT_SECRET is set correctly
 
 3. **Data not loading:**
@@ -431,9 +431,9 @@ See `docs/DEPLOYMENT_DOCKER.md` for docker-compose deployment with external Ngin
 docker compose up -d --build
 
 # Access
-# Frontend: http://localhost:3000
-# Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
+# Frontend: http://localhost:3100
+# Backend API: http://localhost:8100
+# API Docs: http://localhost:8100/docs
 ```
 
 ## Environment Variables

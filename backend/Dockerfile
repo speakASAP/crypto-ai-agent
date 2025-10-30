@@ -20,7 +20,7 @@ COPY app /app/app
 # Create logs directory (mounted in compose as a volume)
 RUN mkdir -p /app/logs
 
-ENV API_PORT=8000
+ENV API_PORT=8100
 EXPOSE $API_PORT
 
 CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT}"]

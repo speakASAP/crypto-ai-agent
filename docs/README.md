@@ -59,9 +59,9 @@
 
 ### API Documentation
 
-- **Backend API**: <http://localhost:8000/docs>
-- **Frontend**: <http://localhost:3000>
-- **WebSocket**: ws://localhost:8000/ws
+- **Backend API**: <http://localhost:8100/docs>
+- **Frontend**: <http://localhost:3100>
+- **WebSocket**: ws://localhost:8100/ws
 
 ## 🆕 Recent Updates
 
