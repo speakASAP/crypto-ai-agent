@@ -9,6 +9,7 @@ from ..services.csv_import_service import CSVImportService
 from ..services.currency_service import currency_service
 from ..schemas.csv_import import CSVUploadResponse
 from ..utils.logger import get_logger
+from ..utils.db import normalize_placeholders as _normalize_placeholders, is_postgres_connection
 
 
 router = APIRouter(prefix="/api/import/csv", tags=["csv-import"])
@@ -107,15 +108,17 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
         logger.info("💾 Saving to database...")
         conn = get_db_connection()
         cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
         imported_count = 0
         now = datetime.now().isoformat() + "Z"
 
         for item in aggregated_items:
             try:
-                cursor.execute('''
-                    SELECT id FROM portfolio_items 
-                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
-                ''', (current_user["id"], item['symbol'], item['quantity']))
+                check_duplicate_sql = _normalize_placeholders(
+                    "SELECT id FROM portfolio_items WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001",
+                    is_pg
+                )
+                cursor.execute(check_duplicate_sql, (current_user["id"], item['symbol'], item['quantity']))
                 if cursor.fetchone():
                     logger.info(f"Skipping duplicate: {item['symbol']}")
                     continue
@@ -143,12 +146,14 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                 currency_symbol = currency_symbols.get(currency, currency + ' ')
                 total_investment_text = f"{currency_symbol}{total_investment:.2f}"
 
-                cursor.execute('''
-                    INSERT INTO portfolio_items 
-                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission,
-                     total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                insert_sql = _normalize_placeholders(
+                    "INSERT INTO portfolio_items "
+                    "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
+                    "total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    is_pg
+                )
+                cursor.execute(insert_sql, (
                     current_user["id"], item['symbol'], item['quantity'], item['price'],
                     item['date'], currency, exchange.capitalize(), item['fees'],
                     total_investment_text, now, now, price_usd, fees_usd, exchange_rate,
@@ -163,17 +168,31 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
             'headers': list(rows[0].keys()) if rows else [],
         }
 
-        cursor.execute('''
-            INSERT OR REPLACE INTO csv_import_mappings 
-            (user_id, exchange, column_mapping, created_at, updated_at, last_used)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
-        ''', (current_user["id"], exchange.lower(), json.dumps(column_mapping_data)))
+        if is_pg:
+            # PostgreSQL: use ON CONFLICT DO UPDATE
+            mapping_sql = (
+                "INSERT INTO csv_import_mappings "
+                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
+                "VALUES (%s, %s, %s, NOW(), NOW(), NOW()) "
+                "ON CONFLICT (user_id, exchange) DO UPDATE SET "
+                "column_mapping = EXCLUDED.column_mapping, updated_at = NOW(), last_used = NOW()"
+            )
+        else:
+            # SQLite: use INSERT OR REPLACE
+            mapping_sql = (
+                "INSERT OR REPLACE INTO csv_import_mappings "
+                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
+                "VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
+            )
+        cursor.execute(mapping_sql, (current_user["id"], exchange.lower(), json.dumps(column_mapping_data)))
 
-        cursor.execute('''
-            INSERT INTO import_history 
-            (user_id, source, import_date, items_imported, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (current_user["id"], exchange.capitalize(), now, imported_count, 'success' if imported_count > 0 else 'partial', now))
+        history_sql = _normalize_placeholders(
+            "INSERT INTO import_history "
+            "(user_id, source, import_date, items_imported, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            is_pg
+        )
+        cursor.execute(history_sql, (current_user["id"], exchange.capitalize(), now, imported_count, 'success' if imported_count > 0 else 'partial', now))
 
         conn.commit()
         conn.close()
@@ -215,10 +234,12 @@ async def get_csv_mapping(exchange: str, current_user: dict = Depends(get_curren
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT column_mapping FROM csv_import_mappings
-            WHERE user_id = ? AND exchange = ?
-        ''', (current_user["id"], exchange.lower()))
+        is_pg = is_postgres_connection(conn)
+        sql = _normalize_placeholders(
+            "SELECT column_mapping FROM csv_import_mappings WHERE user_id = ? AND exchange = ?",
+            is_pg
+        )
+        cursor.execute(sql, (current_user["id"], exchange.lower()))
         result = cursor.fetchone()
         conn.close()
         if result:
@@ -237,11 +258,24 @@ async def save_csv_mapping(exchange: str, mapping_data: Dict[str, Any], current_
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO csv_import_mappings 
-            (user_id, exchange, column_mapping, created_at, updated_at, last_used)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
-        ''', (current_user["id"], exchange.lower(), json.dumps(mapping_data)))
+        is_pg = is_postgres_connection(conn)
+        if is_pg:
+            # PostgreSQL: use ON CONFLICT DO UPDATE
+            sql = (
+                "INSERT INTO csv_import_mappings "
+                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
+                "VALUES (%s, %s, %s, NOW(), NOW(), NOW()) "
+                "ON CONFLICT (user_id, exchange) DO UPDATE SET "
+                "column_mapping = EXCLUDED.column_mapping, updated_at = NOW(), last_used = NOW()"
+            )
+        else:
+            # SQLite: use INSERT OR REPLACE
+            sql = (
+                "INSERT OR REPLACE INTO csv_import_mappings "
+                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
+                "VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
+            )
+        cursor.execute(sql, (current_user["id"], exchange.lower(), json.dumps(mapping_data)))
         conn.commit()
         conn.close()
         return {'message': 'Mapping saved successfully'}
