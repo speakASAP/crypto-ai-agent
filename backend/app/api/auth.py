@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
+import asyncio
 
 from ..dependencies.auth import get_current_active_user, get_db_connection
 from ..utils.auth import (
@@ -91,6 +92,16 @@ async def register(user_data: UserCreate):
         is_active=True,
         created_at=now,
     )
+
+    # Trigger crypto symbols refresh in the background after successful registration
+    # This ensures new users can immediately add cryptocurrencies to their portfolio
+    try:
+        from ..api.prices import _refresh_crypto_symbols_helper
+        asyncio.create_task(_refresh_crypto_symbols_helper())
+        logger.info(f"Started background crypto symbols refresh for new user {user_id} ({user_data.email})")
+    except Exception as e:
+        # Log error but don't fail registration if refresh fails
+        logger.error(f"Failed to start background crypto symbols refresh for user {user_id}: {e}", exc_info=True)
 
     return TokenResponse(
         access_token=access_token,
