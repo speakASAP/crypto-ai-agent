@@ -11,7 +11,7 @@ import warnings
 import urllib3
 from typing import Dict, List, Optional
 from datetime import datetime
-from app.services.currency_service import currency_service
+from ..services.currency_service import currency_service
 
 # Suppress SSL warnings for Bitfinex API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

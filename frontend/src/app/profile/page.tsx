@@ -49,6 +49,7 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'telegram' | 'binance' | 'bitfinex' | 'system'>('profile')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [dbType, setDbType] = useState<string>('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [confirmationText, setConfirmationText] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
@@ -69,6 +70,15 @@ export default function ProfilePage() {
       setActiveTab(tab as 'profile' | 'password' | 'telegram' | 'binance' | 'bitfinex' | 'system')
     }
   }, [searchParams])
+
+  // Load backend health to determine DB type dynamically
+  useEffect(() => {
+    apiClient.client.get('/health')
+      .then(resp => {
+        if (resp?.data?.database) setDbType(resp.data.database as string)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (user) {
@@ -1204,7 +1214,7 @@ export default function ProfilePage() {
                 <div className="border-t pt-4">
                   <h4 className="text-sm font-medium text-gray-900 mb-2">System Information</h4>
                   <div className="text-sm text-gray-600 space-y-1">
-                    <p><strong>Database:</strong> SQLite</p>
+                    <p><strong>Database:</strong> {dbType ? (dbType === 'postgres' ? 'PostgreSQL' : 'SQLite') : '...'}</p>
                     <p><strong>API Source:</strong> CoinGecko API</p>
                     <p><strong>Update Frequency:</strong> Manual (on-demand)</p>
                     <p><strong>Symbols Limit:</strong> 500 cryptocurrencies</p>

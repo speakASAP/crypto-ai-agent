@@ -5,8 +5,8 @@ import logging
 import ssl
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
-from app.core.config import settings
-from app.utils.time_utils import get_current_timestamp
+from ..core.config import settings
+from ..utils.time_utils import get_current_timestamp
 
 logger = logging.getLogger(__name__)
 
