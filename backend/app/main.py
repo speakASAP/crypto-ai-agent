@@ -1250,6 +1250,20 @@ def init_postgres_database():
         )
     ''')
     
+    # Create csv_import_mappings table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS csv_import_mappings (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            exchange TEXT NOT NULL,
+            column_mapping TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_used TIMESTAMP,
+            UNIQUE(user_id, exchange)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     logger.info("PostgreSQL schema initialized")
