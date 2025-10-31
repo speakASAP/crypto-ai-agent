@@ -12,12 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 class MultiExchangePriceService:
-    """Multi-exchange price service with fallback chain: Binance -> Bitfinex -> Coinbase"""
+    """Multi-exchange price service with fallback chain: CoinGecko -> Coinbase -> Binance -> Bitfinex"""
     
     def __init__(self):
+        self.coingecko_url = "https://api.coingecko.com/api/v3"
+        self.coinbase_url = "https://api.coinbase.com"
         self.binance_url = "https://api.binance.com"
         self.bitfinex_url = "https://api-pub.bitfinex.com"
-        self.coinbase_url = "https://api.coinbase.com"
         self.last_updated_timestamps: Dict[str, datetime] = {}
         self.last_bulk_update = None
         
@@ -44,33 +45,41 @@ class MultiExchangePriceService:
         
         logger.debug(f"Fetching prices for {len(crypto_symbols)} symbols using multi-exchange fallback")
         
-        # Try each exchange in order
+        # Try each exchange in order: CoinGecko -> Coinbase -> Binance -> Bitfinex
         prices = {}
         remaining_symbols = crypto_symbols.copy()
         
-        # 1. Try Binance first
-        binance_prices, binance_failed = await self._fetch_from_binance(remaining_symbols)
-        prices.update(binance_prices)
-        remaining_symbols = [s for s in remaining_symbols if s not in binance_prices]
+        # 1. Try CoinGecko first
+        coingecko_prices, coingecko_failed = await self._fetch_from_coingecko(remaining_symbols)
+        prices.update(coingecko_prices)
+        remaining_symbols = [s for s in remaining_symbols if s not in coingecko_prices]
         
         if remaining_symbols:
-            logger.debug(f"Binance failed for {len(remaining_symbols)} symbols, trying Bitfinex: {remaining_symbols}")
+            logger.debug(f"CoinGecko failed for {len(remaining_symbols)} symbols, trying Coinbase: {remaining_symbols}")
             
-            # 2. Try Bitfinex for remaining symbols
-            bitfinex_prices, bitfinex_failed = await self._fetch_from_bitfinex(remaining_symbols)
-            prices.update(bitfinex_prices)
-            remaining_symbols = [s for s in remaining_symbols if s not in bitfinex_prices]
+            # 2. Try Coinbase for remaining symbols
+            coinbase_prices, coinbase_failed = await self._fetch_from_coinbase(remaining_symbols)
+            prices.update(coinbase_prices)
+            remaining_symbols = [s for s in remaining_symbols if s not in coinbase_prices]
             
             if remaining_symbols:
-                logger.debug(f"Bitfinex failed for {len(remaining_symbols)} symbols, trying Coinbase: {remaining_symbols}")
+                logger.debug(f"Coinbase failed for {len(remaining_symbols)} symbols, trying Binance: {remaining_symbols}")
                 
-                # 3. Try Coinbase for remaining symbols
-                coinbase_prices, coinbase_failed = await self._fetch_from_coinbase(remaining_symbols)
-                prices.update(coinbase_prices)
-                remaining_symbols = [s for s in remaining_symbols if s not in coinbase_prices]
+                # 3. Try Binance for remaining symbols
+                binance_prices, binance_failed = await self._fetch_from_binance(remaining_symbols)
+                prices.update(binance_prices)
+                remaining_symbols = [s for s in remaining_symbols if s not in binance_prices]
                 
                 if remaining_symbols:
-                    logger.warning(f"All exchanges failed for {len(remaining_symbols)} symbols: {remaining_symbols}")
+                    logger.debug(f"Binance failed for {len(remaining_symbols)} symbols, trying Bitfinex: {remaining_symbols}")
+                    
+                    # 4. Try Bitfinex for remaining symbols
+                    bitfinex_prices, bitfinex_failed = await self._fetch_from_bitfinex(remaining_symbols)
+                    prices.update(bitfinex_prices)
+                    remaining_symbols = [s for s in remaining_symbols if s not in bitfinex_prices]
+                    
+                    if remaining_symbols:
+                        logger.warning(f"All exchanges failed for {len(remaining_symbols)} symbols: {remaining_symbols}")
         
         # Update timestamps
         current_time = get_current_timestamp()
@@ -80,6 +89,80 @@ class MultiExchangePriceService:
         
         logger.debug(f"Successfully fetched prices for {len(prices)} symbols")
         return prices
+    
+    async def _fetch_from_coingecko(self, symbols: List[str]) -> Tuple[Dict[str, float], List[str]]:
+        """Fetch prices from CoinGecko API using /coins/markets endpoint"""
+        prices = {}
+        failed_symbols = []
+        
+        try:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                # CoinGecko /coins/markets endpoint supports filtering by symbol
+                # We'll fetch up to 250 coins per request (CoinGecko limit)
+                # Filter by symbols we need
+                symbols_lower = [s.lower() for s in symbols]
+                
+                # Fetch prices using markets endpoint with vs_currency=usd
+                # Note: This endpoint doesn't directly filter by symbol, so we fetch and filter
+                url = f"{self.coingecko_url}/coins/markets"
+                params = {
+                    'vs_currency': 'usd',
+                    'per_page': 250,
+                    'page': 1
+                }
+                
+                async with session.get(url, params=params, timeout=15) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Create a mapping of symbol (lowercase) to price
+                        symbol_to_price = {}
+                        for coin in data:
+                            if 'symbol' in coin and 'current_price' in coin:
+                                coin_symbol = coin['symbol'].upper()
+                                if coin_symbol in symbols:
+                                    symbol_to_price[coin_symbol] = float(coin['current_price'])
+                        
+                        # Map prices back to requested symbols
+                        for symbol in symbols:
+                            if symbol in symbol_to_price:
+                                prices[symbol] = symbol_to_price[symbol]
+                            else:
+                                failed_symbols.append(symbol)
+                        
+                        # If we have missing symbols, try fetching more pages
+                        if failed_symbols and len(data) == 250:
+                            # Try page 2 for missing symbols
+                            params['page'] = 2
+                            async with session.get(url, params=params, timeout=15) as response2:
+                                if response2.status == 200:
+                                    data2 = await response2.json()
+                                    for coin in data2:
+                                        if 'symbol' in coin and 'current_price' in coin:
+                                            coin_symbol = coin['symbol'].upper()
+                                            if coin_symbol in failed_symbols:
+                                                prices[coin_symbol] = float(coin['current_price'])
+                                                failed_symbols.remove(coin_symbol)
+                    elif response.status == 429:
+                        # Rate limit - log and mark all as failed
+                        logger.warning("CoinGecko rate limit hit, will try other exchanges")
+                        failed_symbols = symbols.copy()
+                    else:
+                        error_text = await response.text()
+                        logger.debug(f"CoinGecko API returned status {response.status}: {error_text[:200]}")
+                        failed_symbols = symbols.copy()
+        
+        except Exception as e:
+            logger.error(f"Error fetching from CoinGecko: {e}", exc_info=True)
+            failed_symbols = symbols.copy()
+        
+        logger.info(f"CoinGecko: {len(prices)} successful, {len(failed_symbols)} failed")
+        return prices, failed_symbols
     
     async def _fetch_from_binance(self, symbols: List[str]) -> Tuple[Dict[str, float], List[str]]:
         """Fetch prices from Binance API"""
