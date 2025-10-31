@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -113,6 +113,7 @@ export default function Home() {
   const [csvPreview, setCsvPreview] = useState<any>(null)
   const [importingCSV, setImportingCSV] = useState(false)
   const [csvMessage, setCsvMessage] = useState<string>('')
+  const csvFileInputRef = useRef<HTMLInputElement>(null)
 
   // Credential check dialog states
   const [credentialDialogOpen, setCredentialDialogOpen] = useState(false)
@@ -1629,11 +1630,29 @@ export default function Home() {
               {/* File Upload */}
               <div>
                 <input
+                  ref={csvFileInputRef}
                   type="file"
                   accept=".csv"
                   onChange={handleCSVFileSelect}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  className="hidden"
+                  id="csv-file-input"
                 />
+                <Button
+                  type="button"
+                  onClick={() => {
+                    csvFileInputRef.current?.click()
+                  }}
+                  className="w-full"
+                  variant="outline"
+                >
+                  <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  {csvFile ? csvFile.name : 'Choose File'}
+                </Button>
+                {csvFile && (
+                  <p className="text-sm text-gray-500 mt-2">Selected: {csvFile.name}</p>
+                )}
               </div>
 
               {/* Message */}
@@ -1695,6 +1714,9 @@ export default function Home() {
                     setCsvFile(null)
                     setCsvPreview(null)
                     setCsvMessage('')
+                    if (csvFileInputRef.current) {
+                      csvFileInputRef.current.value = ''
+                    }
                   }}
                   variant="outline"
                 >
