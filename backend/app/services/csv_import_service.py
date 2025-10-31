@@ -378,8 +378,27 @@ class CSVImportService:
         
         # Calculate weighted average price from buy transactions
         weighted_price = sum(t['quantity'] * t['price'] for t in buy_txns) / total_buy_qty
-        total_fees = sum(t.get('fees', 0) for t in transactions)
-        total_value = sum(t.get('value', 0) for t in transactions)
+        # Only count fees and values from BUY transactions (sells don't contribute to investment)
+        total_buy_fees = sum(t.get('fees', 0) for t in buy_txns)
+        total_buy_value = sum(t.get('value', 0) for t in buy_txns)
+        
+        # Calculate total buy investment
+        total_buy_investment = total_buy_value + total_buy_fees
+        
+        # For positions with partial sells, calculate remaining investment proportionally
+        if total_sell_qty > 0:
+            # Investment per coin = total buy investment / total buy quantity
+            investment_per_coin = total_buy_investment / total_buy_qty if total_buy_qty > 0 else 0
+            # Remaining investment = investment per coin * remaining quantity
+            remaining_investment = investment_per_coin * net_quantity
+            # Proportionally split remaining investment between value and fees
+            value_ratio = total_buy_value / total_buy_investment if total_buy_investment > 0 else 0
+            fees_ratio = total_buy_fees / total_buy_investment if total_buy_investment > 0 else 0
+            total_value = remaining_investment * value_ratio
+            total_fees = remaining_investment * fees_ratio
+        else:
+            total_value = total_buy_value
+            total_fees = total_buy_fees
         
         # Get earliest buy date
         earliest_date = min(t['date'] for t in buy_txns)
