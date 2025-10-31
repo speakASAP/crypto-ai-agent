@@ -20,33 +20,74 @@ const currencySymbols: Record<Currency, string> = {
 
 /**
  * Format a number as currency with proper locale formatting
+ * Ensures negative numbers always show minus sign
  */
 export function formatCurrency(amount: number, currency: Currency = 'USD'): string {
   const locale = currencyToLocale[currency]
-  return new Intl.NumberFormat(locale, {
+  const formatted = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(amount)
+  
+  // Ensure negative values have minus sign (some locales may use parentheses or other formats)
+  if (amount < 0) {
+    // Remove parentheses if present and add minus sign
+    if (formatted.includes('(') && formatted.includes(')')) {
+      return formatted.replace(/\(([^)]+)\)/, '-$1')
+    }
+    // If no minus sign is present, add it before the currency symbol or number
+    if (!formatted.includes('-')) {
+      // For CZK: "-123,45 Kč" format
+      // For USD/EUR: "-$123.45" format
+      const symbol = getCurrencySymbol(currency)
+      if (symbol === '$' || symbol === '€') {
+        return formatted.replace(new RegExp(`\\${symbol}`), `-${symbol}`)
+      } else {
+        return formatted.replace(/(\d)/, '-$1')
+      }
+    }
+  }
+  return formatted
 }
 
 /**
  * Format a number as currency with no decimal places (for whole numbers)
+ * Ensures negative numbers always show minus sign
  */
 export function formatCurrencyWhole(amount: number, currency: Currency = 'USD'): string {
   const locale = currencyToLocale[currency]
-  return new Intl.NumberFormat(locale, {
+  const formatted = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
   }).format(amount)
+  
+  // Ensure negative values have minus sign (some locales may use parentheses or other formats)
+  if (amount < 0) {
+    // Remove parentheses if present and add minus sign
+    if (formatted.includes('(') && formatted.includes(')')) {
+      return formatted.replace(/\(([^)]+)\)/, '-$1')
+    }
+    // If no minus sign is present, add it before the currency symbol or number
+    if (!formatted.includes('-')) {
+      const symbol = getCurrencySymbol(currency)
+      if (symbol === '$' || symbol === '€') {
+        return formatted.replace(new RegExp(`\\${symbol}`), `-${symbol}`)
+      } else {
+        return formatted.replace(/(\d)/, '-$1')
+      }
+    }
+  }
+  return formatted
 }
 
 /**
  * Format a number as currency with spaces for thousands separators
  * This provides better readability for large numbers
+ * Ensures negative numbers always show minus sign
  */
 export function formatCurrencyWithSpaces(amount: number, currency: Currency = 'USD'): string {
   const locale = currencyToLocale[currency]
@@ -57,31 +98,68 @@ export function formatCurrencyWithSpaces(amount: number, currency: Currency = 'U
     maximumFractionDigits: 2
   }).format(amount)
   
+  // Ensure negative values have minus sign (some locales may use parentheses or other formats)
+  let result = formatted
+  if (amount < 0) {
+    // Remove parentheses if present and add minus sign
+    if (result.includes('(') && result.includes(')')) {
+      result = result.replace(/\(([^)]+)\)/, '-$1')
+    }
+    // If no minus sign is present, add it before the currency symbol or number
+    if (!result.includes('-')) {
+      const symbol = getCurrencySymbol(currency)
+      if (symbol === '$' || symbol === '€') {
+        result = result.replace(new RegExp(`\\${symbol}`), `-${symbol}`)
+      } else {
+        result = result.replace(/(\d)/, '-$1')
+      }
+    }
+  }
+  
   // Add spaces for better readability (replace commas with spaces for CZK, keep commas for others)
   if (currency === 'CZK') {
-    return formatted.replace(/,/g, ' ')
+    return result.replace(/,/g, ' ')
   }
-  return formatted
+  return result
 }
 
 /**
  * Format a percentage with proper sign and decimal places
+ * Ensures negative percentages always show minus sign
  */
 export function formatPercent(percent: number | null | undefined, decimals: number = 2): string {
   if (percent === null || percent === undefined || isNaN(percent)) {
     return 'N/A'
   }
-  return `${percent >= 0 ? '+' : ''}${percent.toFixed(decimals)}%`
+  // Always show minus sign for negative values
+  const sign = percent >= 0 ? '+' : '-'
+  return `${sign}${Math.abs(percent).toFixed(decimals)}%`
 }
 
 /**
  * Format a number with spaces for thousands separators (for non-currency values)
+ * Ensures negative numbers always show minus sign
  */
 export function formatNumberWithSpaces(amount: number, decimals: number = 2): string {
-  return new Intl.NumberFormat('en-US', {
+  const formatted = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals
-  }).format(amount).replace(/,/g, ' ')
+  }).format(amount)
+  
+  // Ensure negative values have minus sign
+  let result = formatted
+  if (amount < 0) {
+    // Remove parentheses if present and add minus sign
+    if (result.includes('(') && result.includes(')')) {
+      result = result.replace(/\(([^)]+)\)/, '-$1')
+    }
+    // If no minus sign is present, add it
+    if (!result.includes('-')) {
+      result = result.replace(/^(\d)/, '-$1')
+    }
+  }
+  
+  return result.replace(/,/g, ' ')
 }
 
 /**
@@ -100,16 +178,22 @@ export function getCurrencySymbol(currency: Currency): string {
 
 /**
  * Format amount with currency symbol and proper spacing
+ * Ensures negative numbers always show minus sign
  */
 export function formatAmountWithSymbol(amount: number, currency: Currency = 'USD'): string {
   const symbol = getCurrencySymbol(currency)
-  const formatted = formatNumberWithSpaces(amount, 2)
+  // Use Math.abs to format the number, then add sign manually
+  const absAmount = Math.abs(amount)
+  const formatted = formatNumberWithSpaces(absAmount, 2)
+  
+  // Add minus sign for negative values
+  const sign = amount < 0 ? '-' : ''
   
   // Add currency symbol with proper spacing
   if (symbol === '$' || symbol === '€') {
-    return `${symbol}${formatted}`
+    return `${sign}${symbol}${formatted}`
   } else {
-    return `${formatted} ${symbol}`
+    return `${sign}${formatted} ${symbol}`
   }
 }
 

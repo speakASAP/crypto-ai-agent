@@ -1224,26 +1224,30 @@ export default function Home() {
                     </div>
                     {item.pnl !== undefined && (
                       <div className="text-right">
-                        <div className={`text-sm font-medium px-2 py-1 rounded transition-all duration-300 ease-in-out ${
-                          item.pnl >= 0
-                            ? 'text-green-600 bg-green-50'
-                            : 'text-red-600 bg-red-50'
-                        }`}>
-                          {(loading || currencyChanging) ? (
-                            <span className="animate-pulse">Loading...</span>
-                          ) : formatCurrencyAmount(item.pnl)}
-                        </div>
                         {item.current_value && (
-                          <div className={`text-sm transition-all duration-300 ease-in-out ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          <div className={`text-sm font-medium px-2 py-1 rounded transition-all duration-300 ease-in-out ${
+                            item.pnl >= 0
+                              ? 'text-green-600 bg-green-50'
+                              : 'text-red-600 bg-red-50'
+                          }`}>
                             {(loading || currencyChanging) ? (
                               <span className="animate-pulse">Loading...</span>
                             ) : (
                               <>
-                                {formatCurrencyAmount(item.current_value)} ({formatPercentAmount(item.pnl_percent || 0)})
+                                {formatCurrencyAmount(item.current_value)}
                               </>
                             )}
                           </div>
                         )}
+                        <div className={`text-sm transition-all duration-300 ease-in-out ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {(loading || currencyChanging) ? (
+                            <span className="animate-pulse">Loading...</span>
+                          ) : (
+                            <>
+                              {formatCurrencyAmount(item.pnl)} ({formatPercentAmount(item.pnl_percent || 0)})
+                            </>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="flex items-center space-x-2">
