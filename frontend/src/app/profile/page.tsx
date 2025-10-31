@@ -878,7 +878,17 @@ export default function ProfilePage() {
                   <p><strong>Step 1 - Create API Key:</strong></p>
                   <ol className="list-decimal list-inside ml-4 space-y-1">
                     <li>Log in to your Binance account</li>
-                    <li>Go to Account → API Management</li>
+                    <li>
+                      Go to{' '}
+                      <a
+                        href="https://www.binance.com/en/my/settings/api-management"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline font-medium"
+                      >
+                        Account → API Management
+                      </a>
+                    </li>
                     <li>Click "Create API"</li>
                     <li>Enter a label (e.g., "Crypto AI Agent")</li>
                     <li>Complete 2FA verification</li>
@@ -1024,7 +1034,17 @@ export default function ProfilePage() {
                   <p><strong>Step 1 - Create API Key:</strong></p>
                   <ol className="list-decimal list-inside ml-4 space-y-1">
                     <li>Log in to your Bitfinex account</li>
-                    <li>Go to Account → API Key Management</li>
+                    <li>
+                      Go to{' '}
+                      <a
+                        href="https://setting.bitfinex.com/api#my-keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline font-medium"
+                      >
+                        Account → API Key Management
+                      </a>
+                    </li>
                     <li>Click "Create New Key"</li>
                     <li>Enter a label (e.g., "Crypto AI Agent")</li>
                     <li>Complete 2FA verification</li>
