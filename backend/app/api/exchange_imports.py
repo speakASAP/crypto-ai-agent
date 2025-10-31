@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..dependencies.auth import get_current_active_user, get_db_connection
 from ..services.currency_service import currency_service
 from ..utils.logger import get_logger
+from ..utils.db import normalize_placeholders as _normalize_placeholders, is_postgres_connection
 
 
 router = APIRouter(prefix="/api/import", tags=["exchange-imports"])
@@ -42,15 +43,17 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
             raise HTTPException(status_code=400, detail=result['message'])
         conn = get_db_connection()
         cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
         imported_count = 0
         now = datetime.now().isoformat() + "Z"
 
         for item in result['portfolio_items']:
             try:
-                cursor.execute('''
-                    SELECT id FROM portfolio_items 
-                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
-                ''', (current_user["id"], item['symbol'], item['amount']))
+                check_duplicate_sql = _normalize_placeholders(
+                    "SELECT id FROM portfolio_items WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001",
+                    is_pg
+                )
+                cursor.execute(check_duplicate_sql, (current_user["id"], item['symbol'], item['amount']))
                 if cursor.fetchone():
                     logger.info(f"Skipping duplicate item: {item['symbol']}")
                     continue
@@ -66,13 +69,16 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
                     price_buy_usd = price_buy
                     commission_usd = commission
                     exchange_rate = None
-                cursor.execute('''
-                    INSERT INTO portfolio_items 
-                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
-                     total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
-                     price_buy_usd, commission_usd, exchange_rate_at_purchase)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                
+                insert_sql = _normalize_placeholders(
+                    "INSERT INTO portfolio_items "
+                    "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
+                    "total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent, "
+                    "price_buy_usd, commission_usd, exchange_rate_at_purchase) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    is_pg
+                )
+                cursor.execute(insert_sql, (
                     current_user["id"], item['symbol'], item['amount'], price_buy,
                     item['purchase_date'], base_currency, item['source'], commission,
                     item['total_investment_text'], now, now,
@@ -84,11 +90,13 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
                 logger.warning(f"Failed to import item {item['symbol']}: {e}")
                 continue
 
-        cursor.execute('''
-            INSERT INTO import_history 
-            (user_id, source, import_date, items_imported, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (current_user["id"], 'binance', now, imported_count, 'success' if imported_count > 0 else 'partial', now))
+        history_sql = _normalize_placeholders(
+            "INSERT INTO import_history "
+            "(user_id, source, import_date, items_imported, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            is_pg
+        )
+        cursor.execute(history_sql, (current_user["id"], 'binance', now, imported_count, 'success' if imported_count > 0 else 'partial', now))
         conn.commit()
         conn.close()
         logger.info(f"✅ Binance import completed: {imported_count} items imported for user {current_user['id']}")
@@ -136,15 +144,17 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
             raise HTTPException(status_code=400, detail=result['message'])
         conn = get_db_connection()
         cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
         imported_count = 0
         now = datetime.now().isoformat() + "Z"
 
         for item in result['portfolio_items']:
             try:
-                cursor.execute('''
-                    SELECT id FROM portfolio_items 
-                    WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001
-                ''', (current_user["id"], item['symbol'], item['amount']))
+                check_duplicate_sql = _normalize_placeholders(
+                    "SELECT id FROM portfolio_items WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001",
+                    is_pg
+                )
+                cursor.execute(check_duplicate_sql, (current_user["id"], item['symbol'], item['amount']))
                 if cursor.fetchone():
                     logger.info(f"Skipping duplicate item: {item['symbol']}")
                     continue
@@ -160,13 +170,16 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
                     price_buy_usd = price_buy
                     commission_usd = commission
                     exchange_rate = None
-                cursor.execute('''
-                    INSERT INTO portfolio_items 
-                    (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
-                     total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
-                     price_buy_usd, commission_usd, exchange_rate_at_purchase)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                
+                insert_sql = _normalize_placeholders(
+                    "INSERT INTO portfolio_items "
+                    "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
+                    "total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent, "
+                    "price_buy_usd, commission_usd, exchange_rate_at_purchase) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    is_pg
+                )
+                cursor.execute(insert_sql, (
                     current_user["id"], item['symbol'], item['amount'], price_buy,
                     item['purchase_date'], base_currency, item['source'], commission,
                     item['total_investment_text'], now, now,
@@ -178,11 +191,13 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
                 logger.warning(f"Failed to import item {item['symbol']}: {e}")
                 continue
 
-        cursor.execute('''
-            INSERT INTO import_history 
-            (user_id, source, import_date, items_imported, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (current_user["id"], 'Bitfinex', now, imported_count, 'success' if imported_count > 0 else 'partial', now))
+        history_sql = _normalize_placeholders(
+            "INSERT INTO import_history "
+            "(user_id, source, import_date, items_imported, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            is_pg
+        )
+        cursor.execute(history_sql, (current_user["id"], 'Bitfinex', now, imported_count, 'success' if imported_count > 0 else 'partial', now))
         conn.commit()
         conn.close()
         logger.info(f"✅ Bitfinex import completed: {imported_count} items imported for user {current_user['id']}")
@@ -204,12 +219,13 @@ async def get_import_history(current_user: dict = Depends(get_current_active_use
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT source, import_date, items_imported, status, error_message, created_at
-            FROM import_history 
-            WHERE user_id = ? 
-            ORDER BY created_at DESC
-        ''', (current_user["id"],))
+        is_pg = is_postgres_connection(conn)
+        history_sql = _normalize_placeholders(
+            "SELECT source, import_date, items_imported, status, error_message, created_at "
+            "FROM import_history WHERE user_id = ? ORDER BY created_at DESC",
+            is_pg
+        )
+        cursor.execute(history_sql, (current_user["id"],))
         rows = cursor.fetchall()
         conn.close()
         history = []
