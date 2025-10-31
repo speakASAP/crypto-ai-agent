@@ -9,10 +9,12 @@ from ..core.config import settings
 from ..services.currency_service import currency_service
 from ..schemas.portfolio import PortfolioItem, PortfolioCreate, PortfolioUpdate
 from ..utils.db import normalize_placeholders as _normalize_placeholders, execute_insert_and_get_id as _execute_insert_and_get_id
+from ..utils.logger import get_logger
 from .ws import manager  # for potential broadcast references
 
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
+logger = get_logger("backend.app.api.portfolio")
 
 
 def format_total_investment_text(total: float, base_currency: str) -> str:
@@ -168,6 +170,16 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
     item_id = _execute_insert_and_get_id(cursor, sql, params, is_pg)
     conn.commit()
     conn.close()
+
+    # Immediately fetch prices for the newly added symbol
+    try:
+        from ..main import fetch_prices_for_symbols
+        logger.info(f"🔄 Fetching prices for newly added symbol: {item.symbol}")
+        await fetch_prices_for_symbols([item.symbol])
+        logger.info(f"✅ Price update completed for {item.symbol}")
+    except Exception as e:
+        logger.error(f"⚠️ Failed to fetch prices for {item.symbol}: {e}", exc_info=True)
+        # Don't fail the creation if price fetch fails
 
     return PortfolioItem(
         id=item_id,

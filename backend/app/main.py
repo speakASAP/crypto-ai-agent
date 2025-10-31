@@ -34,6 +34,7 @@ logger = get_logger("backend.app.main")
 from .utils.db import (
     normalize_placeholders as _normalize_placeholders,
     execute_insert_and_get_id as _execute_insert_and_get_id,
+    is_postgres_connection,
 )
 
 # Database file - resolve to absolute path
@@ -66,10 +67,12 @@ async def fetch_prices_for_symbols(symbols: List[str]):
         # Update database with new prices
         conn = get_db_connection()
         cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
         
         for symbol, price in prices.items():
             # Get the base currency for this symbol from the database
-            cursor.execute("SELECT DISTINCT base_currency FROM portfolio_items WHERE symbol = ?", (symbol,))
+            sql = _normalize_placeholders("SELECT DISTINCT base_currency FROM portfolio_items WHERE symbol = ?", is_pg)
+            cursor.execute(sql, (symbol,))
             base_currencies = cursor.fetchall()
             
             for base_currency_row in base_currencies:
@@ -82,20 +85,27 @@ async def fetch_prices_for_symbols(symbols: List[str]):
                     converted_price = price
                 
                 # Update current_price for all items with this symbol and base currency
-                cursor.execute("""
-                    UPDATE portfolio_items 
-                    SET current_price = ?, 
-                        current_value = amount * ?,
-                        updated_at = datetime('now')
-                    WHERE symbol = ? AND base_currency = ?
-                """, (converted_price, converted_price, symbol, base_currency))
+                if is_pg:
+                    update_sql = (
+                        "UPDATE portfolio_items "
+                        "SET current_price = %s, current_value = amount * %s, updated_at = NOW() "
+                        "WHERE symbol = %s AND base_currency = %s"
+                    )
+                else:
+                    update_sql = (
+                        "UPDATE portfolio_items "
+                        "SET current_price = ?, current_value = amount * ?, updated_at = datetime('now') "
+                        "WHERE symbol = ? AND base_currency = ?"
+                    )
+                cursor.execute(update_sql, (converted_price, converted_price, symbol, base_currency))
             
             # Calculate P&L for each item using USD-based calculations
-            cursor.execute("""
-                SELECT id, amount, price_buy, price_buy_usd, commission, commission_usd, base_currency, exchange_rate_at_purchase 
-                FROM portfolio_items 
-                WHERE symbol = ?
-            """, (symbol,))
+            sql = _normalize_placeholders(
+                "SELECT id, amount, price_buy, price_buy_usd, commission, commission_usd, base_currency, exchange_rate_at_purchase "
+                "FROM portfolio_items WHERE symbol = ?",
+                is_pg
+            )
+            cursor.execute(sql, (symbol,))
             
             items = cursor.fetchall()
             for item_id, amount, price_buy, price_buy_usd, commission, commission_usd, base_currency, exchange_rate_at_purchase in items:
@@ -126,13 +136,14 @@ async def fetch_prices_for_symbols(symbols: List[str]):
                     current_value_display = current_value_usd
                     pnl_display = pnl_usd
                 
-                cursor.execute("""
-                    UPDATE portfolio_items 
-                    SET current_price = ?, current_value = ?, pnl = ?, pnl_percent = ?,
-                        current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?,
-                        price_buy_usd = ?, commission_usd = ?
-                    WHERE id = ?
-                """, (current_price_display, current_value_display, pnl_display, pnl_percent_usd,
+                update_sql = _normalize_placeholders(
+                    "UPDATE portfolio_items "
+                    "SET current_price = ?, current_value = ?, pnl = ?, pnl_percent = ?, "
+                    "current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?, "
+                    "price_buy_usd = ?, commission_usd = ? WHERE id = ?",
+                    is_pg
+                )
+                cursor.execute(update_sql, (current_price_display, current_value_display, pnl_display, pnl_percent_usd,
                       price, current_value_usd, pnl_usd, pnl_percent_usd, 
                       price_buy_usd, commission_usd, item_id))
         
