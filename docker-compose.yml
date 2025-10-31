@@ -21,6 +21,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+    networks:
+      - default
+      - nginx-network
 
   frontend:
     build:
@@ -35,10 +38,13 @@ services:
     environment:
       - PORT=${FRONTEND_PORT:-3100}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${FRONTEND_PORT:-3100}"]
+      test: ["CMD", "curl", "-f", "-L", "http://localhost:${FRONTEND_PORT:-3100}"]
       interval: 30s
       timeout: 5s
       retries: 5
+    networks:
+      - default
+      - nginx-network
 
   postgres:
     image: postgres:15
@@ -67,4 +73,6 @@ volumes:
   pgdata:
   redisdata:
 
-
+networks:
+  nginx-network:
+    external: true

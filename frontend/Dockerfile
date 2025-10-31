@@ -15,6 +15,8 @@ ENV NODE_ENV=production
 ENV PORT=3100
 ENV NODE_PATH=/app/src
 WORKDIR /app
+# Install curl for healthcheck
+RUN apk add --no-cache curl
 COPY --from=builder /app .
 EXPOSE $PORT
 CMD ["sh", "-c", "npm run start"]
