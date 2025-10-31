@@ -199,6 +199,18 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
 
         logger.info(f"✅ CSV import completed: {imported_count} items imported for user {current_user['id']}")
 
+        # Immediately fetch prices for newly imported symbols
+        imported_symbols = list(set(item['symbol'] for item in aggregated_items))
+        if imported_symbols:
+            try:
+                from ..main import fetch_prices_for_symbols
+                logger.info(f"🔄 Fetching prices for {len(imported_symbols)} imported symbols: {imported_symbols}")
+                await fetch_prices_for_symbols(imported_symbols)
+                logger.info(f"✅ Price update completed for imported symbols")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to fetch prices for imported symbols: {e}", exc_info=True)
+                # Don't fail the import if price fetch fails
+
         return {
             'success': True,
             'message': f'Successfully imported {imported_count} portfolio items from CSV',
