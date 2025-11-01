@@ -440,7 +440,7 @@ export default function ProfilePage() {
               <p className="mt-2 text-gray-600">Manage your account settings and preferences</p>
             </div>
             <Button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/dashboard')}
               variant="outline"
               className="flex items-center gap-2"
             >

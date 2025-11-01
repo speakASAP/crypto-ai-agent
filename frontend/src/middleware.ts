@@ -18,8 +18,8 @@ export function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Define protected routes
-  const protectedRoutes = ['/', '/profile']
+  // Define protected routes (dashboard requires auth)
+  const protectedRoutes = ['/dashboard', '/profile']
   const authRoutes = ['/login', '/register', '/forgot-password', '/reset-password']
 
   // Redirect unauthenticated users from protected routes to login
@@ -29,10 +29,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Redirect authenticated users from auth routes to home
+  // Redirect authenticated users from auth routes to dashboard
   if (authRoutes.includes(pathname) && isAuthenticated) {
     const url = request.nextUrl.clone()
-    url.pathname = '/'
+    url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 
@@ -40,5 +40,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/login', '/register', '/profile', '/forgot-password', '/reset-password'],
+  matcher: ['/', '/dashboard', '/login', '/register', '/profile', '/forgot-password', '/reset-password'],
 }
