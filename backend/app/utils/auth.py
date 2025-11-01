@@ -22,7 +22,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
-        print(f"Password verification failed: {e}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Password verification failed: {e}, hash preview: {hashed_password[:20] if hashed_password else 'None'}...")
         return False
 
 def get_password_hash(password: str) -> str:

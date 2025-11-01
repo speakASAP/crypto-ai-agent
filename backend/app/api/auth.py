@@ -121,9 +121,26 @@ async def login(user_data: UserLogin):
     )
     cursor.execute(sql, (user_data.email,))
     user = cursor.fetchone()
-    if not user or not verify_password(user_data.password, user[3]):
+    
+    # Enhanced logging for debugging
+    if not user:
+        logger.error(f"LOGIN FAILED - User not found for email: {user_data.email}")
         conn.close()
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Log hash format for debugging (first 20 chars only for security)
+    hash_preview = user[3][:20] + "..." if len(user[3]) > 20 else user[3]
+    logger.info(f"LOGIN ATTEMPT - User {user[0]} ({user_data.email}), hash preview: {hash_preview}")
+    
+    password_valid = verify_password(user_data.password, user[3])
+    logger.info(f"LOGIN PASSWORD CHECK - User {user[0]}, verification result: {password_valid}")
+    
+    if not password_valid:
+        logger.error(f"LOGIN FAILED - Password verification failed for user {user[0]} ({user_data.email})")
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    logger.info(f"Successful login for user {user[0]} ({user_data.email})")
 
     access_token = create_access_token(data={"sub": str(user[0])})
     refresh_token = create_refresh_token(data={"sub": str(user[0])})
