@@ -7,9 +7,8 @@ services:
       - .env
     ports:
       - "127.0.0.1:${API_PORT:-8100}:${API_PORT:-8100}"
-    depends_on:
-      - postgres
-      - redis
+    # Note: Depends on shared infrastructure (postgres, redis) managed separately
+    # Infrastructure must be running before starting blue/green deployments
     volumes:
       - ./logs:/app/logs
     environment:
@@ -49,44 +48,10 @@ services:
       - default
       - nginx-network
 
-  postgres:
-    image: postgres:15
-    container_name: crypto-ai-postgres-blue
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-crypto_ai_agent}
-      POSTGRES_USER: ${POSTGRES_USER:-crypto}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_pass}
-    env_file:
-      - .env
-    # Ports commented out - accessed via docker network only
-    # ports:
-    #   - "127.0.0.1:5432:5432"
-    volumes:
-      # Shared database volume - ensures data persistence across blue/green deployments
-      - pgdata:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7
-    container_name: crypto-ai-redis-blue
-    restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "${REDIS_APPENDONLY:-no}"]
-    # Ports commented out - accessed via docker network only
-    # ports:
-    #   - "127.0.0.1:${REDIS_PORT:-6379}:6379"
-    volumes:
-      # Shared Redis volume - ensures cache persistence across blue/green deployments
-      - redisdata:/data
-    env_file:
-      - .env
-
-volumes:
-  # Shared volumes - both blue and green deployments use the same database and Redis
-  # This ensures data persistence during blue/green switches
-  pgdata:
-    name: crypto-ai-agent_pgdata
-  redisdata:
-    name: crypto-ai-agent_redisdata
+  # Note: postgres and redis are now managed by docker-compose.infrastructure.yml
+  # They run as singleton services, shared by both blue and green deployments.
+  # This prevents data corruption and ensures zero data loss.
+  # To start infrastructure: docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
 
 networks:
   nginx-network:

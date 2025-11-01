@@ -12,6 +12,7 @@ import urllib3
 from typing import Dict, List, Optional
 from datetime import datetime
 from ..services.currency_service import currency_service
+from ..services.multi_exchange_price_service import MultiExchangePriceService
 
 # Suppress SSL warnings for Bitfinex API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -24,6 +25,9 @@ class BitfinexImportService:
         self.api_url = "https://api.bitfinex.com"
         self.api_key = api_key
         self.api_secret = api_secret
+        self.price_service = MultiExchangePriceService()
+        self._btc_price_cache = None
+        self._eth_price_cache = None
         
         # Validate credentials
         if not self.api_key or not self.api_secret:
@@ -182,6 +186,24 @@ class BitfinexImportService:
             logger.error(f"❌ Error getting Bitfinex wallets: {e}")
             return []
 
+    async def get_all_trades(self) -> List[Dict]:
+        """Try to get all trades at once (if endpoint supports it)"""
+        try:
+            logger.info("Attempting to fetch all trades at once")
+            # Try the endpoint without symbol parameter
+            result = self._make_authenticated_request("/v2/auth/r/trades/hist")
+            
+            if isinstance(result, list):
+                logger.info(f"✅ Retrieved {len(result)} total trades from all symbols")
+                return result
+            else:
+                logger.warning("Unexpected response format for all trades")
+                return []
+        except Exception as e:
+            # This endpoint might not exist, which is fine
+            logger.debug(f"All-trades endpoint not available (expected): {e}")
+            return []
+
     async def get_trades(self, symbol: str, limit: int = 250) -> List[Dict]:
         """Get trading history for a specific symbol"""
         try:
@@ -196,47 +218,199 @@ class BitfinexImportService:
             logger.warning(f"⚠️ Error getting trade history for {symbol}: {e}")
             return []
 
+    def _extract_quote_currency(self, pair: str) -> str:
+        """Extract quote currency from trading pair (e.g., 'tBTCUSD' -> 'USD')"""
+        # Remove 't' prefix if present
+        if pair.startswith('t'):
+            pair = pair[1:]
+        
+        # Common quote currencies (ordered by priority/commonness)
+        quote_currencies = ['USD', 'USDT', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'BNB', 'USDC', 'DAI']
+        
+        for quote in quote_currencies:
+            if pair.endswith(quote):
+                return quote
+        
+        # Fallback: try to detect by length (most pairs are BASE+QUOTE, 3+3 chars)
+        if len(pair) >= 6:
+            # Try common patterns
+            for quote in quote_currencies:
+                if quote in pair[-len(quote):]:
+                    return quote
+        
+        # Default fallback
+        return 'USD'
+
+    async def _get_crypto_price_usd(self, symbol: str) -> float:
+        """Get current USD price for a crypto symbol (with caching)"""
+        # Use cache if available
+        if symbol == 'BTC' and self._btc_price_cache:
+            return self._btc_price_cache
+        if symbol == 'ETH' and self._eth_price_cache:
+            return self._eth_price_cache
+        
+        try:
+            prices = await self.price_service.get_current_prices([symbol])
+            if symbol in prices:
+                price = prices[symbol]
+                # Cache the price
+                if symbol == 'BTC':
+                    self._btc_price_cache = price
+                elif symbol == 'ETH':
+                    self._eth_price_cache = price
+                return price
+        except Exception as e:
+            logger.debug(f"Could not fetch {symbol} price: {e}")
+        
+        # Fallback prices if fetch fails
+        fallback_prices = {
+            'BTC': 50000.0,
+            'ETH': 3000.0
+        }
+        return fallback_prices.get(symbol, 1.0)
+
+    def _convert_price_to_usd(self, price: float, quote_currency: str, trade_time: int = None) -> float:
+        """Convert price from quote currency to USD (synchronous version for use in loops)
+        
+        Note: For BTC/ETH quotes, this uses cached prices or fallback values.
+        For async version with live price fetching, use _convert_price_to_usd_async.
+        
+        Args:
+            price: The execution price from the trade (in quote currency)
+            quote_currency: The quote currency of the trading pair (e.g., 'BTC', 'USD', 'EUR')
+            trade_time: Optional timestamp of the trade for historical rate lookup
+        
+        Returns:
+            Price converted to USD
+        """
+        if quote_currency in ['USD', 'USDT', 'USDC']:
+            return price
+        
+        # Ensure currency service is initialized
+        currency_service.ensure_rates_initialized()
+        
+        try:
+            # For crypto quote currencies (BTC, ETH), we need to multiply by their USD rates
+            # Example: tETHBTC with price 0.05 means 1 ETH = 0.05 BTC
+            # To get USD price: 0.05 * (BTC/USD rate) = ETH price in USD
+            if quote_currency == 'BTC':
+                # Use cached price or fallback
+                btc_price_usd = self._btc_price_cache if self._btc_price_cache else 50000.0
+                logger.debug(f"Converting BTC-quoted price to USD using BTC price: {btc_price_usd}")
+                return price * btc_price_usd
+            elif quote_currency == 'ETH':
+                # Use cached price or fallback
+                eth_price_usd = self._eth_price_cache if self._eth_price_cache else 3000.0
+                logger.debug(f"Converting ETH-quoted price to USD using ETH price: {eth_price_usd}")
+                return price * eth_price_usd
+            else:
+                # For fiat currencies (EUR, GBP, JPY, etc.), use currency service conversion
+                return currency_service.convert_amount(price, quote_currency, 'USD')
+        except Exception as e:
+            logger.warning(f"Error converting {price} {quote_currency} to USD: {e}, using price as-is")
+            return price
+
     async def calculate_portfolio_from_wallets(self, wallets: List[Dict]) -> List[Dict]:
         """Calculate portfolio items from Bitfinex wallets"""
         portfolio_items = []
+        
+        # Pre-fetch BTC and ETH prices for better conversion accuracy
+        try:
+            logger.info("Fetching BTC and ETH prices for price conversion")
+            btc_price = await self._get_crypto_price_usd('BTC')
+            eth_price = await self._get_crypto_price_usd('ETH')
+            logger.info(f"BTC price: ${btc_price:.2f}, ETH price: ${eth_price:.2f}")
+        except Exception as e:
+            logger.warning(f"Could not fetch crypto prices, will use fallbacks: {e}")
+        
+        # First, try to get all trades at once (more efficient)
+        all_trades_map = {}
+        try:
+            all_trades = await self.get_all_trades()
+            if all_trades:
+                logger.info(f"Processing {len(all_trades)} trades from all-trades endpoint")
+                for trade in all_trades:
+                    if len(trade) >= 2:
+                        pair = trade[1] if isinstance(trade[1], str) else str(trade[1])
+                        if pair not in all_trades_map:
+                            all_trades_map[pair] = []
+                        all_trades_map[pair].append(trade)
+        except Exception as e:
+            logger.debug(f"Could not use all-trades endpoint, will fetch per-symbol: {e}")
+        
+        # Common quote currencies to try (expanded list)
+        common_quote_currencies = ['USD', 'USDT', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'USDC', 'DAI']
         
         for wallet in wallets:
             currency = wallet['currency']
             total_amount = wallet['balance']
             
             # Skip stablecoins as they're not crypto investments
-            if currency in ['USD', 'USDT', 'EUR', 'GBP', 'JPY']:
+            if currency in ['USD', 'USDT', 'EUR', 'GBP', 'JPY', 'USDC', 'DAI']:
                 continue
             
-            # Get trading history to calculate average buy price
-            trading_pairs = [f"t{currency}USD", f"t{currency}USDT", f"t{currency}BTC", f"t{currency}ETH"]
             buy_trades = []
+            
+            # Build list of trading pairs to check
+            trading_pairs = []
+            for quote in common_quote_currencies:
+                trading_pairs.append(f"t{currency}{quote}")
             
             logger.info(f"🔍 Looking for trades for {currency} in pairs: {trading_pairs}")
             
+            # Process trades from all-trades endpoint if available
             for pair in trading_pairs:
-                try:
-                    trades = await self.get_trades(pair, 250)
-                    logger.info(f"Found {len(trades)} total trades for {pair}")
-                    
-                    for trade in trades:
-                        # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker]
-                        # We need to determine if this was a buy
+                if pair in all_trades_map:
+                    logger.info(f"Found {len(all_trades_map[pair])} trades for {pair} from all-trades")
+                    for trade in all_trades_map[pair]:
                         if len(trade) >= 6:
                             exec_amount = trade[4]
                             exec_price = trade[5]
                             
                             # Positive amount typically means buy
                             if exec_amount > 0:
+                                quote_currency = self._extract_quote_currency(pair)
+                                price_usd = self._convert_price_to_usd(exec_price, quote_currency, trade[2] if len(trade) > 2 else None)
+                                
                                 buy_trades.append({
                                     'pair': pair,
                                     'amount': abs(exec_amount),
                                     'price': exec_price,
-                                    'time': trade[2]
+                                    'price_usd': price_usd,
+                                    'quote_currency': quote_currency,
+                                    'time': trade[2] if len(trade) > 2 else 0
                                 })
-                except Exception as e:
-                    logger.warning(f"Error processing trades for {pair}: {e}")
-                    continue
+            
+            # If no trades found from all-trades endpoint, try fetching per symbol
+            if not buy_trades:
+                for pair in trading_pairs:
+                    try:
+                        trades = await self.get_trades(pair, 250)
+                        logger.info(f"Found {len(trades)} total trades for {pair}")
+                        
+                        for trade in trades:
+                            # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker]
+                            # We need to determine if this was a buy
+                            if len(trade) >= 6:
+                                exec_amount = trade[4]
+                                exec_price = trade[5]
+                                
+                                # Positive amount typically means buy
+                                if exec_amount > 0:
+                                    quote_currency = self._extract_quote_currency(pair)
+                                    price_usd = self._convert_price_to_usd(exec_price, quote_currency, trade[2] if len(trade) > 2 else None)
+                                    
+                                    buy_trades.append({
+                                        'pair': pair,
+                                        'amount': abs(exec_amount),
+                                        'price': exec_price,
+                                        'price_usd': price_usd,
+                                        'quote_currency': quote_currency,
+                                        'time': trade[2] if len(trade) > 2 else 0
+                                    })
+                    except Exception as e:
+                        logger.warning(f"Error processing trades for {pair}: {e}")
+                        continue
             
             logger.info(f"Total buy trades found for {currency}: {len(buy_trades)}")
             
@@ -244,12 +418,12 @@ class BitfinexImportService:
                 # Sort trades by time to get earliest
                 buy_trades.sort(key=lambda x: x['time'])
                 
-                # Calculate weighted average buy price
+                # Calculate weighted average buy price in USD
                 total_qty = sum(trade['amount'] for trade in buy_trades)
-                total_cost = sum(trade['amount'] * trade['price'] for trade in buy_trades)
+                total_cost_usd = sum(trade['amount'] * trade['price_usd'] for trade in buy_trades)
                 
                 if total_qty > 0:
-                    avg_buy_price = total_cost / total_qty
+                    avg_buy_price_usd = total_cost_usd / total_qty
                     
                     # Scale to current balance
                     scaled_amount = total_amount
@@ -258,18 +432,15 @@ class BitfinexImportService:
                     earliest_trade = buy_trades[0]
                     trade_date = datetime.fromtimestamp(earliest_trade['time'] / 1000).isoformat() + "Z"
                     
-                    # Convert to USD (assuming price is already in USD)
-                    price_buy_usd = avg_buy_price
-                    
                     portfolio_items.append({
                         'symbol': currency,
                         'amount': scaled_amount,
-                        'price_buy': price_buy_usd,
+                        'price_buy': avg_buy_price_usd,
                         'purchase_date': trade_date,
                         'base_currency': 'USD',
                         'source': 'Bitfinex',
                         'commission': 0.0,
-                        'total_investment_text': f"${scaled_amount * price_buy_usd:.2f}"
+                        'total_investment_text': f"${scaled_amount * avg_buy_price_usd:.2f}"
                     })
             else:
                 # If no trading history, create a placeholder entry
