@@ -28,6 +28,8 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        DEBUG: ${DEBUG:-false}
     container_name: crypto-ai-frontend
     env_file:
       - .env
@@ -37,6 +39,7 @@ services:
       - backend
     environment:
       - PORT=${FRONTEND_PORT:-3100}
+      - NEXT_PUBLIC_DEBUG=${DEBUG:-false}
     healthcheck:
       test: ["CMD", "curl", "-f", "-L", "http://localhost:${FRONTEND_PORT:-3100}"]
       interval: 30s

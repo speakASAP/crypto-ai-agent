@@ -17,8 +17,9 @@ import { apiClient } from '@/lib/api'
 import { getRelativeTime, getDataFreshness, getFreshnessColorClass, getTimestampDisplay } from '@/lib/timeUtils'
 import { refreshAllData } from '@/lib/refreshUtils'
 import { formatCurrency, formatCurrencyWhole, formatPercent, formatCryptoAmount, formatInvestmentText, Currency } from '@/lib/currencyUtils'
+import { logger } from '@/lib/logger'
 import Link from 'next/link'
-import { User, LogOut } from 'lucide-react'
+import { User, LogOut, Zap, Sparkles } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 
@@ -31,7 +32,7 @@ const filterValidSymbols = (symbols: string[]): string[] => {
     
     // Skip fiat currencies (these are handled directly in the frontend)
     if (fiatCurrencies.includes(symbolUpper)) {
-      console.log(`🚫 Skipping fiat currency: ${symbolUpper}`)
+      logger.log(`🚫 Skipping fiat currency: ${symbolUpper}`)
       return false
     }
     
@@ -142,7 +143,7 @@ export default function Home() {
       setLastUpdated(rates.last_updated_timestamp || rates.last_updated)
       setLastUpdatedFormatted(rates.last_updated_formatted || rates.last_updated)
     } catch (error) {
-      console.error('Failed to load exchange rates:', error)
+      logger.error('Failed to load exchange rates:', error)
     }
   }
 
@@ -189,13 +190,13 @@ export default function Home() {
             prices[priceData.symbol] = convertedPrice
           }
         } catch (error) {
-          console.error('Failed to fetch batch prices:', error)
+          logger.error('Failed to fetch batch prices:', error)
         }
       }
       
       setAlertCurrentPrices(prices)
     } catch (error) {
-      console.error('Failed to load alert current prices:', error)
+      logger.error('Failed to load alert current prices:', error)
     } finally {
       setLoadingAlertPrices(false)
     }
@@ -219,7 +220,7 @@ export default function Home() {
       setCryptoLastUpdatedFormatted(timestamps.last_bulk_update_formatted)
       setSymbolTimestamps(timestamps.symbol_timestamps)
     } catch (error) {
-      console.error('Failed to load crypto timestamps:', error)
+      logger.error('Failed to load crypto timestamps:', error)
     }
   }
 
@@ -239,7 +240,7 @@ export default function Home() {
       fetchPortfolio()
       fetchSummary()
     } catch (error) {
-      console.error('Failed to refresh data:', error)
+      logger.error('Failed to refresh data:', error)
     } finally {
       setRefreshingRates(false)
     }
@@ -255,7 +256,7 @@ export default function Home() {
         const symbols = items.map(item => item.symbol)
         const validSymbols = filterValidSymbols(symbols)
         subscribeToPrices(validSymbols)
-        console.log('📊 Subscribing to portfolio symbols:', validSymbols)
+        logger.log('📊 Subscribing to portfolio symbols:', validSymbols)
       }
       
       // Also subscribe to tracked symbols if available
@@ -263,7 +264,7 @@ export default function Home() {
         const symbols = trackedSymbols.map(s => s.symbol)
         const validSymbols = filterValidSymbols(symbols)
         subscribeToPrices(validSymbols)
-        console.log('📊 Subscribing to tracked symbols:', validSymbols)
+        logger.log('📊 Subscribing to tracked symbols:', validSymbols)
       }
     }
     // Only re-subscribe when the actual symbol lists change, not on every reference change
@@ -368,7 +369,7 @@ export default function Home() {
       }
     } catch (error: any) {
       // If error fetching credentials (e.g., 404), show credential dialog
-      console.error('Error checking Binance credentials:', error)
+      logger.error('Error checking Binance credentials:', error)
       setCredentialDialogType('binance')
       setCredentialDialogOpen(true)
       return
@@ -406,7 +407,7 @@ export default function Home() {
         }
       }
     } catch (error: any) {
-      console.error('Binance import error:', error)
+      logger.error('Binance import error:', error)
       // Check for missing credentials error in the error response
       const errorMessage = error.response?.data?.detail || error.message || ''
       if (errorMessage.includes('No Binance credentials') || errorMessage.includes('credentials')) {
@@ -432,7 +433,7 @@ export default function Home() {
       }
     } catch (error: any) {
       // If error fetching credentials (e.g., 404), show credential dialog
-      console.error('Error checking Bitfinex credentials:', error)
+      logger.error('Error checking Bitfinex credentials:', error)
       setCredentialDialogType('bitfinex')
       setCredentialDialogOpen(true)
       return
@@ -470,7 +471,7 @@ export default function Home() {
         }
       }
     } catch (error: any) {
-      console.error('Bitfinex import error:', error)
+      logger.error('Bitfinex import error:', error)
       // Check for missing credentials error in the error response
       const errorMessage = error.response?.data?.detail || error.message || ''
       if (errorMessage.includes('No Bitfinex credentials') || errorMessage.includes('credentials')) {
@@ -506,7 +507,7 @@ export default function Home() {
         setCsvMessage(result.message)
       }
     } catch (error: any) {
-      console.error('CSV upload error:', error)
+      logger.error('CSV upload error:', error)
       setCsvMessage(error.response?.data?.detail || 'Failed to parse CSV file')
     }
   }
@@ -517,7 +518,7 @@ export default function Home() {
       return
     }
 
-    console.log('🔵 Starting CSV import:', { 
+    logger.log('🔵 Starting CSV import:', { 
       fileName: csvFile.name, 
       exchange: csvPreview.detected_exchange,
       items: csvPreview.aggregated_items.length 
@@ -528,7 +529,7 @@ export default function Home() {
 
     try {
       const result = await apiClient.executeCSVImport(csvFile, csvPreview.detected_exchange)
-      console.log('✅ CSV import result:', result)
+      logger.log('✅ CSV import result:', result)
 
       if (result.success) {
         setCsvMessage(`Successfully imported ${result.items_imported} items!`)
@@ -546,7 +547,7 @@ export default function Home() {
         setCsvMessage(result.message || 'Import failed')
       }
     } catch (error: any) {
-      console.error('CSV import error:', error)
+      logger.error('CSV import error:', error)
       setCsvMessage(error.response?.data?.detail || 'Failed to import CSV')
     } finally {
       setImportingCSV(false)
@@ -714,7 +715,7 @@ export default function Home() {
   }
 
   // Debug authentication state
-  console.log('🏠 Main page auth state:', {
+  logger.log('🏠 Main page auth state:', {
     isHydrated,
     isAuthenticated,
     hasUser: !!user,
@@ -735,7 +736,7 @@ export default function Home() {
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
-    console.log('🚫 Dashboard: User not authenticated, redirecting to login')
+    logger.log('🚫 Dashboard: User not authenticated, redirecting to login')
     router.push('/login')
     return null
   }
@@ -1952,8 +1953,54 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Footer */}
+      <footer className="mt-12 pt-8 pb-6 border-t border-gray-200">
+        <div className="container mx-auto px-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-6">
+            <div>
+              <div className="flex items-center space-x-2 mb-4">
+                <Sparkles className="h-6 w-6 text-blue-600" />
+                <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                  Crypto AI Agent
+                </span>
+              </div>
+              <p className="text-sm text-gray-600">
+                Advanced AI-powered cryptocurrency portfolio management platform.
+              </p>
+            </div>
+            <div>
+              <h4 className="font-semibold text-gray-900 mb-4">Features</h4>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li>Multi-Platform Portfolio</li>
+                <li>AI Recommendations</li>
+                <li>Price Alerts</li>
+                <li>Real-Time Tracking</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold text-gray-900 mb-4">Quick Links</h4>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li>
+                  <Link href="/profile" className="hover:text-blue-600 transition-colors">
+                    Profile Settings
+                  </Link>
+                </li>
+                <li>
+                  <a href="https://crypto-ai-agent.statex.cz" className="hover:text-blue-600 transition-colors">
+                    Homepage
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-gray-200 pt-6">
+            <div className="flex flex-col md:flex-row justify-between items-center text-sm text-gray-600">
+              <p>&copy; {new Date().getFullYear()} Crypto AI Agent. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
-
-

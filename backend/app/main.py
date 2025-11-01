@@ -473,16 +473,30 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
         
         current_time = datetime.now(timezone.utc)
         
         # Update price check tracking for all symbols
         for symbol, price in current_prices.items():
-            cursor.execute('''
-                INSERT OR REPLACE INTO price_check_tracking 
-                (symbol, last_check_timestamp, last_check_price, updated_at)
-                VALUES (?, ?, ?, ?)
-            ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
+            if is_pg:
+                # PostgreSQL: use ON CONFLICT
+                cursor.execute('''
+                    INSERT INTO price_check_tracking 
+                    (symbol, last_check_timestamp, last_check_price, updated_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (symbol) DO UPDATE SET
+                        last_check_timestamp = EXCLUDED.last_check_timestamp,
+                        last_check_price = EXCLUDED.last_check_price,
+                        updated_at = EXCLUDED.updated_at
+                ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
+            else:
+                # SQLite: use INSERT OR REPLACE
+                cursor.execute('''
+                    INSERT OR REPLACE INTO price_check_tracking 
+                    (symbol, last_check_timestamp, last_check_price, updated_at)
+                    VALUES (?, ?, ?, ?)
+                ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
         
         # Get all active alerts
         if settings.database_url:
@@ -1282,6 +1296,15 @@ def init_postgres_database():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    # Ensure file handler is attached (uvicorn may have reconfigured logging)
+    import logging
+    root_logger = logging.getLogger()
+    from .utils.logger import _setup_file_handler
+    file_handler = _setup_file_handler()
+    if file_handler not in root_logger.handlers:
+        root_logger.addHandler(file_handler)
+        logger.info("✅ File handler re-attached to root logger")
+    
     if settings.database_url:
         logger.info("🚀 Starting Crypto AI Agent API v2.0 (PostgreSQL Mode)")
         init_postgres_database()

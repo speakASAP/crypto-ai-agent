@@ -1,5 +1,6 @@
 'use client'
 
+import { logger } from '@/lib/logger'
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/stores/authStore'
@@ -393,7 +394,7 @@ export default function ProfilePage() {
           accountInfo: result.account_info
         })
       } catch (error) {
-        console.error('Failed to load Binance status:', error)
+        logger.error('Failed to load Binance status:', error)
       }
     }
     
@@ -413,7 +414,7 @@ export default function ProfilePage() {
           accountInfo: result.account_info
         })
       } catch (error) {
-        console.error('Failed to load Bitfinex status:', error)
+        logger.error('Failed to load Bitfinex status:', error)
       }
     }
     

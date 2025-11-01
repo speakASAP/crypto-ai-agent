@@ -1,5 +1,6 @@
 'use client'
 
+import { logger } from '@/lib/logger'
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,7 +78,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
       const rates = await apiClient.getExchangeRates()
       setExchangeRates(rates.rates)
     } catch (error) {
-      console.error('Failed to load exchange rates:', error)
+      logger.error('Failed to load exchange rates:', error)
     }
   }
 
@@ -114,7 +115,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
         max: convertedPrice + range
       })
     } catch (error) {
-      console.error('Failed to fetch current price:', error)
+      logger.error('Failed to fetch current price:', error)
       // Set default values on error
       setSelectedCurrentPrice(0)
       setThresholdPrice(0)
@@ -224,7 +225,7 @@ export function AlertModal({ isOpen, onClose, onSave, alert, presetSymbol, curre
       await onSave(data)
       onClose()
     } catch (error) {
-      console.error('Error saving alert:', error)
+      logger.error('Error saving alert:', error)
     } finally {
       setLoading(false)
     }

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, AlertHistory } from '../types'
 import { apiClient } from '../lib/api'
+import { logger } from '../lib/logger'
 
 interface AlertsState {
   alerts: PriceAlert[]
@@ -93,7 +94,7 @@ export const useAlertsStore = create<AlertsState>()(
           const history = await apiClient.getAlertHistory(limit)
           set({ history })
         } catch (error: any) {
-          console.error('Failed to fetch alert history:', error)
+          logger.error('Failed to fetch alert history:', error)
         }
       },
 

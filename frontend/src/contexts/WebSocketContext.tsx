@@ -6,6 +6,7 @@ import { useAlertsStore } from '@/stores/alertsStore'
 import { useSymbolsStore } from '@/stores/symbolsStore'
 import { PriceUpdateMessage, AlertTriggeredMessage } from '@/types'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { logger } from '@/lib/logger'
 
 interface WebSocketContextType {
   isConnected: boolean
@@ -50,13 +51,13 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
     if (!isMountedRef.current) return
     
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) {
-      console.log('WebSocket already connected or connecting, skipping...')
+      logger.log('WebSocket already connected or connecting, skipping...')
       return
     }
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8100/ws'
-    console.log(`🔌 [${new Date().toISOString()}] Connecting to WebSocket:`, wsUrl)
-    console.log(`📊 [${new Date().toISOString()}] Reconnect attempt: ${reconnectAttemptsRef.current + 1}`)
+    logger.log(`🔌 [${new Date().toISOString()}] Connecting to WebSocket:`, wsUrl)
+    logger.log(`📊 [${new Date().toISOString()}] Reconnect attempt: ${reconnectAttemptsRef.current + 1}`)
     
     setConnectionState('connecting')
 
@@ -71,11 +72,11 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
       wsRef.current.onopen = () => {
         if (!isMountedRef.current || !wsRef.current) {
-          console.log('🔧 WebSocket opened but component unmounted or ref null, ignoring...')
+          logger.log('🔧 WebSocket opened but component unmounted or ref null, ignoring...')
           return
         }
         
-        console.log(`✅ [${new Date().toISOString()}] WebSocket connected successfully`)
+        logger.log(`✅ [${new Date().toISOString()}] WebSocket connected successfully`)
         setIsConnected(true)
         setConnectionState('connected')
         reconnectAttemptsRef.current = 0 // Reset attempts on successful connection
@@ -92,9 +93,9 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
             type: 'connect',
             data: 'Client connected'
           }))
-          console.log('📤 Sent initial connection message')
+          logger.log('📤 Sent initial connection message')
         } catch (error) {
-          console.error('❌ Failed to send initial connection message:', error)
+          logger.error('❌ Failed to send initial connection message:', error)
         }
       }
 
@@ -105,18 +106,18 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
           const message = JSON.parse(event.data)
           handleWebSocketMessage(message)
         } catch (error) {
-          console.error('❌ Failed to parse WebSocket message:', error)
-          console.error('❌ Raw message data:', event.data)
+          logger.error('❌ Failed to parse WebSocket message:', error)
+          logger.error('❌ Raw message data:', event.data)
         }
       }
 
       wsRef.current.onclose = (event) => {
         if (!isMountedRef.current) {
-          console.log('🔧 WebSocket closed but component unmounted, ignoring...')
+          logger.log('🔧 WebSocket closed but component unmounted, ignoring...')
           return
         }
         
-        console.log(`🔌 [${new Date().toISOString()}] WebSocket disconnected:`, {
+        logger.log(`🔌 [${new Date().toISOString()}] WebSocket disconnected:`, {
           code: event.code,
           reason: event.reason,
           wasClean: event.wasClean,
@@ -130,27 +131,27 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
           const delay = getReconnectDelay(reconnectAttemptsRef.current + 1)
           reconnectAttemptsRef.current += 1
           
-          console.log(`🔄 [${new Date().toISOString()}] Scheduling reconnection in ${delay}ms (attempt ${reconnectAttemptsRef.current})`)
+          logger.log(`🔄 [${new Date().toISOString()}] Scheduling reconnection in ${delay}ms (attempt ${reconnectAttemptsRef.current})`)
           setConnectionState('reconnecting')
           
           reconnectTimeoutRef.current = setTimeout(() => {
             if (isMountedRef.current) {
-              console.log(`🔄 [${new Date().toISOString()}] Attempting to reconnect...`)
+              logger.log(`🔄 [${new Date().toISOString()}] Attempting to reconnect...`)
               connect()
             }
           }, delay)
         } else {
-          console.log('🔧 WebSocket closed normally or component unmounted, not reconnecting')
+          logger.log('🔧 WebSocket closed normally or component unmounted, not reconnecting')
         }
       }
 
       wsRef.current.onerror = (error) => {
         if (!isMountedRef.current) return
         
-        console.error(`❌ [${new Date().toISOString()}] WebSocket error:`, error)
-        console.error('WebSocket readyState:', wsRef.current?.readyState)
-        console.error('WebSocket URL:', wsUrl)
-        console.error('WebSocket error details:', {
+        logger.error(`❌ [${new Date().toISOString()}] WebSocket error:`, error)
+        logger.error('WebSocket readyState:', wsRef.current?.readyState)
+        logger.error('WebSocket URL:', wsUrl)
+        logger.error('WebSocket error details:', {
           type: error.type,
           target: error.target,
           currentTarget: error.currentTarget
@@ -160,7 +161,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       }
     } catch (error) {
       if (!isMountedRef.current) return
-      console.error(`❌ [${new Date().toISOString()}] Failed to create WebSocket connection:`, error)
+      logger.error(`❌ [${new Date().toISOString()}] Failed to create WebSocket connection:`, error)
       setConnectionState('disconnected')
     }
   }, [getReconnectDelay])
@@ -187,7 +188,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         symbols: symbols
       }
       wsRef.current.send(JSON.stringify(message))
-      console.log('📊 Subscribed to price updates for:', symbols)
+      logger.log('📊 Subscribed to price updates for:', symbols)
     }
   }, [])
 
@@ -197,7 +198,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         type: 'subscribe_alerts'
       }
       wsRef.current.send(JSON.stringify(message))
-      console.log('🔔 Subscribed to alert notifications')
+      logger.log('🔔 Subscribed to alert notifications')
     }
   }, [])
 
@@ -210,7 +211,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         handleAlertTriggered(message as AlertTriggeredMessage)
         break
       case 'connection_status':
-        console.log('📡 Connection status:', message.data)
+        logger.log('📡 Connection status:', message.data)
         break
       case 'ping':
         // Respond to ping with pong to keep connection alive
@@ -222,13 +223,13 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         }
         break
       default:
-        console.log('📨 Unknown message type:', message.type)
+        logger.log('📨 Unknown message type:', message.type)
     }
   }, [])
 
   const handlePriceUpdate = useCallback((message: PriceUpdateMessage, exchangeRates?: Record<string, number>) => {
     try {
-      console.log('📈 Price update:', message.data)
+      logger.log('📈 Price update:', message.data)
       
       // Update symbol prices in store
       const { symbol, price, timestamp, timestamp_formatted } = message.data as any
@@ -245,15 +246,15 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
       
       // Log the timestamp for debugging
       if (timestamp_formatted) {
-        console.log(`📅 Price updated for ${symbol} at ${timestamp_formatted}`)
+        logger.log(`📅 Price updated for ${symbol} at ${timestamp_formatted}`)
       }
     } catch (error) {
-      console.error('❌ Error handling price update:', error)
+      logger.error('❌ Error handling price update:', error)
     }
   }, [])
 
   const handleAlertTriggered = useCallback((message: AlertTriggeredMessage) => {
-    console.log('🚨 Alert triggered:', message.data)
+    logger.log('🚨 Alert triggered:', message.data)
     
     // Show notification
     const alertData = message.data.alert
@@ -272,21 +273,21 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
   // Auto-connect on mount
   useEffect(() => {
-    console.log('🔧 WebSocketProvider mounted, setting up connection...')
+    logger.log('🔧 WebSocketProvider mounted, setting up connection...')
     isMountedRef.current = true
     
     // Add a delay to prevent race conditions and allow React to stabilize
     const connectTimeout = setTimeout(() => {
       if (isMountedRef.current) {
-        console.log('🔧 Timeout reached, attempting connection...')
+        logger.log('🔧 Timeout reached, attempting connection...')
         connect()
       } else {
-        console.log('🔧 Component unmounted before connection timeout')
+        logger.log('🔧 Component unmounted before connection timeout')
       }
     }, 500) // Increased delay to 500ms
     
     return () => {
-      console.log('🔧 WebSocketProvider unmounting, cleaning up...')
+      logger.log('🔧 WebSocketProvider unmounting, cleaning up...')
       isMountedRef.current = false
       clearTimeout(connectTimeout)
       disconnect()
