@@ -5,6 +5,8 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8100',
     NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8100/ws',
+    // Pass DEBUG flag to frontend (only NEXT_PUBLIC_* vars are available in browser)
+    NEXT_PUBLIC_DEBUG: process.env.DEBUG || process.env.NEXT_PUBLIC_DEBUG || 'false',
   },
   webpack: (config) => {
     config.resolve = config.resolve || {}

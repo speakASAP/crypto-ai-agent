@@ -35,8 +35,16 @@ class CentralLogger:
     
     def _setup_logging(self):
         """Setup comprehensive logging configuration"""
+        # Check DEBUG flag from environment
+        debug = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+        
         # Get configuration from environment variables with proper defaults
-        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        # Use DEBUG level if DEBUG=true, otherwise use LOG_LEVEL or default to INFO
+        if debug:
+            log_level = "DEBUG"
+        else:
+            log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        
         log_file = os.getenv("LOG_FILE", "logs/crypto_agent.log")
         log_format = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         
@@ -45,26 +53,32 @@ class CentralLogger:
         if log_dir and not os.path.exists(log_dir):
             os.makedirs(log_dir, exist_ok=True)
         
+        # Create handlers - always log to file, only to console if DEBUG is enabled
+        handlers = [logging.FileHandler(log_file, encoding='utf-8')]
+        
+        # Only add console handler if DEBUG is enabled
+        if debug:
+            handlers.append(logging.StreamHandler())
+        
         # Configure logging
         logging.basicConfig(
             level=getattr(logging, log_level),
             format=log_format,
-            handlers=[
-                logging.FileHandler(log_file, encoding='utf-8'),
-                logging.StreamHandler()  # Also log to console
-            ],
+            handlers=handlers,
             force=True  # Override any existing configuration
         )
         
         # Create logger instance
         self._logger = logging.getLogger("crypto_ai_agent")
         
-        # Log startup information
+        # Log startup information (only to file, or console if DEBUG)
         self._logger.info("=" * 80)
         self._logger.info("CENTRAL LOGGING SYSTEM INITIALIZED")
         self._logger.info("=" * 80)
+        self._logger.info(f"Debug Mode: {debug}")
         self._logger.info(f"Log Level: {log_level}")
         self._logger.info(f"Log File: {log_file}")
+        self._logger.info(f"Console Output: {debug}")
         self._logger.info(f"Log Format: {log_format}")
         self._logger.info(f"Initialization Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     

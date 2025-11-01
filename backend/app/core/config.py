@@ -45,8 +45,11 @@ class Settings(BaseSettings):
     db_pool_recycle: int = 3600
     db_pool_pre_ping: bool = True
     
+    # Debug Configuration
+    debug: bool = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+    
     # Logging Configuration
-    log_level: str = "INFO"
+    log_level: str = "DEBUG" if debug else "INFO"
     log_file: str = "logs/crypto_agent.log"
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     

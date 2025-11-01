@@ -4,6 +4,7 @@ import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PortfolioSummary, Curr
 import { User } from '../types/auth'
 import { apiClient } from '../lib/api'
 import { refreshCryptoPrices } from '../lib/refreshUtils'
+import { logger } from '../lib/logger'
 
 type ViewMode = 'cards' | 'table'
 type SortBy = 'symbol' | 'investment' | 'platform' | 'pnl' | 'pnl_percent' | 'current_value'
@@ -90,7 +91,7 @@ export const usePortfolioStore = create<PortfolioState>()(
             await get().fetchPortfolio()
             await get().fetchSummary()
           } catch (refreshError) {
-            console.warn('Price refresh failed, but portfolio item was created:', refreshError)
+            logger.warn('Price refresh failed, but portfolio item was created:', refreshError)
             // Still refresh portfolio and summary even if price refresh fails
             await get().fetchPortfolio()
             await get().fetchSummary()
@@ -144,7 +145,7 @@ export const usePortfolioStore = create<PortfolioState>()(
           const summary = await apiClient.getPortfolioSummary(selectedCurrency)
           set({ summary })
         } catch (error: any) {
-          console.error('Failed to fetch portfolio summary:', error)
+          logger.error('Failed to fetch portfolio summary:', error)
         }
       },
 
@@ -155,7 +156,7 @@ export const usePortfolioStore = create<PortfolioState>()(
         try {
           await apiClient.updateProfile({ preferred_currency: currency })
         } catch (error) {
-          console.error('Failed to save currency preference:', error)
+          logger.error('Failed to save currency preference:', error)
         }
         
         // Refresh data with new currency
@@ -185,7 +186,7 @@ export const usePortfolioStore = create<PortfolioState>()(
             // CRITICAL: Always use price_buy_usd for calculations, never use price_buy
             // because price_buy may be in a different currency after conversion
             if (!item.price_buy_usd) {
-              console.warn(`Item ${item.symbol} missing price_buy_usd, skipping WebSocket update`)
+              logger.warn(`Item ${item.symbol} missing price_buy_usd, skipping WebSocket update`)
               return item
             }
             
@@ -317,7 +318,7 @@ export const usePortfolioStore = create<PortfolioState>()(
               portfolio_filters: state.filters
             })
           } catch (error) {
-            console.error('Failed to persist portfolio preferences:', error)
+            logger.error('Failed to persist portfolio preferences:', error)
           }
         }, 500)
         

@@ -12,7 +12,10 @@ export function middleware(request: NextRequest) {
       isAuthenticated = !!(parsed.state?.accessToken && parsed.state?.user)
       
     } catch (e) {
-      console.log('❌ Middleware: Invalid auth storage', e)
+      // Only log in debug mode (server-side, so check env directly)
+      if (process.env.DEBUG === 'true' || process.env.DEBUG === '1') {
+        console.log('❌ Middleware: Invalid auth storage', e)
+      }
     }
   }
 

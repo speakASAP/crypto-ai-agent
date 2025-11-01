@@ -1,5 +1,6 @@
 'use client'
 
+import { logger } from '@/lib/logger'
 import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -169,7 +170,7 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
       await onSave(data)
       onClose()
     } catch (error) {
-      console.error('Error saving portfolio item:', error)
+      logger.error('Error saving portfolio item:', error)
     } finally {
       setLoading(false)
     }
