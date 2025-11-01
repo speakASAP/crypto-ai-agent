@@ -56,14 +56,91 @@ async def upload_csv_file(file: UploadFile = File(...), current_user: dict = Dep
                 errors=errors,
             )
         aggregated_items = csv_import_service.aggregate_transactions(normalized_txns)
+        
+        # Analyze what will happen to existing portfolio items
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
+        
+        items_to_add = []
+        items_to_update = []
+        items_to_delete = []
+        
+        for item in aggregated_items:
+            symbol = item['symbol']
+            net_change = item.get('net_change', item.get('quantity', 0))
+            
+            # Check if portfolio item exists (case-insensitive)
+            if is_pg:
+                check_existing_sql = (
+                    "SELECT id, amount FROM portfolio_items WHERE user_id = %s AND UPPER(symbol) = UPPER(%s)"
+                )
+            else:
+                check_existing_sql = (
+                    "SELECT id, amount FROM portfolio_items WHERE user_id = ? AND UPPER(symbol) = UPPER(?)"
+                )
+            cursor.execute(check_existing_sql, (current_user["id"], symbol))
+            existing_item = cursor.fetchone()
+            
+            if existing_item:
+                existing_amount = existing_item[1]
+                new_amount = existing_amount + net_change
+                
+                if new_amount <= 0:
+                    # Will be deleted
+                    items_to_delete.append({
+                        'symbol': symbol,
+                        'current_amount': existing_amount,
+                        'net_change': net_change,
+                        'will_be_deleted': True
+                    })
+                else:
+                    # Will be updated
+                    items_to_update.append({
+                        'symbol': symbol,
+                        'current_amount': existing_amount,
+                        'net_change': net_change,
+                        'new_amount': new_amount,
+                        'csv_quantity': item.get('quantity', 0),
+                        'csv_price': item.get('price', 0)
+                    })
+            else:
+                # Will be added (only if net_change > 0)
+                if net_change > 0:
+                    items_to_add.append({
+                        'symbol': symbol,
+                        'quantity': item.get('quantity', 0),
+                        'price': item.get('price', 0),
+                        'currency': item.get('currency', 'USD')
+                    })
+                # If net_change <= 0 and doesn't exist, it means selling non-existent position (warning already handled)
+        
+        conn.close()
+        
+        # Build summary message
+        action_summary = []
+        if items_to_add:
+            action_summary.append(f"{len(items_to_add)} will be added")
+        if items_to_update:
+            action_summary.append(f"{len(items_to_update)} will be updated")
+        if items_to_delete:
+            action_summary.append(f"{len(items_to_delete)} will be removed")
+        
+        summary_text = f"Found {len(aggregated_items)} unique symbols from {len(normalized_txns)} transactions."
+        if action_summary:
+            summary_text += f" After import: {', '.join(action_summary)}."
+        
         return CSVUploadResponse(
             success=True,
-            message=f"Successfully parsed CSV file. Found {len(aggregated_items)} unique symbols from {len(normalized_txns)} transactions.",
+            message=summary_text,
             detected_exchange=detected_exchange,
             preview_data=normalized_txns[:10],
             total_rows=len(rows),
             aggregated_items=aggregated_items,
             errors=errors[:10] if errors else [],
+            items_to_add=items_to_add,
+            items_to_update=items_to_update,
+            items_to_delete=items_to_delete,
         )
     except HTTPException:
         raise
@@ -121,10 +198,17 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                 is_sell_only = item.get('is_sell_only', False)
 
                 # Check if portfolio item exists by symbol only (not quantity)
-                check_existing_sql = _normalize_placeholders(
-                    "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase FROM portfolio_items WHERE user_id = ? AND symbol = ?",
-                    is_pg
-                )
+                # Use UPPER() for case-insensitive comparison since CSV symbols are normalized to uppercase
+                if is_pg:
+                    check_existing_sql = (
+                        "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase "
+                        "FROM portfolio_items WHERE user_id = %s AND UPPER(symbol) = UPPER(%s)"
+                    )
+                else:
+                    check_existing_sql = (
+                        "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase "
+                        "FROM portfolio_items WHERE user_id = ? AND UPPER(symbol) = UPPER(?)"
+                    )
                 cursor.execute(check_existing_sql, (current_user["id"], symbol))
                 existing_item = cursor.fetchone()
 
