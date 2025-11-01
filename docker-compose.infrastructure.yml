@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: crypto-ai-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-crypto_ai_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_pass}
+    env_file:
+      - .env
+    # No host port binding - accessed via docker network only for security
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    volumes:
+      # Shared database volume - ensures data persistence
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crypto} -d ${POSTGRES_DB:-crypto_ai_agent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - nginx-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7
+    container_name: crypto-ai-redis
+    restart: always
+    command: ["redis-server", "--save", "", "--appendonly", "${REDIS_APPENDONLY:-no}"]
+    env_file:
+      - .env
+    # No host port binding - accessed via docker network only for security
+    # ports:
+    #   - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      # Shared Redis volume - ensures cache persistence
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nginx-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # Shared volumes - used by all deployments
+  pgdata:
+    name: crypto-ai-agent_pgdata
+  redisdata:
+    name: crypto-ai-agent_redisdata
+
+networks:
+  nginx-network:
+    external: true
+

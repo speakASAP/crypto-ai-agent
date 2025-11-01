@@ -352,7 +352,8 @@ class CSVImportService:
         for symbol, txns in by_symbol.items():
             try:
                 result = self._calculate_weighted_average(symbol, txns)
-                if result:
+                # Include ALL results, even if net_quantity <= 0 (for DELETE operations)
+                if result is not None:
                     aggregated.append(result)
             except Exception as e:
                 logger.error(f"Error aggregating {symbol}: {e}")
@@ -364,44 +365,51 @@ class CSVImportService:
         buy_txns = [t for t in transactions if t['type'].lower() in ['buy', 'purchase']]
         sell_txns = [t for t in transactions if t['type'].lower() in ['sell', 'sale']]
         
-        if not buy_txns:
-            logger.warning(f"No buy transactions found for {symbol}")
-            return None
-        
         total_buy_qty = sum(t['quantity'] for t in buy_txns)
         total_sell_qty = sum(t['quantity'] for t in sell_txns)
         net_quantity = total_buy_qty - total_sell_qty
+        net_change = net_quantity  # This represents the change from CSV transactions
         
-        if net_quantity <= 0:
-            logger.info(f"Fully sold position for {symbol}, skipping")
-            return None
+        # Handle sell-only transactions (no buys in CSV)
+        is_sell_only = len(buy_txns) == 0 and len(sell_txns) > 0
+        is_buy_only = len(buy_txns) > 0 and len(sell_txns) == 0
+        has_both = len(buy_txns) > 0 and len(sell_txns) > 0
         
-        # Calculate weighted average price from buy transactions
-        weighted_price = sum(t['quantity'] * t['price'] for t in buy_txns) / total_buy_qty
-        # Only count fees and values from BUY transactions (sells don't contribute to investment)
-        total_buy_fees = sum(t.get('fees', 0) for t in buy_txns)
-        total_buy_value = sum(t.get('value', 0) for t in buy_txns)
+        # Calculate weighted average price from buy transactions (if any)
+        if len(buy_txns) > 0:
+            weighted_price = sum(t['quantity'] * t['price'] for t in buy_txns) / total_buy_qty
+            total_buy_fees = sum(t.get('fees', 0) for t in buy_txns)
+            total_buy_value = sum(t.get('value', 0) for t in buy_txns)
+            total_buy_investment = total_buy_value + total_buy_fees
+            earliest_date = min(t['date'] for t in buy_txns)
+        else:
+            # Sell-only: use average sell price for reference (won't be used for purchase price)
+            weighted_price = sum(t['quantity'] * t['price'] for t in sell_txns) / total_sell_qty if total_sell_qty > 0 else 0.0
+            total_buy_fees = 0.0
+            total_buy_value = 0.0
+            total_buy_investment = 0.0
+            earliest_date = min(t['date'] for t in sell_txns) if sell_txns else transactions[0]['date']
         
-        # Calculate total buy investment
-        total_buy_investment = total_buy_value + total_buy_fees
+        # Calculate fees: for sell-only, we track sell fees but they don't affect investment
+        total_sell_fees = sum(t.get('fees', 0) for t in sell_txns)
         
-        # For positions with partial sells, calculate remaining investment proportionally
-        if total_sell_qty > 0:
-            # Investment per coin = total buy investment / total buy quantity
+        # For positions with sells, calculate remaining investment proportionally
+        if total_buy_qty > 0 and total_sell_qty > 0:
+            # Partial sell: calculate remaining investment
             investment_per_coin = total_buy_investment / total_buy_qty if total_buy_qty > 0 else 0
-            # Remaining investment = investment per coin * remaining quantity
             remaining_investment = investment_per_coin * net_quantity
-            # Proportionally split remaining investment between value and fees
             value_ratio = total_buy_value / total_buy_investment if total_buy_investment > 0 else 0
             fees_ratio = total_buy_fees / total_buy_investment if total_buy_investment > 0 else 0
             total_value = remaining_investment * value_ratio
             total_fees = remaining_investment * fees_ratio
-        else:
+        elif total_buy_qty > 0:
+            # Buy-only
             total_value = total_buy_value
             total_fees = total_buy_fees
-        
-        # Get earliest buy date
-        earliest_date = min(t['date'] for t in buy_txns)
+        else:
+            # Sell-only: no investment to track
+            total_value = 0.0
+            total_fees = total_sell_fees
         
         # Get currency from first transaction
         currency = transactions[0].get('currency', 'USD')
@@ -409,11 +417,15 @@ class CSVImportService:
         return {
             'symbol': symbol,
             'quantity': net_quantity,
+            'net_change': net_change,  # Positive for buys, negative for sells
             'price': weighted_price,
             'value': total_value,
             'fees': total_fees,
             'date': earliest_date,
             'currency': currency,
-            'transactions_count': len(transactions)
+            'transactions_count': len(transactions),
+            'is_sell_only': is_sell_only,
+            'total_buy_qty': total_buy_qty,
+            'total_sell_qty': total_sell_qty
         }
 

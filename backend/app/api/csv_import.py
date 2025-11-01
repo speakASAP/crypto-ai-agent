@@ -110,57 +110,205 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
         cursor = conn.cursor()
         is_pg = is_postgres_connection(conn)
         imported_count = 0
+        updated_count = 0
+        deleted_count = 0
         now = datetime.now().isoformat() + "Z"
 
         for item in aggregated_items:
             try:
-                check_duplicate_sql = _normalize_placeholders(
-                    "SELECT id FROM portfolio_items WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001",
+                symbol = item['symbol']
+                net_change = item.get('net_change', item.get('quantity', 0))
+                is_sell_only = item.get('is_sell_only', False)
+
+                # Check if portfolio item exists by symbol only (not quantity)
+                check_existing_sql = _normalize_placeholders(
+                    "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase FROM portfolio_items WHERE user_id = ? AND symbol = ?",
                     is_pg
                 )
-                cursor.execute(check_duplicate_sql, (current_user["id"], item['symbol'], item['quantity']))
-                if cursor.fetchone():
-                    logger.info(f"Skipping duplicate: {item['symbol']}")
-                    continue
+                cursor.execute(check_existing_sql, (current_user["id"], symbol))
+                existing_item = cursor.fetchone()
 
                 currency = item.get('currency', 'USD')
                 currency_service.ensure_rates_initialized()
 
-                if currency != 'USD':
-                    exchange_rate = currency_service.rates.get(currency, 1.0)
-                    price_usd = item['price'] / exchange_rate
-                    fees_usd = item['fees'] / exchange_rate if item['fees'] > 0 else 0.0
-                    value_usd = item.get('value', 0) / exchange_rate if item.get('value', 0) > 0 else 0.0
+                if existing_item:
+                    # Portfolio item exists - merge with existing data
+                    existing_id = existing_item[0]
+                    existing_amount = existing_item[1]
+                    existing_price = existing_item[2]
+                    existing_commission = existing_item[3] if existing_item[3] else 0.0
+                    existing_currency = existing_item[4]
+                    existing_price_usd = existing_item[5] if existing_item[5] else None
+                    existing_commission_usd = existing_item[6] if existing_item[6] else 0.0
+                    existing_exchange_rate = existing_item[7]
+
+                    # Calculate new amount after applying CSV net change
+                    new_amount = existing_amount + net_change
+
+                    if new_amount <= 0:
+                        # Fully sold or over-sold: DELETE portfolio item
+                        delete_sql = _normalize_placeholders(
+                            "DELETE FROM portfolio_items WHERE id = ? AND user_id = ?",
+                            is_pg
+                        )
+                        cursor.execute(delete_sql, (existing_id, current_user["id"]))
+                        deleted_count += 1
+                        logger.info(f"🗑️ Deleted {symbol} (sold completely, was {existing_amount}, sold {abs(net_change)})")
+                    else:
+                        # Partial sell or additional buy: UPDATE portfolio item
+                        # Calculate weighted average price
+                        if is_sell_only:
+                            # Sell-only: keep existing price (we're reducing quantity, not changing buy price)
+                            merged_price = existing_price
+                            merged_price_usd = existing_price_usd if existing_price_usd else existing_price
+                            # Commission stays the same (we already paid it)
+                            merged_commission = existing_commission
+                            merged_commission_usd = existing_commission_usd
+                            merged_exchange_rate = existing_exchange_rate
+                        else:
+                            # Has buys in CSV: calculate weighted average
+                            # CSV price is already weighted average of buy transactions
+                            csv_price = item['price']
+                            csv_buy_qty = item.get('total_buy_qty', 0)  # Amount actually bought in CSV
+                            
+                            # For weighted average, we consider:
+                            # - Existing holdings: existing_amount at existing_price
+                            # - New buys from CSV: csv_buy_qty at csv_price
+                            # If net_change is negative (more sold than bought), we keep existing price
+                            
+                            if net_change > 0:
+                                # Net increase: calculate weighted average
+                                # Convert existing price to same currency as CSV item if needed
+                                existing_price_in_csv_currency = existing_price
+                                if existing_currency != currency:
+                                    # Convert existing price to CSV currency
+                                    if currency != 'USD' and existing_currency != 'USD':
+                                        # Both non-USD: convert existing to USD first, then to CSV currency
+                                        existing_exchange_rate_used = existing_exchange_rate if existing_exchange_rate else 1.0
+                                        existing_price_usd_calc = existing_price / existing_exchange_rate_used
+                                        csv_exchange_rate = currency_service.rates.get(currency, 1.0)
+                                        existing_price_in_csv_currency = existing_price_usd_calc * csv_exchange_rate
+                                    elif existing_currency == 'USD' and currency != 'USD':
+                                        csv_exchange_rate = currency_service.rates.get(currency, 1.0)
+                                        existing_price_in_csv_currency = existing_price * csv_exchange_rate
+
+                                # Weighted average: (existing * existing_price + new_buys * csv_price) / (existing + new_buys)
+                                existing_value = existing_amount * existing_price_in_csv_currency
+                                csv_buy_value = csv_buy_qty * csv_price
+                                total_value = existing_value + csv_buy_value
+                                total_quantity_for_price = existing_amount + csv_buy_qty
+                                merged_price = total_value / total_quantity_for_price if total_quantity_for_price > 0 else existing_price
+
+                                # Calculate USD prices
+                                if currency != 'USD':
+                                    csv_exchange_rate = currency_service.rates.get(currency, 1.0)
+                                    csv_price_usd = csv_price / csv_exchange_rate
+                                else:
+                                    csv_exchange_rate = None
+                                    csv_price_usd = csv_price
+
+                                # Merge commission (only from buys, not sells)
+                                merged_commission = existing_commission + item.get('fees', 0)
+                                
+                                if existing_price_usd:
+                                    existing_value_usd = existing_amount * existing_price_usd
+                                else:
+                                    existing_value_usd = existing_amount * csv_price_usd  # Fallback
+
+                                csv_buy_value_usd = csv_buy_qty * csv_price_usd
+                                total_value_usd = existing_value_usd + csv_buy_value_usd
+                                merged_price_usd = total_value_usd / total_quantity_for_price if total_quantity_for_price > 0 else (existing_price_usd or csv_price_usd)
+                                
+                                if currency != 'USD':
+                                    merged_commission_usd = existing_commission_usd + (item.get('fees', 0) / csv_exchange_rate)
+                                    merged_exchange_rate = csv_exchange_rate
+                                else:
+                                    merged_commission_usd = existing_commission_usd + item.get('fees', 0)
+                                    merged_exchange_rate = None
+                            else:
+                                # Net decrease (partial sell): keep existing price
+                                merged_price = existing_price
+                                merged_price_usd = existing_price_usd if existing_price_usd else existing_price
+                                merged_commission = existing_commission  # Don't add fees from sells
+                                merged_commission_usd = existing_commission_usd
+                                if currency != 'USD':
+                                    merged_exchange_rate = currency_service.rates.get(currency, 1.0)
+                                else:
+                                    merged_exchange_rate = existing_exchange_rate
+
+                        # Calculate total investment for display
+                        if currency != 'USD':
+                            exchange_rate_for_display = currency_service.rates.get(currency, 1.0)
+                            total_investment_usd = (new_amount * merged_price_usd) + merged_commission_usd
+                            total_investment = total_investment_usd * exchange_rate_for_display
+                        else:
+                            total_investment = (new_amount * merged_price) + merged_commission
+
+                        currency_symbols = {'USD': '$', 'EUR': '€', 'CZK': 'Kč', 'GBP': '£', 'JPY': '¥'}
+                        currency_symbol = currency_symbols.get(currency, currency + ' ')
+                        total_investment_text = f"{currency_symbol}{total_investment:.2f}"
+
+                        # Update portfolio item
+                        update_sql = _normalize_placeholders(
+                            "UPDATE portfolio_items SET "
+                            "amount = ?, price_buy = ?, commission = ?, "
+                            "price_buy_usd = ?, commission_usd = ?, exchange_rate_at_purchase = ?, "
+                            "total_investment_text = ?, updated_at = ?, source = ? "
+                            "WHERE id = ? AND user_id = ?",
+                            is_pg
+                        )
+                        cursor.execute(update_sql, (
+                            new_amount, merged_price, merged_commission,
+                            merged_price_usd, merged_commission_usd, merged_exchange_rate,
+                            total_investment_text, now, exchange.capitalize(),
+                            existing_id, current_user["id"]
+                        ))
+                        updated_count += 1
+                        logger.info(f"🔄 Updated {symbol}: {existing_amount} -> {new_amount} (change: {net_change:+.8f})")
                 else:
-                    exchange_rate = None
-                    price_usd = item['price']
-                    fees_usd = item['fees']
-                    value_usd = item.get('value', 0)
+                    # Portfolio item doesn't exist
+                    if net_change > 0:
+                        # Insert new item (net change is positive = buy)
+                        if currency != 'USD':
+                            exchange_rate = currency_service.rates.get(currency, 1.0)
+                            price_usd = item['price'] / exchange_rate
+                            fees_usd = item['fees'] / exchange_rate if item['fees'] > 0 else 0.0
+                            value_usd = item.get('value', 0) / exchange_rate if item.get('value', 0) > 0 else 0.0
+                        else:
+                            exchange_rate = None
+                            price_usd = item['price']
+                            fees_usd = item['fees']
+                            value_usd = item.get('value', 0)
 
-                if item.get('value', 0) > 0:
-                    total_investment = item['value'] + item['fees']
-                else:
-                    total_investment = item['quantity'] * item['price'] + item['fees']
+                        if item.get('value', 0) > 0:
+                            total_investment = item['value'] + item['fees']
+                        else:
+                            total_investment = item['quantity'] * item['price'] + item['fees']
 
-                currency_symbols = {'USD': '$', 'EUR': '€', 'CZK': 'Kč', 'GBP': '£', 'JPY': '¥'}
-                currency_symbol = currency_symbols.get(currency, currency + ' ')
-                total_investment_text = f"{currency_symbol}{total_investment:.2f}"
+                        currency_symbols = {'USD': '$', 'EUR': '€', 'CZK': 'Kč', 'GBP': '£', 'JPY': '¥'}
+                        currency_symbol = currency_symbols.get(currency, currency + ' ')
+                        total_investment_text = f"{currency_symbol}{total_investment:.2f}"
 
-                insert_sql = _normalize_placeholders(
-                    "INSERT INTO portfolio_items "
-                    "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
-                    "total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    is_pg
-                )
-                cursor.execute(insert_sql, (
-                    current_user["id"], item['symbol'], item['quantity'], item['price'],
-                    item['date'], currency, exchange.capitalize(), item['fees'],
-                    total_investment_text, now, now, price_usd, fees_usd, exchange_rate,
-                ))
-                imported_count += 1
+                        insert_sql = _normalize_placeholders(
+                            "INSERT INTO portfolio_items "
+                            "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
+                            "total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            is_pg
+                        )
+                        cursor.execute(insert_sql, (
+                            current_user["id"], symbol, item['quantity'], item['price'],
+                            item['date'], currency, exchange.capitalize(), item['fees'],
+                            total_investment_text, now, now, price_usd, fees_usd, exchange_rate,
+                        ))
+                        imported_count += 1
+                        logger.info(f"➕ Inserted new {symbol}: {item['quantity']}")
+                    else:
+                        # Selling non-existent position - log warning but don't create negative amount
+                        logger.warning(f"⚠️ Attempted to sell {symbol} ({abs(net_change)}) that doesn't exist in portfolio - skipping")
+
             except Exception as e:
-                logger.warning(f"Failed to import item {item['symbol']}: {e}")
+                logger.error(f"Failed to process item {item.get('symbol', 'unknown')}: {e}", exc_info=True)
                 continue
 
         column_mapping_data = {
@@ -186,18 +334,19 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
             )
         cursor.execute(mapping_sql, (current_user["id"], exchange.lower(), json.dumps(column_mapping_data)))
 
+        total_processed = imported_count + updated_count + deleted_count
         history_sql = _normalize_placeholders(
             "INSERT INTO import_history "
             "(user_id, source, import_date, items_imported, status, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             is_pg
         )
-        cursor.execute(history_sql, (current_user["id"], exchange.capitalize(), now, imported_count, 'success' if imported_count > 0 else 'partial', now))
+        cursor.execute(history_sql, (current_user["id"], exchange.capitalize(), now, total_processed, 'success' if total_processed > 0 else 'partial', now))
 
         conn.commit()
         conn.close()
 
-        logger.info(f"✅ CSV import completed: {imported_count} items imported for user {current_user['id']}")
+        logger.info(f"✅ CSV import completed for user {current_user['id']}: {imported_count} inserted, {updated_count} updated, {deleted_count} deleted")
 
         # Immediately fetch prices for newly imported symbols
         imported_symbols = list(set(item['symbol'] for item in aggregated_items))
@@ -211,10 +360,14 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                 logger.error(f"⚠️ Failed to fetch prices for imported symbols: {e}", exc_info=True)
                 # Don't fail the import if price fetch fails
 
+        total_processed = imported_count + updated_count + deleted_count
         return {
             'success': True,
-            'message': f'Successfully imported {imported_count} portfolio items from CSV',
+            'message': f'Successfully processed CSV: {imported_count} inserted, {updated_count} updated, {deleted_count} deleted',
             'items_imported': imported_count,
+            'items_updated': updated_count,
+            'items_deleted': deleted_count,
+            'total_processed': total_processed,
             'total_found': len(aggregated_items),
         }
     except HTTPException:

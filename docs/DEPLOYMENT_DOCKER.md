@@ -156,8 +156,10 @@ The project supports zero-downtime blue/green deployments managed from the nginx
 
 - Nginx microservice running
 - Service registered in nginx-microservice service registry
+- `docker-compose.infrastructure.yml` for shared database/Redis (NEW - required)
 - `docker-compose.blue.yml` and `docker-compose.green.yml` files created
 - Health check endpoints configured (`/health` for backend, `/` for frontend)
+- **Shared infrastructure must be running** (postgres, redis) before deployments
 
 ### Quick Deployment
 
@@ -168,12 +170,43 @@ From the nginx-microservice directory:
 ./scripts/blue-green/deploy.sh crypto-ai-agent
 
 # This will:
+# 0. Ensure shared infrastructure (postgres, redis) is running
 # 1. Build and start green containers
 # 2. Run health checks
 # 3. Switch traffic to green (< 2 seconds)
 # 4. Monitor for 5 minutes
 # 5. Clean up old blue containers if healthy
 ```
+
+### Shared Infrastructure Management
+
+**IMPORTANT**: Database (PostgreSQL) and Redis are now managed separately as shared infrastructure. This ensures:
+
+- ✅ **Zero data loss** - Only one database instance prevents data corruption
+- ✅ **Always online** - Database survives blue/green deployments
+- ✅ **No conflicts** - No volume conflicts during deployments
+
+**Starting Infrastructure:**
+
+```bash
+cd /path/to/crypto-ai-agent
+
+# Start shared infrastructure (postgres, redis)
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
+
+# Verify it's running
+docker ps | grep -E 'postgres|redis'
+```
+
+**Infrastructure is automatically checked** before each blue/green deployment. If not running, it will be started automatically.
+
+**Stopping Infrastructure** (use with caution - stops database!):
+
+```bash
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure down
+```
+
+**Note**: Infrastructure containers use `restart: always` and will automatically restart on failure.
 
 ### Manual Rollback
 
@@ -189,15 +222,18 @@ The blue/green system deploys:
 
 - **Backend**: FastAPI service with health checks
 - **Frontend**: Next.js application
-- **Shared Services**: Postgres and Redis (can be shared or separate per color)
+- **Shared Infrastructure** (managed separately): Postgres and Redis (singleton services, shared by both blue and green)
+
+**Important**: Database and Redis are NOT part of blue/green deployments. They run as singleton services and are shared by both environments. This prevents data corruption and ensures zero data loss.
 
 ### Deployment Flow
 
+0. **Infrastructure Check**: Ensure shared infrastructure (postgres, redis) is running
 1. **Prepare**: Build and start green containers, verify health
 2. **Switch**: Update nginx upstream weights, reload nginx (< 2 seconds)
 3. **Monitor**: Continuous health checks for 5 minutes
 4. **Rollback**: Automatic if health checks fail
-5. **Cleanup**: Remove old deployment after successful monitoring
+5. **Cleanup**: Remove old deployment after successful monitoring (infrastructure stays running)
 
 ### Configuration
 
@@ -221,10 +257,15 @@ FRONTEND_PORT_GREEN=3101
 
 The deployment uses:
 
-- `docker-compose.blue.yml` - Blue environment configuration
-- `docker-compose.green.yml` - Green environment configuration
+- `docker-compose.infrastructure.yml` - **Shared infrastructure** (postgres, redis) - always running
+- `docker-compose.blue.yml` - Blue environment configuration (backend, frontend only)
+- `docker-compose.green.yml` - Green environment configuration (backend, frontend only)
 
-Both files are automatically created and use environment variables from `.env`.
+**Architecture:**
+- Infrastructure runs independently with `restart: always`
+- Blue/green deployments only manage application containers
+- Both blue and green connect to the same shared database/Redis
+- This prevents data corruption from multiple database instances
 
 ### Health Checks
 
