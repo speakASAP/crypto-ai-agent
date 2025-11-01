@@ -62,7 +62,8 @@ services:
     env_file:
       - .env
     volumes:
-      - pgdata-green:/var/lib/postgresql/data
+      # Shared database volume - ensures data persistence across blue/green deployments
+      - pgdata:/var/lib/postgresql/data
 
   redis:
     image: redis:7
@@ -72,13 +73,18 @@ services:
     ports:
       - "127.0.0.1:${REDIS_PORT_GREEN:-6380}:6379"
     volumes:
-      - redisdata-green:/data
+      # Shared Redis volume - ensures cache persistence across blue/green deployments
+      - redisdata:/data
     env_file:
       - .env
 
 volumes:
-  pgdata-green:
-  redisdata-green:
+  # Shared volumes - both blue and green deployments use the same database and Redis
+  # This ensures data persistence during blue/green switches
+  pgdata:
+    name: crypto-ai-agent_pgdata
+  redisdata:
+    name: crypto-ai-agent_redisdata
 
 networks:
   nginx-network:
