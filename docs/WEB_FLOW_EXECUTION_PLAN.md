@@ -133,4 +133,3 @@ This document defines the exact steps to execute the tasks from `data/notepad.md
 14. Open `http://localhost:3100/profile` and review Bitfinex settings/status.
 15. Run Bitfinex test connection endpoint from profile UI; confirm response.
 16. Final pass: ensure no 4xx/5xx in Network tab, no errors in logs.
-

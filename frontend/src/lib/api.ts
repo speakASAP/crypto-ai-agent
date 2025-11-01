@@ -479,6 +479,9 @@ class ApiClient {
     total_rows: number;
     aggregated_items: any[];
     errors: string[];
+    items_to_add?: any[];
+    items_to_update?: any[];
+    items_to_delete?: any[];
   }> {
     const formData = new FormData()
     formData.append('file', file)

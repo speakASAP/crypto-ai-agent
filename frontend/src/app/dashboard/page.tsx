@@ -843,68 +843,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="text-2xl font-bold transition-all duration-300 ease-in-out">
-                {(loading || currencyChanging) ? (
-                  <span className="animate-pulse">Loading...</span>
-                ) : summary ? formatCurrencyWholeAmount(summary.total_value) : 'Loading...'}
-              </div>
-              <div className="text-lg text-blue-600 font-medium transition-all duration-300 ease-in-out">
-                {(loading || currencyChanging) ? (
-                  <span className="animate-pulse">Loading...</span>
-                ) : summary ? formatCurrencyWholeAmount(summary.total_invested) : 'Loading...'}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${summary && summary.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {(loading || currencyChanging) ? (
-                <span className="animate-pulse">Loading...</span>
-              ) : summary ? formatCurrencyWholeAmount(summary.total_pnl) : 'Loading...'}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">P&L %</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${summary && summary.total_pnl_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {(loading || currencyChanging) ? (
-                <span className="animate-pulse">Loading...</span>
-              ) : summary ? formatPercentAmount(summary.total_pnl_percent) : 'Loading...'}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Items</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {summary ? summary.item_count : 'Loading...'}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Portfolio Table */}
-      {/* Filtering and sorting logic */}
+      {/* Calculate filtered summary for header cards */}
       {(() => {
         // Calculate investment for each item
         const calculateInvestment = (item: PortfolioItem) => (item.amount * item.price_buy) + item.commission
@@ -949,51 +888,194 @@ export default function Home() {
           return true
         })
 
-        // Sort items
-        const sortedItems = [...filteredItems].sort((a, b) => {
-          let aVal: any
-          let bVal: any
-
-          switch (sort.by) {
-            case 'symbol':
-              aVal = a.symbol
-              bVal = b.symbol
-              break
-            case 'investment':
-              aVal = calculateInvestment(a)
-              bVal = calculateInvestment(b)
-              break
-            case 'platform':
-              aVal = a.source || ''
-              bVal = b.source || ''
-              break
-            case 'pnl':
-              aVal = a.pnl || 0
-              bVal = b.pnl || 0
-              break
-            case 'pnl_percent':
-              aVal = a.pnl_percent || 0
-              bVal = b.pnl_percent || 0
-              break
-            case 'current_value':
-              // Sort by P&L (mathematically correct: positive down to 0, then negative)
-              // sorting should be like 45, 12, 9, -3, -10, -200
-              aVal = a.pnl || 0
-              bVal = b.pnl || 0
-              break
-            default:
-              return 0
+        // Calculate filtered summary based on filtered items
+        // Use USD values for accuracy, similar to portfolioStore.ts updatePortfolioWithNewPrice
+        const filteredSummary = filteredItems.reduce((acc, item) => {
+          // CRITICAL: Always use price_buy_usd for summary calculations
+          if (!item.price_buy_usd) {
+            return acc // Skip items without USD values
           }
 
-          if (aVal < bVal) return sort.dir === 'asc' ? -1 : 1
-          if (aVal > bVal) return sort.dir === 'asc' ? 1 : -1
-          return 0
+          const priceBuyUsd = item.price_buy_usd
+          const commissionUsd = item.commission_usd || 0
+          const totalInvestmentUsd = (item.amount * priceBuyUsd) + commissionUsd
+          
+          // Prefer USD fields, fallback to converting from display currency if needed
+          let currentValueUsd = item.current_value_usd
+          let pnlUsd = item.pnl_usd
+          
+          // If USD fields are missing, convert from display currency to USD
+          if (!currentValueUsd && item.current_value) {
+            // Items from backend are already in selectedCurrency, so convert back to USD
+            if (selectedCurrency === 'USD') {
+              currentValueUsd = item.current_value
+            } else if (exchangeRates && exchangeRates[selectedCurrency]) {
+              currentValueUsd = item.current_value / exchangeRates[selectedCurrency]
+            } else {
+              currentValueUsd = 0
+            }
+          }
+          
+          if (!pnlUsd && item.pnl !== undefined && item.pnl !== null) {
+            // Items from backend are already in selectedCurrency, so convert back to USD
+            if (selectedCurrency === 'USD') {
+              pnlUsd = item.pnl
+            } else if (exchangeRates && exchangeRates[selectedCurrency]) {
+              pnlUsd = item.pnl / exchangeRates[selectedCurrency]
+            } else {
+              pnlUsd = 0
+            }
+          }
+
+          acc.total_invested += totalInvestmentUsd
+          acc.total_value += (currentValueUsd || 0)
+          acc.total_pnl += (pnlUsd || 0)
+          return acc
+        }, {
+          total_value: 0,
+          total_invested: 0,
+          total_pnl: 0,
+          total_pnl_percent: 0,
+          currency: selectedCurrency,
+          item_count: 0
         })
 
-        // Get unique platforms for filter dropdown
-        const platforms = ['All', ...Array.from(new Set(items.map(item => item.source).filter(Boolean)))]
+        // Set item_count to all filtered items (not just those with USD values)
+        // This ensures the count matches what's displayed in the portfolio table
+        filteredSummary.item_count = filteredItems.length
+
+        // Convert summary values to display currency
+        if (selectedCurrency !== 'USD' && exchangeRates && exchangeRates[selectedCurrency]) {
+          const rate = exchangeRates[selectedCurrency]
+          filteredSummary.total_value = filteredSummary.total_value * rate
+          filteredSummary.total_invested = filteredSummary.total_invested * rate
+          filteredSummary.total_pnl = filteredSummary.total_pnl * rate
+        }
+
+        filteredSummary.total_pnl_percent = filteredSummary.total_invested > 0
+          ? (filteredSummary.total_pnl / filteredSummary.total_invested) * 100
+          : 0
+
+        // Use filtered summary for header cards, fallback to global summary if no filtered items
+        const displaySummary = filteredItems.length > 0 ? filteredSummary : (summary || {
+          total_value: 0,
+          total_invested: 0,
+          total_pnl: 0,
+          total_pnl_percent: 0,
+          currency: selectedCurrency,
+          item_count: 0
+        })
 
         return (
+          <>
+            {/* Summary Cards - Now showing filtered values */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <div className="text-2xl font-bold transition-all duration-300 ease-in-out">
+                      {(loading || currencyChanging) ? (
+                        <span className="animate-pulse">Loading...</span>
+                      ) : displaySummary ? formatCurrencyWholeAmount(displaySummary.total_value) : 'Loading...'}
+                    </div>
+                    <div className="text-lg text-blue-600 font-medium transition-all duration-300 ease-in-out">
+                      {(loading || currencyChanging) ? (
+                        <span className="animate-pulse">Loading...</span>
+                      ) : displaySummary ? formatCurrencyWholeAmount(displaySummary.total_invested) : 'Loading...'}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${displaySummary && displaySummary.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(loading || currencyChanging) ? (
+                      <span className="animate-pulse">Loading...</span>
+                    ) : displaySummary ? formatCurrencyWholeAmount(displaySummary.total_pnl) : 'Loading...'}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">P&L %</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className={`text-2xl font-bold transition-all duration-300 ease-in-out ${displaySummary && displaySummary.total_pnl_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(loading || currencyChanging) ? (
+                      <span className="animate-pulse">Loading...</span>
+                    ) : displaySummary ? formatPercentAmount(displaySummary.total_pnl_percent) : 'Loading...'}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Items</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {displaySummary ? displaySummary.item_count : 'Loading...'}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Portfolio Table */}
+            {/* Filtering and sorting logic */}
+            {(() => {
+              // Sort items
+              const sortedItems = [...filteredItems].sort((a, b) => {
+                let aVal: any
+                let bVal: any
+
+                switch (sort.by) {
+                  case 'symbol':
+                    aVal = a.symbol
+                    bVal = b.symbol
+                    break
+                  case 'investment':
+                    aVal = calculateInvestment(a)
+                    bVal = calculateInvestment(b)
+                    break
+                  case 'platform':
+                    aVal = a.source || ''
+                    bVal = b.source || ''
+                    break
+                  case 'pnl':
+                    aVal = a.pnl || 0
+                    bVal = b.pnl || 0
+                    break
+                  case 'pnl_percent':
+                    aVal = a.pnl_percent || 0
+                    bVal = b.pnl_percent || 0
+                    break
+                  case 'current_value':
+                    // Sort by P&L (mathematically correct: positive down to 0, then negative)
+                    // sorting should be like 45, 12, 9, -3, -10, -200
+                    aVal = a.pnl || 0
+                    bVal = b.pnl || 0
+                    break
+                  default:
+                    return 0
+                }
+
+                if (aVal < bVal) return sort.dir === 'asc' ? -1 : 1
+                if (aVal > bVal) return sort.dir === 'asc' ? 1 : -1
+                return 0
+              })
+
+              // Get unique platforms for filter dropdown
+              const platforms = ['All', ...Array.from(new Set(items.map(item => item.source).filter(Boolean)))]
+
+              return (
           <Card>
             <CardHeader>
           <div className="flex items-center justify-between">
@@ -1368,6 +1450,9 @@ export default function Home() {
           )}
         </CardContent>
       </Card>
+              )
+            })()}
+          </>
         )
       })()}
 
@@ -1662,36 +1747,132 @@ export default function Home() {
 
               {/* Preview */}
               {csvPreview?.success && (
-                <div>
-                  <h3 className="font-semibold mb-2">Preview: {csvPreview.aggregated_items.length} positions</h3>
-                  <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 sticky top-0">
-                        <tr>
-                          <th className="px-3 py-2 text-left">Symbol</th>
-                          <th className="px-3 py-2 text-right">Quantity</th>
-                          <th className="px-3 py-2 text-right">Price</th>
-                          <th className="px-3 py-2 text-right">Value</th>
-                          <th className="px-3 py-2 text-right">Fees</th>
-                          <th className="px-3 py-2 text-left">Date</th>
-                          <th className="px-3 py-2 text-left">Currency</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {csvPreview.aggregated_items.map((item: any, idx: number) => (
-                          <tr key={idx} className="border-t hover:bg-gray-50">
-                            <td className="px-3 py-2 font-medium">{item.symbol}</td>
-                            <td className="px-3 py-2 text-right">{item.quantity.toFixed(8)}</td>
-                            <td className="px-3 py-2 text-right">{item.price.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right">{item.value ? item.value.toFixed(2) : (item.quantity * item.price).toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right">{item.fees ? item.fees.toFixed(2) : '0.00'}</td>
-                            <td className="px-3 py-2">{item.date || 'N/A'}</td>
-                            <td className="px-3 py-2">{item.currency}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div className="space-y-4">
+                  <h3 className="font-semibold mb-2">Import Preview</h3>
+                  
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {csvPreview.items_to_add && csvPreview.items_to_add.length > 0 && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                        <div className="text-sm font-medium text-green-800">
+                          ➕ {csvPreview.items_to_add.length} Will Be Added
+                        </div>
+                        <div className="text-xs text-green-600 mt-1">
+                          {csvPreview.items_to_add.map((item: any) => item.symbol).join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    {csvPreview.items_to_update && csvPreview.items_to_update.length > 0 && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div className="text-sm font-medium text-blue-800">
+                          🔄 {csvPreview.items_to_update.length} Will Be Updated
+                        </div>
+                        <div className="text-xs text-blue-600 mt-1">
+                          {csvPreview.items_to_update.map((item: any) => item.symbol).join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    {csvPreview.items_to_delete && csvPreview.items_to_delete.length > 0 && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                        <div className="text-sm font-medium text-red-800">
+                          🗑️ {csvPreview.items_to_delete.length} Will Be Removed
+                        </div>
+                        <div className="text-xs text-red-600 mt-1">
+                          {csvPreview.items_to_delete.map((item: any) => item.symbol).join(', ')}
+                        </div>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Detailed Lists */}
+                  {csvPreview.items_to_delete && csvPreview.items_to_delete.length > 0 && (
+                    <div className="border border-red-200 rounded-lg overflow-hidden">
+                      <div className="bg-red-50 px-3 py-2 font-semibold text-sm text-red-800">
+                        Symbols That Will Be Removed (Sold Completely):
+                      </div>
+                      <div className="p-3 space-y-2">
+                        {csvPreview.items_to_delete.map((item: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center text-sm">
+                            <span className="font-medium">{item.symbol}</span>
+                            <span className="text-gray-600">
+                              Current: {item.current_amount.toFixed(8)} → Selling: {Math.abs(item.net_change).toFixed(8)} → Removed
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {csvPreview.items_to_add && csvPreview.items_to_add.length > 0 && (
+                    <div className="border border-green-200 rounded-lg overflow-hidden">
+                      <div className="bg-green-50 px-3 py-2 font-semibold text-sm text-green-800">
+                        New Symbols That Will Be Added:
+                      </div>
+                      <div className="p-3 space-y-2">
+                        {csvPreview.items_to_add.map((item: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center text-sm">
+                            <span className="font-medium">{item.symbol}</span>
+                            <span className="text-gray-600">
+                              Quantity: {item.quantity.toFixed(8)} @ {item.price.toFixed(2)} {item.currency}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {csvPreview.items_to_update && csvPreview.items_to_update.length > 0 && (
+                    <div className="border border-blue-200 rounded-lg overflow-hidden">
+                      <div className="bg-blue-50 px-3 py-2 font-semibold text-sm text-blue-800">
+                        Existing Symbols That Will Be Updated:
+                      </div>
+                      <div className="p-3 space-y-2">
+                        {csvPreview.items_to_update.map((item: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center text-sm">
+                            <span className="font-medium">{item.symbol}</span>
+                            <span className="text-gray-600">
+                              {item.current_amount.toFixed(8)} → {item.new_amount.toFixed(8)} ({item.net_change > 0 ? '+' : ''}{item.net_change.toFixed(8)})
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Full Transaction Table (Collapsible) */}
+                  <details className="border rounded-lg">
+                    <summary className="px-3 py-2 bg-gray-50 cursor-pointer font-medium text-sm">
+                      Show All {csvPreview.aggregated_items.length} Transactions
+                    </summary>
+                    <div className="overflow-hidden max-h-96 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Symbol</th>
+                            <th className="px-3 py-2 text-right">Quantity</th>
+                            <th className="px-3 py-2 text-right">Price</th>
+                            <th className="px-3 py-2 text-right">Value</th>
+                            <th className="px-3 py-2 text-right">Fees</th>
+                            <th className="px-3 py-2 text-left">Date</th>
+                            <th className="px-3 py-2 text-left">Currency</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {csvPreview.aggregated_items.map((item: any, idx: number) => (
+                            <tr key={idx} className="border-t hover:bg-gray-50">
+                              <td className="px-3 py-2 font-medium">{item.symbol}</td>
+                              <td className="px-3 py-2 text-right">{item.quantity.toFixed(8)}</td>
+                              <td className="px-3 py-2 text-right">{item.price.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{item.value ? item.value.toFixed(2) : (item.quantity * item.price).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{item.fees ? item.fees.toFixed(2) : '0.00'}</td>
+                              <td className="px-3 py-2">{item.date || 'N/A'}</td>
+                              <td className="px-3 py-2">{item.currency}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
                 </div>
               )}
 
