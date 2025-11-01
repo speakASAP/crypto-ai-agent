@@ -28,6 +28,7 @@ import {
   PasswordChange
 } from '@/types/auth'
 import { useAuthStore } from '@/stores/authStore'
+import { logger } from '@/lib/logger'
 
 class ApiClient {
   public client: AxiosInstance
@@ -50,7 +51,7 @@ class ApiClient {
         if (typeof window !== 'undefined') {
           const authState = useAuthStore.getState()
           
-          console.log('🔍 API Request - Auth state:', {
+          logger.debug('🔍 API Request - Auth state:', {
             isHydrated: authState.isHydrated,
             hasAccessToken: !!authState.accessToken,
             isAuthenticated: authState.isAuthenticated,
@@ -60,19 +61,19 @@ class ApiClient {
           // Only proceed if store is hydrated
           if (authState.isHydrated && authState.accessToken) {
             config.headers.Authorization = `Bearer ${authState.accessToken}`
-            console.log('✅ Added auth header to request:', config.url)
+            logger.debug('✅ Added auth header to request:', config.url)
           } else if (authState.isHydrated) {
-            console.log('❌ No access token available for request:', config.url)
+            logger.debug('❌ No access token available for request:', config.url)
           } else {
-            console.log('⏳ Auth store not hydrated yet for request:', config.url)
+            logger.debug('⏳ Auth store not hydrated yet for request:', config.url)
           }
         }
         
-        console.log(`🚀 ${config.method?.toUpperCase()} ${config.url}`)
+        logger.debug(`🚀 ${config.method?.toUpperCase()} ${config.url}`)
         return config
       },
       (error) => {
-        console.error('❌ Request error:', error)
+        logger.error('❌ Request error:', error)
         return Promise.reject(error)
       }
     )
@@ -80,18 +81,18 @@ class ApiClient {
     // Response interceptor
     this.client.interceptors.response.use(
       (response) => {
-        console.log(`✅ ${response.status} ${response.config.url}`)
+        logger.debug(`✅ ${response.status} ${response.config.url}`)
         return response
       },
       async (error) => {
-        console.error('❌ Response error:', error.response?.data || error.message)
+        logger.error('❌ Response error:', error.response?.data || error.message)
         
         // Handle 401 errors (token expired)
         if (error.response?.status === 401) {
           // Only handle refresh on client side and when hydrated
           if (typeof window !== 'undefined') {
             const authState = useAuthStore.getState()
-            console.log('🔄 401 error - auth state:', { 
+            logger.debug('🔄 401 error - auth state:', { 
               hasRefreshToken: !!authState.refreshToken, 
               isAuthenticated: authState.isAuthenticated,
               isHydrated: authState.isHydrated,
@@ -105,7 +106,7 @@ class ApiClient {
               // If already refreshing, wait for the existing refresh to complete
               return this.refreshPromise
             } else {
-              console.log('🔄 No refresh token, not hydrated, or already refreshing')
+              logger.debug('🔄 No refresh token, not hydrated, or already refreshing')
               // If no refresh token available, logout immediately
               if (authState.isHydrated) {
                 authState.logout()
@@ -122,17 +123,17 @@ class ApiClient {
 
   private async performTokenRefresh(originalConfig: any): Promise<any> {
     try {
-      console.log('🔄 Attempting token refresh...')
+      logger.debug('🔄 Attempting token refresh...')
       const authState = useAuthStore.getState()
       await authState.refreshAccessToken()
-      console.log('✅ Token refresh successful')
+      logger.debug('✅ Token refresh successful')
       
       // Retry the original request
       const newAuthState = useAuthStore.getState()
       originalConfig.headers.Authorization = `Bearer ${newAuthState.accessToken}`
       return this.client(originalConfig)
     } catch (refreshError) {
-      console.log('🔄 Token refresh failed:', refreshError instanceof Error ? refreshError.message : 'Unknown error')
+      logger.debug('🔄 Token refresh failed:', refreshError instanceof Error ? refreshError.message : 'Unknown error')
       // Immediately logout on refresh failure
       const authState = useAuthStore.getState()
       authState.logout()
@@ -501,7 +502,7 @@ class ApiClient {
     formData.append('file', file)
     formData.append('exchange', exchange)
     
-    console.log('📤 Executing CSV import:', { exchange, fileName: file.name, fileSize: file.size })
+    logger.debug('📤 Executing CSV import:', { exchange, fileName: file.name, fileSize: file.size })
     
     const response = await this.client.post('/api/import/csv/execute', formData, {
       headers: {
@@ -510,7 +511,7 @@ class ApiClient {
       timeout: 120000
     })
     
-    console.log('✅ CSV import response:', response.data)
+    logger.debug('✅ CSV import response:', response.data)
     return response.data
   }
 

@@ -1,0 +1,86 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: crypto-ai-backend-green
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:${API_PORT_GREEN:-8101}:${API_PORT:-8100}"
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+      - API_PORT=${API_PORT:-8100}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8100}/docs"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - nginx-network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        DEBUG: ${DEBUG:-false}
+    container_name: crypto-ai-frontend-green
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT_GREEN:-3101}:${FRONTEND_PORT:-3100}"
+    depends_on:
+      - backend
+    environment:
+      - PORT=${FRONTEND_PORT:-3100}
+      - NEXT_PUBLIC_DEBUG=${DEBUG:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-L", "http://localhost:${FRONTEND_PORT:-3100}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - nginx-network
+
+  postgres:
+    image: postgres:15
+    container_name: crypto-ai-postgres-green
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-crypto_ai_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_pass}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT_GREEN:-5433}:5432"
+    env_file:
+      - .env
+    volumes:
+      - pgdata-green:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: crypto-ai-redis-green
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "${REDIS_APPENDONLY:-no}"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT_GREEN:-6380}:6379"
+    volumes:
+      - redisdata-green:/data
+    env_file:
+      - .env
+
+volumes:
+  pgdata-green:
+  redisdata-green:
+
+networks:
+  nginx-network:
+    external: true
+
