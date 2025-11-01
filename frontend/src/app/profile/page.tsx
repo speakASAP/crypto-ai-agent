@@ -1235,7 +1235,6 @@ export default function ProfilePage() {
                 <div className="border-t pt-4">
                   <h4 className="text-sm font-medium text-gray-900 mb-2">System Information</h4>
                   <div className="text-sm text-gray-600 space-y-1">
-                    <p><strong>Database:</strong> {dbType ? (dbType === 'postgres' ? 'PostgreSQL' : 'SQLite') : '...'}</p>
                     <p><strong>API Source:</strong> CoinGecko API</p>
                     <p><strong>Update Frequency:</strong> Manual (on-demand)</p>
                     <p><strong>Symbols Limit:</strong> 750 cryptocurrencies</p>
