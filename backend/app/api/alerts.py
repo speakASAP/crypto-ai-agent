@@ -158,19 +158,35 @@ async def get_alert_history(limit: int = 100, current_user: dict = Depends(get_c
     cursor = conn.cursor()
     try:
         is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-        history_sql = """
-            SELECT 
-                ah.id,
-                ah.alert_id,
-                ah.symbol,
-                ah.triggered_price,
-                ah.triggered_at
-            FROM alert_history ah
-            WHERE ah.user_id = ?
-            ORDER BY ah.triggered_at DESC
-            LIMIT ?
-        """
-        history_sql = _normalize_placeholders(history_sql, is_pg)
+        if is_pg:
+            # PostgreSQL: join with alerts table to get symbol
+            history_sql = """
+                SELECT 
+                    ah.id,
+                    ah.alert_id,
+                    a.symbol,
+                    ah.triggered_price,
+                    ah.triggered_at
+                FROM alert_history ah
+                JOIN alerts a ON ah.alert_id = a.id
+                WHERE ah.user_id = %s
+                ORDER BY ah.triggered_at DESC
+                LIMIT %s
+            """
+        else:
+            # SQLite: symbol is directly in alert_history
+            history_sql = """
+                SELECT 
+                    ah.id,
+                    ah.alert_id,
+                    ah.symbol,
+                    ah.triggered_price,
+                    ah.triggered_at
+                FROM alert_history ah
+                WHERE ah.user_id = ?
+                ORDER BY ah.triggered_at DESC
+                LIMIT ?
+            """
         cursor.execute(history_sql, (current_user["id"], limit))
         history = []
         for row in cursor.fetchall():

@@ -147,3 +147,112 @@ The scripts wrap `docker compose` with a fixed project name via `COMPOSE_PROJECT
 ./status.sh --env production --logs 100
 ./status.sh --env production --service backend --logs 200
 ```
+
+## Blue/Green Deployment (Zero-Downtime)
+
+The project supports zero-downtime blue/green deployments managed from the nginx-microservice.
+
+### Prerequisites
+
+- Nginx microservice running
+- Service registered in nginx-microservice service registry
+- `docker-compose.blue.yml` and `docker-compose.green.yml` files created
+- Health check endpoints configured (`/health` for backend, `/` for frontend)
+
+### Quick Deployment
+
+From the nginx-microservice directory:
+
+```bash
+# Full deployment (recommended)
+./scripts/blue-green/deploy.sh crypto-ai-agent
+
+# This will:
+# 1. Build and start green containers
+# 2. Run health checks
+# 3. Switch traffic to green (< 2 seconds)
+# 4. Monitor for 5 minutes
+# 5. Clean up old blue containers if healthy
+```
+
+### Manual Rollback
+
+If something goes wrong:
+
+```bash
+./scripts/blue-green/rollback.sh crypto-ai-agent
+```
+
+### What Gets Deployed
+
+The blue/green system deploys:
+
+- **Backend**: FastAPI service with health checks
+- **Frontend**: Next.js application
+- **Shared Services**: Postgres and Redis (can be shared or separate per color)
+
+### Deployment Flow
+
+1. **Prepare**: Build and start green containers, verify health
+2. **Switch**: Update nginx upstream weights, reload nginx (< 2 seconds)
+3. **Monitor**: Continuous health checks for 5 minutes
+4. **Rollback**: Automatic if health checks fail
+5. **Cleanup**: Remove old deployment after successful monitoring
+
+### Configuration
+
+Ensure your `.env` file includes:
+
+```bash
+# Blue/Green Deployment Configuration
+DEPLOYMENT_COLOR=blue
+COMPOSE_PROJECT_NAME_BLUE=crypto_ai_agent_blue
+COMPOSE_PROJECT_NAME_GREEN=crypto_ai_agent_green
+
+# Blue/Green Deployment Port Configuration
+POSTGRES_PORT_GREEN=5433
+REDIS_PORT_GREEN=6380
+REDIS_APPENDONLY=no
+API_PORT_GREEN=8101
+FRONTEND_PORT_GREEN=3101
+```
+
+### Docker Compose Files
+
+The deployment uses:
+
+- `docker-compose.blue.yml` - Blue environment configuration
+- `docker-compose.green.yml` - Green environment configuration
+
+Both files are automatically created and use environment variables from `.env`.
+
+### Health Checks
+
+The system checks:
+
+- **Backend**: `http://crypto-ai-backend-{color}:8100/health`
+- **Frontend**: `http://crypto-ai-frontend-{color}:3100/`
+
+### Monitoring
+
+After switching traffic, the system monitors for 5 minutes:
+
+- Health check every 30 seconds
+- Automatic rollback if any check fails
+- Cleanup after successful monitoring period
+
+### Troubleshooting
+
+**Deployment fails during prepare:**
+
+- Check container logs: `docker compose -f docker-compose.green.yml -p crypto_ai_agent_green logs`
+- Verify health endpoints are accessible
+- Check service registry configuration in nginx-microservice
+
+**Automatic rollback triggered:**
+
+- Check logs: `tail -f /nginx-microservice/logs/blue-green/deploy.log`
+- Verify green containers: `docker ps | grep green`
+- Test health endpoints manually
+
+For more details, see [nginx-microservice Blue/Green Deployment Guide](../../nginx-microservice/docs/BLUE_GREEN_DEPLOYMENT.md).

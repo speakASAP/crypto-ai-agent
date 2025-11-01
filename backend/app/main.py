@@ -367,14 +367,22 @@ async def trigger_alert(
     
     try:
         cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
         
         # Get portfolio information for this symbol
         # First, get all base currencies for this symbol
-        cursor.execute("""
-            SELECT DISTINCT base_currency 
-            FROM portfolio_items 
-            WHERE symbol = ? AND base_currency IS NOT NULL
-        """, (symbol,))
+        if is_pg:
+            cursor.execute("""
+                SELECT DISTINCT base_currency 
+                FROM portfolio_items 
+                WHERE symbol = %s AND base_currency IS NOT NULL
+            """, (symbol,))
+        else:
+            cursor.execute("""
+                SELECT DISTINCT base_currency 
+                FROM portfolio_items 
+                WHERE symbol = ? AND base_currency IS NOT NULL
+            """, (symbol,))
         
         base_currencies = [row[0] for row in cursor.fetchall()]
         portfolio_data = []
@@ -388,16 +396,28 @@ async def trigger_alert(
                 converted_price = trigger_price
             
             # Get portfolio data for this base currency
-            cursor.execute("""
-                SELECT 
-                    SUM(amount) as total_amount,
-                    SUM(amount * price_buy + commission) as total_investment,
-                    SUM(amount * ?) as current_value,
-                    base_currency
-                FROM portfolio_items 
-                WHERE symbol = ? AND base_currency = ?
-                GROUP BY base_currency
-            """, (converted_price, symbol, base_currency))
+            if is_pg:
+                cursor.execute("""
+                    SELECT 
+                        SUM(amount) as total_amount,
+                        SUM(amount * price_buy + commission) as total_investment,
+                        SUM(amount * %s) as current_value,
+                        base_currency
+                    FROM portfolio_items 
+                    WHERE symbol = %s AND base_currency = %s
+                    GROUP BY base_currency
+                """, (converted_price, symbol, base_currency))
+            else:
+                cursor.execute("""
+                    SELECT 
+                        SUM(amount) as total_amount,
+                        SUM(amount * price_buy + commission) as total_investment,
+                        SUM(amount * ?) as current_value,
+                        base_currency
+                    FROM portfolio_items 
+                    WHERE symbol = ? AND base_currency = ?
+                    GROUP BY base_currency
+                """, (converted_price, symbol, base_currency))
             
             result = cursor.fetchone()
             if result:
@@ -405,15 +425,46 @@ async def trigger_alert(
         
         # Log alert history with missed flag
         check_type = 'historical' if was_missed else 'realtime'
-        cursor.execute('''
-            INSERT INTO alert_history 
-            (alert_id, user_id, symbol, triggered_price, triggered_at, was_missed, check_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (alert_id, user_id, symbol, trigger_price, 
-              trigger_time.isoformat() + "Z", was_missed, check_type))
+        # Format timestamp for database
+        if is_pg:
+            # PostgreSQL: format as ISO timestamp without timezone
+            # Convert to UTC first, then format without timezone info
+            if trigger_time.tzinfo:
+                # Convert to UTC if timezone-aware
+                trigger_time_utc = trigger_time.astimezone(timezone.utc)
+            else:
+                # Assume UTC if timezone-naive
+                trigger_time_utc = trigger_time.replace(tzinfo=timezone.utc)
+            # Format as ISO string: YYYY-MM-DDTHH:MM:SS[.microseconds]
+            # Use strftime to avoid timezone suffix issues
+            trigger_timestamp = trigger_time_utc.strftime('%Y-%m-%dT%H:%M:%S')
+            # Add microseconds if present
+            if trigger_time_utc.microsecond:
+                trigger_timestamp += f".{trigger_time_utc.microsecond:06d}"
+        else:
+            # SQLite: use ISO format with Z
+            trigger_timestamp = trigger_time.isoformat() + "Z"
+        
+        if is_pg:
+            # PostgreSQL schema doesn't have symbol column
+            cursor.execute('''
+                INSERT INTO alert_history 
+                (alert_id, user_id, triggered_price, triggered_at, was_missed, check_type)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (alert_id, user_id, trigger_price, trigger_timestamp, was_missed, check_type))
+        else:
+            # SQLite schema has symbol column
+            cursor.execute('''
+                INSERT INTO alert_history 
+                (alert_id, user_id, symbol, triggered_price, triggered_at, was_missed, check_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (alert_id, user_id, symbol, trigger_price, trigger_timestamp, was_missed, check_type))
         
         # Deactivate the alert (one-time alert behavior)
-        cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
+        if is_pg:
+            cursor.execute("UPDATE alerts SET is_active = FALSE WHERE id = %s", (alert_id,))
+        else:
+            cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
         
         # Prepare notification message
         alert_message = f"🚨 <b>Price Alert Triggered!</b>\n\n"
@@ -442,7 +493,10 @@ async def trigger_alert(
             alert_message += f"\n💬 <b>Alert Message:</b> {message}\n"
         alert_message += f"\n⏰ <b>Time:</b> {trigger_time.strftime('%Y-%m-%d %H:%M:%S')}"
         
-        conn.commit()
+        # Don't commit here when conn is passed in - let caller manage transaction
+        # Only commit if we created the connection ourselves
+        if should_close:
+            conn.commit()
         
         # Send notifications
         await send_user_telegram_notification(user_id, alert_message)
@@ -461,9 +515,16 @@ async def trigger_alert(
         
     except Exception as e:
         logger.error(f"Error triggering alert {alert_id}: {e}")
+        # Only rollback if we created the connection ourselves
+        # If conn was passed in, caller will handle savepoint/rollback
         if should_close and conn:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except Exception as rollback_error:
+                logger.error(f"Error during rollback in trigger_alert: {rollback_error}")
+            conn.close()
     finally:
+        # Only close if we created the connection (should_close = True)
         if should_close and conn:
             conn.close()
 
@@ -478,25 +539,33 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
         current_time = datetime.now(timezone.utc)
         
         # Update price check tracking for all symbols
-        for symbol, price in current_prices.items():
-            if is_pg:
-                # PostgreSQL: use ON CONFLICT
-                cursor.execute('''
-                    INSERT INTO price_check_tracking 
-                    (symbol, last_check_timestamp, last_check_price, updated_at)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (symbol) DO UPDATE SET
-                        last_check_timestamp = EXCLUDED.last_check_timestamp,
-                        last_check_price = EXCLUDED.last_check_price,
-                        updated_at = EXCLUDED.updated_at
-                ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
-            else:
-                # SQLite: use INSERT OR REPLACE
-                cursor.execute('''
-                    INSERT OR REPLACE INTO price_check_tracking 
-                    (symbol, last_check_timestamp, last_check_price, updated_at)
-                    VALUES (?, ?, ?, ?)
-                ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
+        # Commit price tracking updates separately to avoid transaction issues
+        try:
+            for symbol, price in current_prices.items():
+                if is_pg:
+                    # PostgreSQL: use ON CONFLICT
+                    cursor.execute('''
+                        INSERT INTO price_check_tracking 
+                        (symbol, last_check_timestamp, last_check_price, updated_at)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (symbol) DO UPDATE SET
+                            last_check_timestamp = EXCLUDED.last_check_timestamp,
+                            last_check_price = EXCLUDED.last_check_price,
+                            updated_at = EXCLUDED.updated_at
+                    ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
+                else:
+                    # SQLite: use INSERT OR REPLACE
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO price_check_tracking 
+                        (symbol, last_check_timestamp, last_check_price, updated_at)
+                        VALUES (?, ?, ?, ?)
+                    ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
+            
+            # Commit price tracking before processing alerts
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating price tracking: {e}")
+            conn.rollback()
         
         # Get all active alerts
         if settings.database_url:
@@ -508,7 +577,25 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
         triggered_count = 0
         
         for alert in alerts:
-            alert_id, user_id, symbol, threshold_price, alert_type, message, is_active, created_at, threshold_price_usd, base_currency, exchange_rate_at_creation = alert
+            # Handle both schemas: SQLite may include extended columns, Postgres has core columns only
+            alert_id = alert[0]
+            user_id = alert[1]
+            symbol = alert[2]
+            threshold_price = alert[3]
+            alert_type = alert[4]
+            message = alert[5]
+            is_active = alert[6]
+            created_at = alert[7]
+            # Optional fields that may not exist in Postgres schema
+            threshold_price_usd = None
+            base_currency = None
+            exchange_rate_at_creation = None
+            if len(alert) > 8:
+                threshold_price_usd = alert[8]
+            if len(alert) > 9:
+                base_currency = alert[9]
+            if len(alert) > 10:
+                exchange_rate_at_creation = alert[10]
             
             if symbol not in current_prices:
                 continue
@@ -552,14 +639,42 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 should_trigger = True
             
             if should_trigger:
-                await trigger_alert(
-                    alert_id, user_id, symbol, threshold_price, alert_type,
-                    message, current_price, current_time, was_missed=False,
-                    conn=conn
-                )
-                triggered_count += 1
+                # Use savepoint for each alert to prevent transaction abort cascading
+                savepoint_name = f"alert_{alert_id}_{int(current_time.timestamp() * 1000)}"
+                try:
+                    if is_pg:
+                        # Create savepoint before triggering alert
+                        cursor.execute(f"SAVEPOINT {savepoint_name}")
+                    
+                    await trigger_alert(
+                        alert_id, user_id, symbol, threshold_price, alert_type,
+                        message, current_price, current_time, was_missed=False,
+                        conn=conn
+                    )
+                    triggered_count += 1
+                    
+                    if is_pg:
+                        # Release savepoint on success
+                        cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                        conn.commit()
+                except Exception as e:
+                    logger.error(f"Error triggering alert {alert_id} in batch: {e}")
+                    # Rollback to savepoint for PostgreSQL to continue with next alert
+                    if is_pg:
+                        try:
+                            cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                            cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                        except Exception as savepoint_error:
+                            # If savepoint operations fail, do full rollback
+                            logger.error(f"Error with savepoint for alert {alert_id}: {savepoint_error}")
+                            try:
+                                conn.rollback()
+                            except Exception as rollback_error:
+                                logger.error(f"Error during rollback for alert {alert_id}: {rollback_error}")
         
-        conn.commit()
+        # No final commit needed - PostgreSQL commits per alert, SQLite commits at end
+        if not is_pg:
+            conn.commit()
         
         if triggered_count > 0:
             logger.info(f"Triggered {triggered_count} alerts in real-time check")
