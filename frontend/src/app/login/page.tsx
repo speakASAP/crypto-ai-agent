@@ -25,7 +25,7 @@ export default function LoginPage() {
     try {
       await login({ email, password })
       // Use window.location.href to ensure full page reload and proper cookie handling
-      window.location.href = '/'
+      window.location.href = '/dashboard'
     } catch (error: any) {
       setError(error.message || 'Login failed')
     }
