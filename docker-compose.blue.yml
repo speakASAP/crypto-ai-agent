@@ -59,8 +59,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_pass}
     env_file:
       - .env
-    ports:
-      - "127.0.0.1:5432:5432"
+    # Ports commented out - accessed via docker network only
+    # ports:
+    #   - "127.0.0.1:5432:5432"
     volumes:
       - pgdata-blue:/var/lib/postgresql/data
 
@@ -69,8 +70,9 @@ services:
     container_name: crypto-ai-redis-blue
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "${REDIS_APPENDONLY:-no}"]
-    ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    # Ports commented out - accessed via docker network only
+    # ports:
+    #   - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata-blue:/data
     env_file:

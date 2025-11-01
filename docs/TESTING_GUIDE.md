@@ -172,7 +172,7 @@ cat state/crypto-ai-agent.json | jq .active_color
 
 **Expected Result:**
 
-```
+```text
 "green"
 ```
 
@@ -280,7 +280,7 @@ cat state/crypto-ai-agent.json | jq .active_color
 
 **Expected Result:**
 
-```
+```text
 "blue"
 ```
 

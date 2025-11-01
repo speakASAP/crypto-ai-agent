@@ -344,195 +344,195 @@ When adding a domain that supports blue/green:
 
 ### Phase 2: Core Utility Script
 
-12. Create file `/nginx-microservice/scripts/blue-green/utils.sh` with function `load_service_registry(service_name)`
-13. Add function `load_state(service_name)` to utils.sh
-14. Add function `save_state(service_name, state_data)` to utils.sh
-15. Add function `get_active_color(service_name)` to utils.sh
-16. Add function `get_inactive_color(service_name)` to utils.sh
-17. Add function `update_nginx_upstream(config_file, service_name, active_color)` to utils.sh
-18. Add function `log_message(level, service, color, action, message)` to utils.sh
-19. Add function `test_nginx_config()` to utils.sh
-20. Add function `reload_nginx()` to utils.sh
-21. Add function `check_docker_compose_available()` to utils.sh
+1. Create file `/nginx-microservice/scripts/blue-green/utils.sh` with function `load_service_registry(service_name)`
+2. Add function `load_state(service_name)` to utils.sh
+3. Add function `save_state(service_name, state_data)` to utils.sh
+4. Add function `get_active_color(service_name)` to utils.sh
+5. Add function `get_inactive_color(service_name)` to utils.sh
+6. Add function `update_nginx_upstream(config_file, service_name, active_color)` to utils.sh
+7. Add function `log_message(level, service, color, action, message)` to utils.sh
+8. Add function `test_nginx_config()` to utils.sh
+9. Add function `reload_nginx()` to utils.sh
+10. Add function `check_docker_compose_available()` to utils.sh
 
 ### Phase 3: Prepare Green Script
 
-22. Create file `/nginx-microservice/scripts/blue-green/prepare-green.sh` with main function
-23. Implement service registry loading in prepare-green.sh
-24. Implement state loading in prepare-green.sh
-25. Implement inactive color determination in prepare-green.sh
-26. Implement docker-compose file path construction (docker-compose.{color}.yml)
-27. Implement docker project name construction (crypto_ai_agent_{color})
-28. Implement docker compose build command: `docker compose -f docker-compose.{color}.yml -p {project_name} build`
-29. Implement docker compose up command: `docker compose -f docker-compose.{color}.yml -p {project_name} up -d`
-30. Implement startup wait loop (wait for startup_time from registry)
-31. Implement backend health check: `curl http://{container-name}:{port}/health`
-32. Implement frontend health check: `curl http://{container-name}:{port}/`
-33. Implement health check retry logic (retry up to health_retries)
-34. Implement success/failure state update in prepare-green.sh
-35. Implement error handling: stop containers on failure, exit with error code
+1. Create file `/nginx-microservice/scripts/blue-green/prepare-green.sh` with main function
+2. Implement service registry loading in prepare-green.sh
+3. Implement state loading in prepare-green.sh
+4. Implement inactive color determination in prepare-green.sh
+5. Implement docker-compose file path construction (docker-compose.{color}.yml)
+6. Implement docker project name construction (crypto_ai_agent_{color})
+7. Implement docker compose build command: `docker compose -f docker-compose.{color}.yml -p {project_name} build`
+8. Implement docker compose up command: `docker compose -f docker-compose.{color}.yml -p {project_name} up -d`
+9. Implement startup wait loop (wait for startup_time from registry)
+10. Implement backend health check: `curl http://{container-name}:{port}/health`
+11. Implement frontend health check: `curl http://{container-name}:{port}/`
+12. Implement health check retry logic (retry up to health_retries)
+13. Implement success/failure state update in prepare-green.sh
+14. Implement error handling: stop containers on failure, exit with error code
 
 ### Phase 4: Switch Traffic Script
 
-36. Create file `/nginx-microservice/scripts/blue-green/switch-traffic.sh` with main function
-37. Implement service registry loading in switch-traffic.sh
-38. Implement state loading in switch-traffic.sh
-39. Implement active color determination in switch-traffic.sh
-40. Implement nginx config file path determination (from domain in registry)
-41. Implement upstream block update: set new_color weight=100, old_color weight=0 backup
-42. Implement nginx config test: `docker compose exec nginx nginx -t`
-43. Implement nginx reload: `docker compose exec nginx nginx -s reload`
-44. Implement state update: active_color = new_color
-45. Implement error handling: rollback on nginx reload failure
+1. Create file `/nginx-microservice/scripts/blue-green/switch-traffic.sh` with main function
+2. Implement service registry loading in switch-traffic.sh
+3. Implement state loading in switch-traffic.sh
+4. Implement active color determination in switch-traffic.sh
+5. Implement nginx config file path determination (from domain in registry)
+6. Implement upstream block update: set new_color weight=100, old_color weight=0 backup
+7. Implement nginx config test: `docker compose exec nginx nginx -t`
+8. Implement nginx reload: `docker compose exec nginx nginx -s reload`
+9. Implement state update: active_color = new_color
+10. Implement error handling: rollback on nginx reload failure
 
 ### Phase 5: Health Check Script
 
-46. Create file `/nginx-microservice/scripts/blue-green/health-check.sh` with main function
-47. Implement service registry loading in health-check.sh
-48. Implement state loading in health-check.sh (get active color)
-49. Implement backend health check endpoint call
-50. Implement frontend health check endpoint call
-51. Implement retry logic: retry up to health_retries times with health_timeout interval
-52. Implement rollback call if all health checks fail: call `rollback.sh`
-53. Implement success return if any service passes health check
-54. Implement logging of health check results
+1. Create file `/nginx-microservice/scripts/blue-green/health-check.sh` with main function
+2. Implement service registry loading in health-check.sh
+3. Implement state loading in health-check.sh (get active color)
+4. Implement backend health check endpoint call
+5. Implement frontend health check endpoint call
+6. Implement retry logic: retry up to health_retries times with health_timeout interval
+7. Implement rollback call if all health checks fail: call `rollback.sh`
+8. Implement success return if any service passes health check
+9. Implement logging of health check results
 
 ### Phase 6: Rollback Script
 
-55. Create file `/nginx-microservice/scripts/blue-green/rollback.sh` with main function
-56. Implement service registry loading in rollback.sh
-57. Implement state loading in rollback.sh
-58. Implement previous color determination (blue if active=green, green if active=blue)
-59. Implement nginx config update: switch upstream weights back
-60. Implement nginx config test in rollback.sh
-61. Implement nginx reload in rollback.sh
-62. Implement state update: active_color = previous_color
-63. Implement stop failed color containers: `docker compose -f docker-compose.{failed_color}.yml -p {project_name} down`
-64. Implement rollback event logging
-65. Implement error handling: ensure nginx reloads successfully
+1. Create file `/nginx-microservice/scripts/blue-green/rollback.sh` with main function
+2. Implement service registry loading in rollback.sh
+3. Implement state loading in rollback.sh
+4. Implement previous color determination (blue if active=green, green if active=blue)
+5. Implement nginx config update: switch upstream weights back
+6. Implement nginx config test in rollback.sh
+7. Implement nginx reload in rollback.sh
+8. Implement state update: active_color = previous_color
+9. Implement stop failed color containers: `docker compose -f docker-compose.{failed_color}.yml -p {project_name} down`
+10. Implement rollback event logging
+11. Implement error handling: ensure nginx reloads successfully
 
 ### Phase 7: Cleanup Script
 
-66. Create file `/nginx-microservice/scripts/blue-green/cleanup.sh` with main function
-67. Implement service registry loading in cleanup.sh
-68. Implement state loading in cleanup.sh
-69. Implement inactive color determination in cleanup.sh
-70. Implement docker compose down command: `docker compose -f docker-compose.{inactive_color}.yml -p {project_name} down`
-71. Implement optional image removal (configurable)
-72. Implement state update: mark inactive color as stopped
-73. Implement cleanup confirmation logging
+1. Create file `/nginx-microservice/scripts/blue-green/cleanup.sh` with main function
+2. Implement service registry loading in cleanup.sh
+3. Implement state loading in cleanup.sh
+4. Implement inactive color determination in cleanup.sh
+5. Implement docker compose down command: `docker compose -f docker-compose.{inactive_color}.yml -p {project_name} down`
+6. Implement optional image removal (configurable)
+7. Implement state update: mark inactive color as stopped
+8. Implement cleanup confirmation logging
 
 ### Phase 8: Main Deploy Script
 
-74. Create file `/nginx-microservice/scripts/blue-green/deploy.sh` with main function
-75. Implement command-line argument parsing (service_name)
-76. Implement service registry validation (check if service exists)
-77. Implement call to prepare-green.sh and capture exit code
-78. Implement conditional: if prepare-green fails, exit with error
-79. Implement call to switch-traffic.sh and capture exit code
-80. Implement conditional: if switch-traffic fails, call rollback.sh
-81. Implement background health check monitoring: call health-check.sh every 30 seconds for 5 minutes
-82. Implement conditional: if health check fails during monitoring, call rollback.sh
-83. Implement conditional: after 5 minutes of healthy monitoring, call cleanup.sh
-84. Implement deployment logging: log all steps with timestamps
-85. Implement success/failure return codes
+1. Create file `/nginx-microservice/scripts/blue-green/deploy.sh` with main function
+2. Implement command-line argument parsing (service_name)
+3. Implement service registry validation (check if service exists)
+4. Implement call to prepare-green.sh and capture exit code
+5. Implement conditional: if prepare-green fails, exit with error
+6. Implement call to switch-traffic.sh and capture exit code
+7. Implement conditional: if switch-traffic fails, call rollback.sh
+8. Implement background health check monitoring: call health-check.sh every 30 seconds for 5 minutes
+9. Implement conditional: if health check fails during monitoring, call rollback.sh
+10. Implement conditional: after 5 minutes of healthy monitoring, call cleanup.sh
+11. Implement deployment logging: log all steps with timestamps
+12. Implement success/failure return codes
 
 ### Phase 9: Nginx Configuration Updates
 
-86. Update file `/nginx-microservice/nginx/conf.d/crypto-ai-agent.statex.cz.conf` to use upstream blocks instead of direct container names
-87. Add upstream block `upstream crypto-ai-frontend` with blue (weight=100) and green (weight=0 backup)
-88. Add upstream block `upstream crypto-ai-backend` with blue (weight=100) and green (weight=0 backup)
-89. Update location `/` to use `proxy_pass http://crypto-ai-frontend`
-90. Update location `/api/` to use `proxy_pass http://crypto-ai-backend/api/`
-91. Update location `/ws` to use `proxy_pass http://crypto-ai-backend/ws`
-92. Update location `/health` to use `proxy_pass http://crypto-ai-backend/health`
-93. Test nginx config: `docker compose exec nginx nginx -t`
-94. Reload nginx: `docker compose exec nginx nginx -s reload`
+1. Update file `/nginx-microservice/nginx/conf.d/crypto-ai-agent.statex.cz.conf` to use upstream blocks instead of direct container names
+2. Add upstream block `upstream crypto-ai-frontend` with blue (weight=100) and green (weight=0 backup)
+3. Add upstream block `upstream crypto-ai-backend` with blue (weight=100) and green (weight=0 backup)
+4. Update location `/` to use `proxy_pass http://crypto-ai-frontend`
+5. Update location `/api/` to use `proxy_pass http://crypto-ai-backend/api/`
+6. Update location `/ws` to use `proxy_pass http://crypto-ai-backend/ws`
+7. Update location `/health` to use `proxy_pass http://crypto-ai-backend/health`
+8. Test nginx config: `docker compose exec nginx nginx -t`
+9. Reload nginx: `docker compose exec nginx nginx -s reload`
 
 ### Phase 10: Docker Compose File Creation
 
-95. Copy `/crypto-ai-agent/docker-compose.yml` to `/crypto-ai-agent/docker-compose.blue.yml`
-96. In docker-compose.blue.yml: Update backend container_name to `crypto-ai-backend-blue`
-97. In docker-compose.blue.yml: Update frontend container_name to `crypto-ai-frontend-blue`
-98. In docker-compose.blue.yml: Update postgres container_name to `crypto-ai-postgres-blue`
-99. In docker-compose.blue.yml: Update redis container_name to `crypto-ai-redis-blue`
-100. Copy `/crypto-ai-agent/docker-compose.blue.yml` to `/crypto-ai-agent/docker-compose.green.yml`
-101. In docker-compose.green.yml: Replace all `-blue` suffixes with `-green` in container names
-102. Verify both docker-compose files have correct network: `nginx-network`
+1. Copy `/crypto-ai-agent/docker-compose.yml` to `/crypto-ai-agent/docker-compose.blue.yml`
+2. In docker-compose.blue.yml: Update backend container_name to `crypto-ai-backend-blue`
+3. In docker-compose.blue.yml: Update frontend container_name to `crypto-ai-frontend-blue`
+4. In docker-compose.blue.yml: Update postgres container_name to `crypto-ai-postgres-blue`
+5. In docker-compose.blue.yml: Update redis container_name to `crypto-ai-redis-blue`
+6. Copy `/crypto-ai-agent/docker-compose.blue.yml` to `/crypto-ai-agent/docker-compose.green.yml`
+7. In docker-compose.green.yml: Replace all `-blue` suffixes with `-green` in container names
+8. Verify both docker-compose files have correct network: `nginx-network`
 
 ### Phase 11: Testing - Prepare Green
 
-103. Run `./scripts/blue-green/prepare-green.sh crypto-ai-agent` and verify it builds green containers
-104. Verify green containers start successfully: `docker ps | grep green`
-105. Verify green backend health check passes: `curl http://crypto-ai-backend-green:8100/health`
-106. Verify green frontend health check passes: `curl http://crypto-ai-frontend-green:3100/`
-107. Verify state file updates correctly after successful prepare
-108. Test failure scenario: stop green containers manually, verify prepare-green.sh detects failure and exits with error
+1. Run `./scripts/blue-green/prepare-green.sh crypto-ai-agent` and verify it builds green containers
+2. Verify green containers start successfully: `docker ps | grep green`
+3. Verify green backend health check passes: `curl http://crypto-ai-backend-green:8100/health`
+4. Verify green frontend health check passes: `curl http://crypto-ai-frontend-green:3100/`
+5. Verify state file updates correctly after successful prepare
+6. Test failure scenario: stop green containers manually, verify prepare-green.sh detects failure and exits with error
 
 ### Phase 12: Testing - Switch Traffic
 
-109. Run `./scripts/blue-green/switch-traffic.sh crypto-ai-agent` and verify nginx config updates
-110. Verify upstream weights change: blue weight=0 backup, green weight=100
-111. Verify nginx config test passes before reload
-112. Verify nginx reloads successfully
-113. Verify state file updates: active_color = green
-114. Test traffic routing: curl requests go to green containers
-115. Verify rollback on nginx reload failure scenario
+1. Run `./scripts/blue-green/switch-traffic.sh crypto-ai-agent` and verify nginx config updates
+2. Verify upstream weights change: blue weight=0 backup, green weight=100
+3. Verify nginx config test passes before reload
+4. Verify nginx reloads successfully
+5. Verify state file updates: active_color = green
+6. Test traffic routing: curl requests go to green containers
+7. Verify rollback on nginx reload failure scenario
 
 ### Phase 13: Testing - Health Check
 
-116. Run `./scripts/blue-green/health-check.sh crypto-ai-agent` with healthy services and verify success
-117. Test health check with unhealthy backend: stop backend container, verify health-check detects failure
-118. Test health check with unhealthy frontend: stop frontend container, verify health-check detects failure
-119. Verify automatic rollback trigger when health check fails
-120. Test retry logic: verify health check retries up to health_retries times
+1. Run `./scripts/blue-green/health-check.sh crypto-ai-agent` with healthy services and verify success
+2. Test health check with unhealthy backend: stop backend container, verify health-check detects failure
+3. Test health check with unhealthy frontend: stop frontend container, verify health-check detects failure
+4. Verify automatic rollback trigger when health check fails
+5. Test retry logic: verify health check retries up to health_retries times
 
 ### Phase 14: Testing - Rollback
 
-121. Run `./scripts/blue-green/rollback.sh crypto-ai-agent` and verify nginx switches back to blue
-122. Verify upstream weights revert: blue weight=100, green weight=0 backup
-123. Verify nginx reloads successfully during rollback
-124. Verify state file updates: active_color = blue
-125. Verify green containers are stopped after rollback
-126. Test rollback logging: verify rollback events are logged
+1. Run `./scripts/blue-green/rollback.sh crypto-ai-agent` and verify nginx switches back to blue
+2. Verify upstream weights revert: blue weight=100, green weight=0 backup
+3. Verify nginx reloads successfully during rollback
+4. Verify state file updates: active_color = blue
+5. Verify green containers are stopped after rollback
+6. Test rollback logging: verify rollback events are logged
 
 ### Phase 15: Testing - Cleanup
 
-127. Run `./scripts/blue-green/cleanup.sh crypto-ai-agent` and verify inactive color containers are stopped
-128. Verify docker compose down executes successfully
-129. Verify state file updates: inactive color marked as stopped
-130. Test cleanup logging: verify cleanup events are logged
+1. Run `./scripts/blue-green/cleanup.sh crypto-ai-agent` and verify inactive color containers are stopped
+2. Verify docker compose down executes successfully
+3. Verify state file updates: inactive color marked as stopped
+4. Test cleanup logging: verify cleanup events are logged
 
 ### Phase 16: Testing - End-to-End Deployment
 
-131. Run `./scripts/blue-green/deploy.sh crypto-ai-agent` and verify complete deployment cycle
-132. Verify prepare-green executes successfully
-133. Verify switch-traffic executes successfully
-134. Verify health check monitoring runs for 5 minutes
-135. Verify automatic rollback if green fails during monitoring
-136. Verify cleanup executes after successful monitoring period
-137. Test deployment logging: verify all steps are logged
-138. Test failure scenario: simulate green failure after switch, verify automatic rollback
+1. Run `./scripts/blue-green/deploy.sh crypto-ai-agent` and verify complete deployment cycle
+2. Verify prepare-green executes successfully
+3. Verify switch-traffic executes successfully
+4. Verify health check monitoring runs for 5 minutes
+5. Verify automatic rollback if green fails during monitoring
+6. Verify cleanup executes after successful monitoring period
+7. Test deployment logging: verify all steps are logged
+8. Test failure scenario: simulate green failure after switch, verify automatic rollback
 
 ### Phase 17: Documentation
 
-139. Update `/nginx-microservice/README.md`: Add blue/green deployment section
-140. Create `/nginx-microservice/docs/BLUE_GREEN_DEPLOYMENT.md` guide
-141. Document service registry JSON format in README
-142. Document state file format in README
-143. Document rollback procedures and scenarios
-144. Update `/crypto-ai-agent/docs/DEPLOYMENT_DOCKER.md` with blue/green deployment instructions
-145. Add usage examples to documentation: deploy, rollback, status
+1. Update `/nginx-microservice/README.md`: Add blue/green deployment section
+2. Create `/nginx-microservice/docs/BLUE_GREEN_DEPLOYMENT.md` guide
+3. Document service registry JSON format in README
+4. Document state file format in README
+5. Document rollback procedures and scenarios
+6. Update `/crypto-ai-agent/docs/DEPLOYMENT_DOCKER.md` with blue/green deployment instructions
+7. Add usage examples to documentation: deploy, rollback, status
 
 ### Phase 18: Production Validation
 
-146. Test on production server (create staging test first if possible)
-147. Verify zero-downtime: monitor requests during switch, verify no 502 errors
-148. Verify switch duration: time the switch, verify < 2 seconds
-149. Test automatic rollback: simulate failure, verify rollback executes within 5 seconds
-150. Monitor logs for 24 hours after deployment
-151. Verify performance: no degradation during or after switch
-152. Test manual rollback command: `./scripts/blue-green/rollback.sh crypto-ai-agent`
+1. Test on production server (create staging test first if possible)
+2. Verify zero-downtime: monitor requests during switch, verify no 502 errors
+3. Verify switch duration: time the switch, verify < 2 seconds
+4. Test automatic rollback: simulate failure, verify rollback executes within 5 seconds
+5. Monitor logs for 24 hours after deployment
+6. Verify performance: no degradation during or after switch
+7. Test manual rollback command: `./scripts/blue-green/rollback.sh crypto-ai-agent`
 
 ## Error Handling
 

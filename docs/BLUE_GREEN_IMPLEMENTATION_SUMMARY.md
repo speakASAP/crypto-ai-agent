@@ -78,7 +78,7 @@ The blue/green deployment system has been successfully implemented for crypto-ai
 
 ## Architecture
 
-```
+```text
 nginx-microservice/
 ├── service-registry/
 │   └── crypto-ai-agent.json        # Service metadata

@@ -11,6 +11,7 @@ import os
 import asyncio
 import aiohttp
 import ssl
+import psycopg
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
@@ -1099,7 +1100,6 @@ def get_db_connection():
     """Get database connection: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
     use_postgres = settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))
     if use_postgres:
-        import psycopg
         # Remove +psycopg suffix if present for connection
         pg_url = settings.database_url.replace("+psycopg", "") if settings.database_url and "+psycopg" in settings.database_url else settings.database_url
         return psycopg.connect(pg_url)
@@ -1190,7 +1190,6 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
 
 def init_postgres_database():
     """Initialize PostgreSQL database schema"""
-    import psycopg
     pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
     conn = psycopg.connect(pg_url)
     cur = conn.cursor()
