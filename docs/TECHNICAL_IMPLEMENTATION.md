@@ -80,7 +80,7 @@ def decode_token(token: str) -> dict:
 def generate_reset_token() -> str:
     """Generate secure random token for password reset"""
     return secrets.token_urlsafe(32)
-```
+```text
 
 ### Authentication Dependencies
 
@@ -159,7 +159,7 @@ async def get_current_active_user(current_user: dict = Depends(get_current_user)
     if not current_user["is_active"]:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
-```
+```text
 
 ### Database Initialization
 
@@ -250,7 +250,7 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Starting Crypto AI Agent API v2.0 (SQLite Mode)")
         init_database()
         logger.info("✅ Database initialized")
-```
+```text
 
 ### Redis Caching
 
@@ -290,7 +290,7 @@ class CurrencyService:
             if self._redis:
                 payload = {"rates": self.rates, "timestamp": self.last_updated}
                 self._redis.set("currency:USD", json.dumps(payload), ex=1800)  # 30 min TTL
-```
+```text
 
 ### Data Migration Script
 
@@ -352,7 +352,7 @@ def main():
     # ... other tables ...
     
     print(f"Copied rows: {copied}")
-```
+```text
 
 ## Frontend Implementation
 
@@ -461,7 +461,7 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 )
-```
+```text
 
 ### API Client with Authentication
 
@@ -565,7 +565,7 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient()
-```
+```text
 
 ### Route Protection Middleware
 
@@ -604,7 +604,7 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: ['/', '/login', '/register', '/profile', '/forgot-password', '/reset-password'],
 }
-```
+```text
 
 ## Database Design
 
@@ -650,7 +650,7 @@ export const config = {
 │ alert_type      │
 │ ...             │
 └─────────────────┘
-```
+```text
 
 ### Indexes
 
@@ -670,7 +670,7 @@ CREATE INDEX idx_alerts_user_symbol ON alerts(user_id, symbol);
 -- Password reset tokens
 CREATE INDEX idx_reset_tokens_token ON password_reset_tokens(token);
 CREATE INDEX idx_reset_tokens_user_id ON password_reset_tokens(user_id);
-```
+```text
 
 ## Security Implementation
 
@@ -691,7 +691,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     """Hash password with salt"""
     return pwd_context.hash(password)
-```
+```text
 
 ### JWT Security
 
@@ -708,7 +708,7 @@ def create_access_token(data: dict) -> str:
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
-```
+```text
 
 ### Input Validation
 
@@ -734,7 +734,7 @@ class UserCreate(BaseModel):
         if not v.isalnum():
             raise ValueError('Username must contain only alphanumeric characters')
         return v
-```
+```text
 
 ## Error Handling
 
@@ -761,7 +761,7 @@ if not user or not verify_password(credentials.password, user[3]):
 # Business logic errors
 if cursor.fetchone():
     raise HTTPException(status_code=400, detail="Email or username already registered")
-```
+```text
 
 ### Frontend Error Handling
 
@@ -796,7 +796,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     setError(error.message || 'Login failed')
   }
 }
-```
+```text
 
 ## Testing Strategy
 
@@ -820,7 +820,7 @@ def test_jwt_token_creation():
     decoded = decode_token(token)
     assert decoded["sub"] == 1
     assert decoded["type"] == "access"
-```
+```text
 
 ### Integration Tests
 
@@ -857,7 +857,7 @@ def test_user_login():
         "password": "password123"
     })
     assert response.status_code == 200
-```
+```text
 
 ### Frontend Tests
 
@@ -885,7 +885,7 @@ describe('AuthStore', () => {
     expect(result.current.user).toBeDefined()
   })
 })
-```
+```text
 
 ## Deployment Considerations
 
@@ -908,7 +908,7 @@ POSTGRES_PASSWORD=crypto_pass
 # API configuration
 API_PORT=8100
 FRONTEND_PORT=3100
-```
+```text
 
 ### Docker Compose Deployment
 
@@ -951,7 +951,7 @@ services:
 volumes:
   pgdata:
   redisdata:
-```
+```text
 
 ### Data Migration
 
@@ -961,7 +961,7 @@ The system includes a migration script to transfer data from SQLite to PostgreSQ
 # Run migration
 DATABASE_URL="postgresql://crypto:crypto_pass@127.0.0.1:5432/crypto_ai_agent" \
 python3 backend/scripts/sqlite_to_postgres.py
-```
+```text
 
 Key features of the migration:
 
@@ -1001,7 +1001,7 @@ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 # Cache with 30-minute TTL
 redis_client.set("currency:USD", json.dumps(payload), ex=1800)
-```
+```text
 
 ### Database Backup
 
@@ -1011,7 +1011,7 @@ docker compose exec postgres pg_dump -U crypto crypto_ai_agent > backup.sql
 
 # Restore from backup
 docker compose exec -T postgres psql -U crypto crypto_ai_agent < backup.sql
-```
+```text
 
 ### Health Checks
 
@@ -1021,7 +1021,7 @@ healthcheck:
   interval: 30s
   timeout: 5s
   retries: 5
-```
+```text
 
 ---
 

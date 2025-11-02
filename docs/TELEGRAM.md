@@ -102,7 +102,7 @@ Implement user-specific Telegram integration that allows users to:
 ```sql
 ALTER TABLE users ADD COLUMN telegram_bot_token TEXT;
 ALTER TABLE users ADD COLUMN telegram_chat_id TEXT;
-```
+```text
 
 #### Updated UserResponse Model
 
@@ -117,7 +117,7 @@ class UserResponse(BaseModel):
     created_at: str
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
-```
+```text
 
 #### Updated UserProfileUpdate Model
 
@@ -137,7 +137,7 @@ class UserProfileUpdate(BaseModel):
             if not v.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) or ':' not in v:
                 raise ValueError('Invalid Telegram bot token format')
         return v
-```
+```text
 
 ### FALLBACK LOGIC IMPLEMENTATION
 
@@ -188,7 +188,7 @@ def get_user_telegram_credentials(user_id: int) -> Optional[dict]:
     except Exception as e:
         logger.error(f"Error getting user Telegram credentials: {e}")
         return None
-```
+```text
 
 ### IMPLEMENTATION CHECKLIST
 

@@ -6,6 +6,7 @@
 ## Summary
 
 All critical issues with CSV import have been fixed. The system now correctly:
+
 - ✅ Processes sell-only transactions
 - ✅ Merges with existing portfolio items (UPDATE instead of INSERT)
 - ✅ Deletes fully sold positions
@@ -16,20 +17,23 @@ All critical issues with CSV import have been fixed. The system now correctly:
 ### 1. Service Layer (`backend/app/services/csv_import_service.py`)
 
 **Modified**: `_calculate_weighted_average()` method
+
 - Now handles sell-only transactions (no longer returns None)
 - Returns `net_change` field (positive for buys, negative for sells)
 - Returns `is_sell_only` flag for tracking
 - Returns `total_buy_qty` and `total_sell_qty` for proper weighted average calculation
 
 **Modified**: `aggregate_transactions()` method
+
 - Includes ALL symbols even if `net_quantity <= 0`
 - Allows DELETE operations for fully sold positions
 
 ### 2. API Layer (`backend/app/api/csv_import.py`)
 
 **Completely Rewritten**: Portfolio merge logic in `execute_csv_import()`
+
 - **Before**: Only checked for exact quantity duplicates and always INSERTED
-- **After**: 
+- **After**:
   - Checks if portfolio item exists by symbol only
   - If exists:
     - Calculates `new_amount = existing_amount + net_change`
@@ -40,6 +44,7 @@ All critical issues with CSV import have been fixed. The system now correctly:
     - If `net_change <= 0`: Logs warning (selling non-existent position)
 
 **Enhanced Statistics**:
+
 - Tracks `imported_count` (inserted)
 - Tracks `updated_count` (updated)
 - Tracks `deleted_count` (deleted)
@@ -48,6 +53,7 @@ All critical issues with CSV import have been fixed. The system now correctly:
 ### 3. Weighted Average Price Calculation
 
 **For Merging Existing Items**:
+
 - **Buy-only or net increase**: Calculates weighted average of existing + new buys
 - **Sell-only**: Keeps existing price (we're reducing quantity, not changing buy price)
 - **Partial sell**: Keeps existing price (no new investment)
@@ -55,19 +61,23 @@ All critical issues with CSV import have been fixed. The system now correctly:
 ## Testing Status
 
 ### Server Status
+
 - ✅ Backend code updated
 - ✅ Backend restarted
 - ⚠️ Database connection issue detected (PostgreSQL not connecting)
 - ⚠️ Full testing requires database to be running
 
 ### User Credentials for Testing
+
 - Use your own credentials for testing
 - Do not commit real credentials to repository
 
 ### Test CSV File
+
 Located at: `/Users/sergiystashok/Downloads/Telegram Lite/AAC6A2B8-59F5-4458-AE29-B1443FC30BE2.csv`
 
 **Contains**:
+
 - ZEN: Sell 7.65152085
 - DASH: Sell 2.00002968
 - IP: Sell 12
@@ -76,12 +86,14 @@ Located at: `/Users/sergiystashok/Downloads/Telegram Lite/AAC6A2B8-59F5-4458-AE2
 
 ## Expected Behavior After Fix
 
-### Before Fix:
+### Before Fix
+
 - ❌ ZEN, DASH, IP, HBAR sells would be ignored
 - ❌ BTC would create duplicate entry if already exists
 - ❌ Sold positions would remain in portfolio
 
-### After Fix:
+### After Fix
+
 - ✅ ZEN, DASH, IP, HBAR will be removed from portfolio (if they exist)
 - ✅ BTC will be added (or updated if exists)
 - ✅ Fully sold positions will be deleted
@@ -95,6 +107,7 @@ Located at: `/Users/sergiystashok/Downloads/Telegram Lite/AAC6A2B8-59F5-4458-AE2
    - Check `docker-compose.yml` configuration
 
 2. **Test CSV Import**:
+
    ```bash
    # Login to get token
    curl -X POST http://localhost:8100/api/auth/login \
@@ -111,9 +124,10 @@ Located at: `/Users/sergiystashok/Downloads/Telegram Lite/AAC6A2B8-59F5-4458-AE2
      -H "Authorization: Bearer <TOKEN>" \
      -F "file=@/Users/sergiystashok/Downloads/Telegram\ Lite/AAC6A2B8-59F5-4458-AE29-B1443FC30BE2.csv" \
      -F "exchange=revolut"
-   ```
+   ```text
 
 3. **Verify Results**:
+
    - Check portfolio items: `GET /api/portfolio`
    - Verify ZEN, DASH, IP, HBAR are deleted (if they existed)
    - Verify BTC is added/updated correctly
@@ -145,4 +159,3 @@ Located at: `/Users/sergiystashok/Downloads/Telegram Lite/AAC6A2B8-59F5-4458-AE2
 ---
 
 **Ready for user testing once database connection is resolved.**
-

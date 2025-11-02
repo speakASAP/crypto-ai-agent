@@ -14,17 +14,19 @@ After analyzing the CSV import codebase and the user's CSV file, **two critical 
 ## User Scenario
 
 ### Initial State (Last Month's CSV Import)
+
 - User imported portfolio via CSV showing initial holdings
 - Example: Had 5 BTC, some ZEN, DASH, IP, HBAR
 
 ### Current State (Today's CSV)
-```
+
+```text
 ZEN,Sell,7.65152085,405.25 CZK,"3,100.80 CZK",75.00 CZK,"Nov 1, 2025, 4:38:14 PM"
 DASH,Sell,2.00002968,"1,483.42 CZK","2,966.89 CZK",59.00 CZK,"Nov 1, 2025, 4:38:59 PM"
 IP,Sell,12,93.27 CZK,"1,119.21 CZK",59.00 CZK,"Nov 1, 2025, 4:42:26 PM"
 HBAR,Sell,528.49325905,4.15 CZK,"2,195.76 CZK",59.00 CZK,"Nov 1, 2025, 4:43:40 PM"
 BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4:54:09 PM"
-```
+```text
 
 ### Expected Behavior
 - ZEN, DASH, IP, HBAR should be **removed from portfolio** (or quantity reduced if user had more)
@@ -57,7 +59,7 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
         if net_quantity <= 0:
             logger.info(f"Fully sold position for {symbol}, skipping")
             return None
-```
+```text
 
 **Problem**:
 - If CSV contains **only sells** (no buys), line 367-369 returns `None` immediately
@@ -123,7 +125,7 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
             except Exception as e:
                 logger.warning(f"Failed to import item {item['symbol']}: {e}")
                 continue
-```
+```text
 
 **Problem**:
 1. **Duplicate check is flawed**: Line 117-124 checks if portfolio item exists with **exact same quantity**. This won't work for incremental updates:
@@ -144,7 +146,7 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
 
 ### Current Flow (Broken)
 
-```
+```text
 1. CSV Import → Parse transactions
 2. Aggregate transactions by symbol
    - For ZEN (sell-only): No buys found → Returns None ❌
@@ -152,11 +154,11 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
 3. For each aggregated item:
    - Check duplicate by exact quantity match (won't match existing 5 BTC)
    - INSERT new portfolio item (creates duplicate BTC) ❌
-```
+```text
 
 ### Expected Flow (Correct)
 
-```
+```text
 1. CSV Import → Parse transactions
 2. Process ALL transactions (both buys and sells):
    - ZEN: Sell 7.65152085 → Net change: -7.65152085
@@ -172,7 +174,7 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
    - If doesn't exist:
      - If net_change > 0: INSERT new item
      - If net_change < 0: Log warning (selling non-existent position)
-```
+```text
 
 ## Code References
 

@@ -22,7 +22,7 @@ Before starting testing, verify:
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/prepare-green.sh crypto-ai-agent
-```
+```text
 
 **Expected Result:**
 
@@ -41,7 +41,7 @@ cd /path/to/nginx-microservice
 
 ```bash
 docker ps | grep green
-```
+```text
 
 **Expected Result:**
 You should see:
@@ -58,20 +58,20 @@ All should be in "Up" status.
 ```bash
 docker run --rm --network nginx-network alpine/curl:latest \
   curl -s http://crypto-ai-backend-green:8100/health
-```
+```text
 
 **Expected Result:**
 
 ```json
 {"status":"healthy","database":"postgres","version":"2.0.0","websocket_connections":0}
-```
+```text
 
 ### Test 106: Verify Frontend Health Check
 
 ```bash
 docker run --rm --network nginx-network alpine/curl:latest \
   curl -s -o /dev/null -w "%{http_code}" http://crypto-ai-frontend-green:3100/
-```
+```text
 
 **Expected Result:**
 HTTP status code: `200` or `304`
@@ -80,7 +80,7 @@ HTTP status code: `200` or `304`
 
 ```bash
 cat /path/to/nginx-microservice/state/crypto-ai-agent.json | jq .green
-```
+```text
 
 **Expected Result:**
 
@@ -90,7 +90,7 @@ cat /path/to/nginx-microservice/state/crypto-ai-agent.json | jq .green
   "deployed_at": "2025-01-XX...",
   "version": null
 }
-```
+```text
 
 ### Test 108: Test Failure Scenario
 
@@ -102,7 +102,7 @@ docker compose -f docker-compose.green.yml -p crypto_ai_agent_green down
 # Try prepare again (should fail if containers can't start)
 cd /path/to/nginx-microservice
 ./scripts/blue-green/prepare-green.sh crypto-ai-agent
-```
+```text
 
 **Expected Result:**
 
@@ -118,7 +118,7 @@ cd /path/to/nginx-microservice
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/switch-traffic.sh crypto-ai-agent
-```
+```text
 
 **Expected Result:**
 
@@ -131,7 +131,7 @@ cd /path/to/nginx-microservice
 
 ```bash
 cat nginx/conf.d/crypto-ai-agent.statex.cz.conf | grep -A 2 "upstream crypto-ai-frontend"
-```
+```text
 
 **Expected Result:**
 
@@ -140,7 +140,7 @@ upstream crypto-ai-frontend {
     server crypto-ai-frontend-blue:3100 weight=0 backup;
     server crypto-ai-frontend-green:3100 weight=100;
 }
-```
+```text
 
 ### Test 111: Verify Nginx Config Test Passes
 
@@ -148,7 +148,7 @@ The script should test nginx config before reload. Check logs:
 
 ```bash
 tail -20 logs/blue-green/deploy.log | grep "Testing nginx configuration"
-```
+```text
 
 **Expected Result:**
 Should see "SUCCESS" message for config test.
@@ -157,7 +157,7 @@ Should see "SUCCESS" message for config test.
 
 ```bash
 docker compose exec nginx nginx -s reload && echo "✅ Nginx reloaded"
-```
+```text
 
 **Expected Result:**
 
@@ -168,20 +168,20 @@ docker compose exec nginx nginx -s reload && echo "✅ Nginx reloaded"
 
 ```bash
 cat state/crypto-ai-agent.json | jq .active_color
-```
+```text
 
 **Expected Result:**
 
 ```text
 "green"
-```
+```text
 
 ### Test 114: Test Traffic Routing
 
 ```bash
 # From nginx container, test routing
 docker compose exec nginx curl -s http://crypto-ai-frontend/ | head -20
-```
+```text
 
 **Expected Result:**
 
@@ -195,7 +195,7 @@ docker compose exec nginx curl -s http://crypto-ai-frontend/ | head -20
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/health-check.sh crypto-ai-agent
-```
+```text
 
 **Expected Result:**
 
@@ -214,7 +214,7 @@ docker stop crypto-ai-backend-green
 
 # Restart backend (cleanup)
 docker start crypto-ai-backend-green
-```
+```text
 
 **Expected Result:**
 
@@ -233,7 +233,7 @@ docker stop crypto-ai-frontend-green
 
 # Restart frontend (cleanup)
 docker start crypto-ai-frontend-green
-```
+```text
 
 **Expected Result:**
 
@@ -248,7 +248,7 @@ docker start crypto-ai-frontend-green
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```
+```text
 
 **Expected Result:**
 
@@ -261,7 +261,7 @@ cd /path/to/nginx-microservice
 
 ```bash
 cat nginx/conf.d/crypto-ai-agent.statex.cz.conf | grep -A 2 "upstream crypto-ai-frontend"
-```
+```text
 
 **Expected Result:**
 
@@ -270,25 +270,25 @@ upstream crypto-ai-frontend {
     server crypto-ai-frontend-blue:3100 weight=100;
     server crypto-ai-frontend-green:3100 weight=0 backup;
 }
-```
+```text
 
 ### Test 124: Verify State File Updates
 
 ```bash
 cat state/crypto-ai-agent.json | jq .active_color
-```
+```text
 
 **Expected Result:**
 
 ```text
 "blue"
-```
+```text
 
 ### Test 125: Verify Green Containers Stopped
 
 ```bash
 docker ps | grep green
-```
+```text
 
 **Expected Result:**
 
@@ -302,7 +302,7 @@ docker ps | grep green
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/cleanup.sh crypto-ai-agent
-```
+```text
 
 **Expected Result:**
 
@@ -317,7 +317,7 @@ cd /path/to/nginx-microservice
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```
+```text
 
 **Expected Result:**
 
@@ -351,7 +351,7 @@ cat state/crypto-ai-agent.json | jq .active_color
 # Cleanup
 kill $DEPLOY_PID 2>/dev/null || true
 docker start crypto-ai-backend-green 2>/dev/null || true
-```
+```text
 
 **Expected Result:**
 

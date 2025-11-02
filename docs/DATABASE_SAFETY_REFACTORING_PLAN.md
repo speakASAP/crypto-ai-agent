@@ -15,7 +15,7 @@ This plan outlines the refactoring required to ensure zero data loss and zero fa
 
 ### New Structure
 
-```
+```text
 crypto-ai-agent/
 ├── docker-compose.infrastructure.yml  # NEW: Shared infrastructure (postgres, redis)
 ├── docker-compose.blue.yml            # MODIFIED: Only backend/frontend
@@ -26,11 +26,11 @@ nginx-microservice/
 └── scripts/
     └── blue-green/
         └── ensure-infrastructure.sh   # NEW: Ensure shared infrastructure is running
-```
+```text
 
 ### Architecture Flow
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │  Shared Infrastructure (Always Online)  │
 │  ┌─────────────┐  ┌─────────────┐      │
@@ -51,7 +51,7 @@ nginx-microservice/
 │  (connects to │    │ (connects to    │
 │  shared DB)   │    │  shared DB)     │
 └───────────────┘    └─────────────────┘
-```
+```text
 
 ## Implementation Steps
 
@@ -261,7 +261,7 @@ nginx-microservice/
 cd /path/to/crypto-ai-agent
 docker compose -f docker-compose.blue.yml -p crypto_ai_agent_blue down
 docker compose -f docker-compose.green.yml -p crypto_ai_agent_green down
-```
+```text
 
 ### Step 2: Start Infrastructure
 
@@ -271,14 +271,14 @@ docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastru
 
 # Verify it's running
 docker ps | grep -E 'postgres|redis'
-```
+```text
 
 ### Step 3: Verify Database Access
 
 ```bash
 # Test database connection
 docker exec crypto-ai-postgres psql -U crypto -d crypto_ai_agent -c "SELECT 1;"
-```
+```text
 
 ### Step 4: Test Blue/Green with New Structure
 
@@ -286,7 +286,7 @@ docker exec crypto-ai-postgres psql -U crypto -d crypto_ai_agent -c "SELECT 1;"
 # Test deployment
 cd /path/to/nginx-microservice
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```
+```text
 
 ### Step 5: Verify Only One Database Instance
 
@@ -294,7 +294,7 @@ cd /path/to/nginx-microservice
 # Verify only one postgres container
 docker ps | grep postgres
 # Should show only one: crypto-ai-postgres (from infrastructure)
-```
+```text
 
 ## Rollback Plan
 

@@ -58,7 +58,7 @@ crypto-ai-agent/
 ├── docker-compose.prod.yml # Production environment
 ├── deploy.sh               # Deployment script
 └── README.md
-```
+```text
 
 ### **Key Features**
 
@@ -96,7 +96,7 @@ docker-compose up --build
 # Backend API: http://localhost:8100
 # API Docs: http://localhost:8100/docs
 # Performance Dashboard: http://localhost:8100/api/v2/performance/summary
-```
+```text
 
 ### **Production Deployment**
 
@@ -106,7 +106,7 @@ docker-compose up --build
 
 # Monitor the application
 ./monitor.sh
-```
+```text
 
 ### **Migration Phases Completed**
 
