@@ -17,7 +17,7 @@ Starts the entire application stack:
 
 ```bash
 ./start.sh
-```
+```text
 
 **What it does:**
 
@@ -37,7 +37,7 @@ Stops all running services and cleans up processes.
 
 ```bash
 ./stop.sh
-```
+```text
 
 **What it does:**
 
@@ -55,7 +55,7 @@ Checks the status of all services and provides detailed information.
 
 ```bash
 ./status.sh
-```
+```text
 
 **What it shows:**
 
@@ -74,19 +74,19 @@ Checks the status of all services and provides detailed information.
 
    ```bash
    ./start.sh
-   ```
+   ```text
 
 2. **Check status:**
 
    ```bash
    ./status.sh
-   ```
+   ```text
 
 3. **Stop the application:**
 
    ```bash
    ./stop.sh
-   ```
+   ```text
 
 ## Access URLs
 
@@ -115,7 +115,7 @@ If you get "port already in use" errors:
 ```bash
 ./stop.sh  # Stop all services
 ./start.sh # Start fresh
-```
+```text
 
 ### Services Not Starting
 
@@ -138,7 +138,7 @@ pip install -r requirements.txt
 # Frontend dependencies
 cd frontend
 npm install
-```
+```text
 
 ## Requirements
 

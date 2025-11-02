@@ -16,14 +16,14 @@
 # Add to .env file
 BINANCE_API_KEY=your_api_key_here
 BINANCE_API_SECRET=your_secret_key_here
-```
+```text
 
 ### 3. Import Portfolio
 
 ```bash
 # Test import
 python test_binance_import.py
-```
+```text
 
 ## 📋 API Endpoints
 
@@ -59,7 +59,7 @@ cd backend && python -c "
 from app.core.config import settings
 print(f'API Key: {settings.binance_api_key[:10]}...')
 "
-```
+```text
 
 ## 📊 What Gets Imported
 

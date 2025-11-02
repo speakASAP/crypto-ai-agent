@@ -17,7 +17,7 @@ Add these variables to your `.env` file to configure logging:
 LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FILE=logs/crypto_agent.log    # Path to log file
 LOG_FORMAT="%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log format
-```
+```text
 
 ### Log Levels
 
@@ -78,7 +78,7 @@ logs/
 ├── crypto_agent.log          # Main application log
 ├── crypto_agent.log.1       # Rotated log (if rotation enabled)
 └── crypto_agent.log.2       # Older rotated log
-```
+```text
 
 In Docker deployments, the backend writes logs to `/app/logs` which is bind-mounted to the host `./logs` directory via docker-compose.
 
@@ -88,7 +88,7 @@ Each log entry follows this format:
 
 ```text
 2024-01-15 10:30:45,123 - crypto_ai_agent.agent - INFO - INFO in database_initialization - Database initialized successfully - db_path=data/crypto_portfolio.db
-```
+```text
 
 Components:
 
@@ -116,7 +116,7 @@ log_database_operation("insert", "portfolio", "agent", symbol="BTC", amount=1.5)
 
 # Performance logging
 log_performance("price_prediction", 0.123, "agent", symbol="BTC")
-```
+```text
 
 ### In UI Dashboard
 
@@ -127,7 +127,7 @@ logger = get_logger("ui_dashboard")
 
 # User action logging
 log_user_action("add_coin", {"symbol": "BTC", "amount": 0.5}, "ui_dashboard")
-```
+```text
 
 ## Monitoring and Alerts
 
@@ -160,7 +160,7 @@ For production environments, consider setting up log rotation:
     notifempty
     create 644 user group
 }
-```
+```text
 
 ## Troubleshooting
 
@@ -170,25 +170,25 @@ For production environments, consider setting up log rotation:
 
    ```text
    ERROR in database_initialization - Connection failed - attempt=1, max_retries=3
-   ```
+   ```text
 
 2. **API Rate Limiting**
 
    ```text
    WARNING in api_call - HTTP 429 from Binance API - status_code=429
-   ```
+   ```text
 
 3. **User Actions**
 
    ```text
    INFO in user_action - USER ACTION add_coin - symbol=BTC, amount=0.5
-   ```
+   ```text
 
 4. **Performance Issues**
 
    ```text
    INFO in performance - PERFORMANCE price_prediction took 2.456s - symbol=BTC
-   ```
+   ```text
 
 ### Debug Mode
 
@@ -196,7 +196,7 @@ To enable detailed debugging, set:
 
 ```bash
 LOG_LEVEL=DEBUG
-```
+```text
 
 This will log:
 

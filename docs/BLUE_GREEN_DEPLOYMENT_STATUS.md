@@ -74,25 +74,29 @@ The blue/green deployment system for crypto-ai-agent has been successfully imple
 ### Before First Production Deployment
 
 1. **SSL Certificates**
+
    ```bash
    cd /path/to/nginx-microservice
    ./scripts/add-domain.sh crypto-ai-agent.statex.cz crypto-ai-frontend 3100
-   ```
+   ```text
    This will request Let's Encrypt certificates automatically.
 
 2. **Initial Blue Deployment**
+
    ```bash
    cd /path/to/crypto-ai-agent
    docker compose -f docker-compose.blue.yml -p crypto_ai_agent_blue up -d
-   ```
+   ```text
 
 3. **Start Nginx**
+
    ```bash
    cd /path/to/nginx-microservice
    docker compose up -d
-   ```
+   ```text
 
 4. **Verify Setup**
+
    ```bash
    # Check blue is running
    docker ps | grep blue
@@ -102,7 +106,7 @@ The blue/green deployment system for crypto-ai-agent has been successfully imple
    
    # Check state
    cat state/crypto-ai-agent.json | jq .
-   ```
+   ```text
 
 ## Production Deployment Flow
 
@@ -111,7 +115,7 @@ The blue/green deployment system for crypto-ai-agent has been successfully imple
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```
+```text
 
 **What happens:**
 1. ✅ Prepares green containers (validated)
@@ -124,7 +128,7 @@ cd /path/to/nginx-microservice
 
 ```bash
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```
+```text
 
 ## Testing Validation
 

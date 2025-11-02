@@ -22,12 +22,14 @@ Fix CSV import to correctly merge with existing portfolio items, handle sell-onl
 **File**: `backend/app/services/csv_import_service.py`
 
 **Change 1.1**: Modify `_calculate_weighted_average()` method (lines 362-418)
+
 - Remove early return when no buy_txns found
 - Calculate net_quantity even for sell-only transactions
 - Return net_quantity (can be negative), net_change flag, and transaction summary
 - Return None only if there are no transactions at all
 
 **Change 1.2**: Modify `aggregate_transactions()` method (lines 332-360)
+
 - Include ALL symbols even if net_quantity <= 0
 - Add `net_change` field to returned items (positive for buys, negative for sells)
 - Add `is_sell_only` flag for symbols with only sells
@@ -37,6 +39,7 @@ Fix CSV import to correctly merge with existing portfolio items, handle sell-onl
 **File**: `backend/app/api/csv_import.py`
 
 **Change 2.1**: Rewrite portfolio merge logic in `execute_csv_import()` (lines 115-164)
+
 - Replace duplicate check with existence check by symbol only
 - For each aggregated item:
   - Query existing portfolio item by symbol (not quantity)
@@ -49,23 +52,28 @@ Fix CSV import to correctly merge with existing portfolio items, handle sell-onl
     - If net_quantity <= 0: Log warning (selling non-existent position)
 
 **Change 2.2**: Update import statistics
+
 - Track items_updated, items_deleted, items_inserted separately
 - Update import_history with accurate counts
 
 ### Step 3: Handle Edge Cases
 
 **Edge Case 3.1**: Multiple portfolio items for same symbol
+
 - For now: Update the first matching item
 - Future: Consider merging all matching items
 
 **Edge Case 3.2**: Price calculation for merged positions
-- Calculate weighted average: (old_amount * old_price + new_amount * new_price) / (old_amount + new_amount)
+
+- Calculate weighted average: (old_amount *old_price + new_amount* new_price) / (old_amount + new_amount)
 
 **Edge Case 3.3**: Commission and fees
+
 - Add new commission to existing commission
 - Recalculate total_investment_text
 
 **Edge Case 3.4**: Currency handling
+
 - Handle currency conversions correctly when merging items with different currencies
 
 ## Implementation Checklist
@@ -102,7 +110,8 @@ Fix CSV import to correctly merge with existing portfolio items, handle sell-onl
 
 **Current behavior**: Returns None if no buys or net_quantity <= 0
 
-**New behavior**: 
+**New behavior**:
+
 - Always calculate net_quantity = total_buy_qty - total_sell_qty
 - Return result even if net_quantity <= 0 (so we can DELETE portfolio items)
 - Add `net_change` field indicating positive/negative change
@@ -113,17 +122,20 @@ Fix CSV import to correctly merge with existing portfolio items, handle sell-onl
 **Current behavior**: Filters out items where `_calculate_weighted_average()` returns None
 
 **New behavior**:
+
 - Include ALL aggregated items, even with negative quantities
 - Add `net_change` field to each aggregated item
 - Don't filter by net_quantity in aggregation
 
 ### Change 3: `csv_import.py` - `execute_csv_import()`
 
-**Current behavior**: 
+**Current behavior**:
+
 - Checks duplicate by symbol + exact quantity
 - Only does INSERT operations
 
 **New behavior**:
+
 ```python
 for item in aggregated_items:
     # Check if portfolio item exists by symbol only
@@ -155,7 +167,7 @@ for item in aggregated_items:
         else:
             # Selling non-existent position - log warning
             logger.warning(f"Selling {symbol} that doesn't exist in portfolio")
-```
+```text
 
 ## Testing Scenarios
 

@@ -51,7 +51,7 @@ CREATE TABLE price_check_tracking (
 -- Enhanced alert history with recovery tracking
 ALTER TABLE alert_history ADD COLUMN was_missed BOOLEAN DEFAULT 0;
 ALTER TABLE alert_history ADD COLUMN check_type TEXT DEFAULT 'realtime';
-```
+```text
 
 #### Recovery Process
 
@@ -168,7 +168,7 @@ CREATE TABLE price_alerts (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-```
+```text
 
 #### New Table: `alert_history`
 
@@ -184,7 +184,7 @@ CREATE TABLE alert_history (
     triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (alert_id) REFERENCES price_alerts (id)
 );
-```
+```text
 
 ### IMPLEMENTATION CHECKLIST
 

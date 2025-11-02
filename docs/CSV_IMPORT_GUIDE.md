@@ -34,7 +34,7 @@ The CSV Portfolio Import feature allows users to import cryptocurrency transacti
 Symbol,Type,Quantity,Price,Value,Fees,Date
 ONDO,Buy,128.2149791,15.60 CZK,"2,000.00 CZK",45.00 CZK,"Oct 21, 2025, 2:36:35 PM"
 ETH,Buy,0.02419027,"82,677.84 CZK","2,000.00 CZK",44.99 CZK,"Oct 21, 2025, 3:05:50 PM"
-```
+```text
 
 ### Coinbase (Template Available)
 
@@ -60,7 +60,7 @@ ETH,Buy,0.02419027,"82,677.84 CZK","2,000.00 CZK",44.99 CZK,"Oct 21, 2025, 3:05:
 curl -X POST "http://localhost:8100/api/import/csv/upload" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "file=@your_transactions.csv"
-```
+```text
 
 **Response:**
 
@@ -83,7 +83,7 @@ curl -X POST "http://localhost:8100/api/import/csv/upload" \
   ],
   "errors": []
 }
-```
+```text
 
 #### Execute CSV Import (Save to Database)
 
@@ -92,7 +92,7 @@ curl -X POST "http://localhost:8100/api/import/csv/execute" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "file=@your_transactions.csv" \
   -d '{"exchange": "revolut"}'
-```
+```text
 
 **Response:**
 
@@ -103,21 +103,21 @@ curl -X POST "http://localhost:8100/api/import/csv/execute" \
   "items_imported": 15,
   "total_found": 15
 }
-```
+```text
 
 #### Get Available Templates
 
 ```bash
 curl -X GET "http://localhost标准:8100/api/import/csv/templates" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
+```text
 
 #### View Import History
 
 ```bash
 curl offers GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
+```text
 
 ### Method 2: Web Interface (Coming Soon)
 
@@ -153,7 +153,7 @@ Each CSV row is normalized to an internal schema:
     "date": "2025-10-21",
     "currency": "CZK"
 }
-```
+```text
 
 ### 3. Transaction Aggregation
 
@@ -164,13 +164,13 @@ Multiple transactions for the same symbol are aggregated:
 ```text
 XRP Buy 9.639722 @ 51.87 CZK
 XRP Buy 29.09079 @ 51.56 CZK
-```
+```text
 
 ↓
 
 ```text
 XRP: 38.730512 (net quantity) @ 51.637 (weighted average price)
-```
+```text
 
 **Aggregation Logic:**
 
@@ -212,7 +212,7 @@ CREATE TABLE csv_import_mappings (
     FOREIGN KEY (user_id) REFERENCES users (id),
     UNIQUE(user_id, exchange)
 )
-```
+```text
 
 ### Service Architecture
 
@@ -317,7 +317,7 @@ Templates are JSON files in `backend/templates/`:
     }
   }
 }
-```
+```text
 
 ## Future Enhancements
 
@@ -350,14 +350,14 @@ from app.services.csv_import_service import CSVImportService
 service = CSVImportService()
 print(f'Templates: {list(service.templates.keys())}')
 "
-```
+```text
 
 #### Check Import History
 
 ```bash
 curl -X GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
+```text
 
 ### Log Analysis
 
@@ -365,7 +365,7 @@ Check backend logs for detailed import information:
 
 ```bash
 tail -f logs/backend.log | grep "CSV import"
-```
+```text
 
 ## Support
 

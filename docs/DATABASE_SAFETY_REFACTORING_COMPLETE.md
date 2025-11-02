@@ -9,11 +9,13 @@ Successfully refactored the blue/green deployment architecture to ensure **zero 
 ### ✅ Issue 1: Multiple Database Instances - FIXED
 
 **Problem:** Both blue and green deployments tried to start their own PostgreSQL and Redis containers, causing:
+
 - Data corruption risk (multiple instances accessing same volume)
 - Lock conflicts
 - Potential data loss
 
 **Solution:**
+
 - Created `docker-compose.infrastructure.yml` for shared infrastructure
 - Removed postgres/redis from blue/green compose files
 - Only ONE database instance runs at a time
@@ -22,6 +24,7 @@ Successfully refactored the blue/green deployment architecture to ensure **zero 
 ### ✅ Issue 2: Database High Availability - IMPLEMENTED
 
 **Solution:**
+
 - Infrastructure uses `restart: always` policy
 - Automatic health checks for postgres and redis
 - Infrastructure automatically starts before deployments
@@ -30,6 +33,7 @@ Successfully refactored the blue/green deployment architecture to ensure **zero 
 ### ✅ Issue 3: Infrastructure Independence - ACHIEVED
 
 **Solution:**
+
 - Infrastructure runs independently via `docker-compose.infrastructure.yml`
 - Blue/green deployments only manage application containers
 - Infrastructure containers are never stopped during cleanup
@@ -87,7 +91,8 @@ Successfully refactored the blue/green deployment architecture to ensure **zero 
 ## Architecture Changes
 
 ### Before (UNSAFE)
-```
+
+```text
 Blue Deployment:
 ├── postgres-blue (tries to mount shared volume)
 ├── redis-blue (tries to mount shared volume)
@@ -101,10 +106,10 @@ Green Deployment:
 └── frontend-green
 
 Result: Data corruption risk, multiple instances
-```
+```text
 
 ### After (SAFE)
-```
+```text
 Shared Infrastructure (Always Running):
 ├── postgres (singleton, restart: always)
 └── redis (singleton, restart: always)
@@ -118,7 +123,7 @@ Green Deployment:
 └── frontend-green
 
 Result: Zero data loss, zero conflicts
-```
+```text
 
 ## Verification Checklist
 
@@ -165,7 +170,7 @@ Result: Zero data loss, zero conflicts
    # Test deployment
    cd /path/to/nginx-microservice
    ./scripts/blue-green/deploy.sh crypto-ai-agent
-   ```
+   ```text
 
 2. **Verify Database Safety:**
    - Check only one postgres container running

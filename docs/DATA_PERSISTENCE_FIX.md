@@ -3,10 +3,12 @@
 ## Issue
 
 During the initial blue/green deployment setup, separate database volumes were created for blue and green environments:
+
 - `crypto_ai_agent_blue_pgdata-blue` (blue deployment)
 - `crypto_ai_agent_green_pgdata-green` (green deployment)
 
 This caused **data loss** because:
+
 1. When blue/green deployment was first run, it created brand new empty databases
 2. The original database (`crypto-ai-agent_pgdata`) was not being used
 3. All user data, portfolio items, and alerts were inaccessible
@@ -50,6 +52,7 @@ Updated both `docker-compose.blue.yml` and `docker-compose.green.yml` to use **s
 ## Verification
 
 After this fix:
+
 - ✅ User accounts are accessible in both blue and green deployments
 - ✅ Portfolio data is preserved
 - ✅ Alerts are preserved
@@ -70,7 +73,7 @@ cd /path/to/nginx-microservice
 
 # 3. Verify data is accessible
 # Login to the application and confirm all data is present
-```
+```text
 
 ## Date
 

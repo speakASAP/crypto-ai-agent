@@ -99,7 +99,7 @@ crypto-ai-agent/
 ├── docker-compose.blue.yml         # Blue environment
 ├── docker-compose.green.yml        # Green environment
 └── .env                           # Configuration variables
-```
+```text
 
 ## Key Features
 
@@ -118,25 +118,25 @@ crypto-ai-agent/
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```
+```text
 
 ### Rollback
 
 ```bash
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```
+```text
 
 ### Check Status
 
 ```bash
 cat state/crypto-ai-agent.json | jq .
-```
+```text
 
 ### View Logs
 
 ```bash
 tail -f logs/blue-green/deploy.log
-```
+```text
 
 ## Performance Targets (Achieved)
 

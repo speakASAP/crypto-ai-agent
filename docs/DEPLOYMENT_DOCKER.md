@@ -27,7 +27,7 @@
 # Preferred: use scripts (sets project name and supports per-service)
 echo "ENVIRONMENT=production" >> .env
 ./start.sh --env production
-```
+```text
 
 3. Verify services
 
@@ -36,7 +36,7 @@ echo "ENVIRONMENT=production" >> .env
 curl -f http://127.0.0.1:8100/docs
 # Frontend
 curl -f http://127.0.0.1:3100
-```
+```text
 
 4. Configure external Nginx
 
@@ -69,7 +69,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
-```
+```text
 
 ### Frontend
 
@@ -86,7 +86,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
-```
+```text
 
 ## Volumes and logs
 
@@ -146,7 +146,7 @@ The scripts wrap `docker compose` with a fixed project name via `COMPOSE_PROJECT
 # Status and logs
 ./status.sh --env production --logs 100
 ./status.sh --env production --service backend --logs 200
-```
+```text
 
 ## Blue/Green Deployment (Zero-Downtime)
 
@@ -176,7 +176,7 @@ From the nginx-microservice directory:
 # 3. Switch traffic to green (< 2 seconds)
 # 4. Monitor for 5 minutes
 # 5. Clean up old blue containers if healthy
-```
+```text
 
 ### Shared Infrastructure Management
 
@@ -196,7 +196,7 @@ docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastru
 
 # Verify it's running
 docker ps | grep -E 'postgres|redis'
-```
+```text
 
 **Infrastructure is automatically checked** before each blue/green deployment. If not running, it will be started automatically.
 
@@ -204,7 +204,7 @@ docker ps | grep -E 'postgres|redis'
 
 ```bash
 docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure down
-```
+```text
 
 **Note**: Infrastructure containers use `restart: always` and will automatically restart on failure.
 
@@ -214,7 +214,7 @@ If something goes wrong:
 
 ```bash
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```
+```text
 
 ### What Gets Deployed
 
@@ -251,7 +251,7 @@ REDIS_PORT_GREEN=6380
 REDIS_APPENDONLY=no
 API_PORT_GREEN=8101
 FRONTEND_PORT_GREEN=3101
-```
+```text
 
 ### Docker Compose Files
 

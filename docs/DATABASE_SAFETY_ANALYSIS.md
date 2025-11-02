@@ -5,6 +5,7 @@
 ### Issue 1: Multiple Database Instances Accessing Same Volume (CRITICAL)
 
 **Current State:**
+
 - Both `docker-compose.blue.yml` and `docker-compose.green.yml` include PostgreSQL and Redis services
 - Both use the same Docker volumes: `crypto-ai-agent_pgdata` and `crypto-ai-agent_redisdata`
 - During blue/green deployment, **both containers start simultaneously** and try to access the same data directory
@@ -32,12 +33,14 @@
 ### Issue 2: No Database High Availability
 
 **Current State:**
+
 - Single database instance (no replication)
 - No automatic failover
 - No backup automation
 - If database container crashes, service is down until manual restart
 
 **Risks:**
+
 - Single point of failure
 - No redundancy
 - Manual recovery required
@@ -46,11 +49,13 @@
 ### Issue 3: Database Containers Part of Blue/Green Deployment
 
 **Current State:**
+
 - Database containers are included in blue/green compose files
 - They get stopped/started as part of deployment
 - No guarantee database stays online during deployments
 
 **Problem:**
+
 - Database should be **always online** and **independent** of application deployments
 - Stopping/starting database containers risks:
   - Connection drops
@@ -60,6 +65,7 @@
 ### Issue 4: No Database Monitoring or Health Checks
 
 **Current State:**
+
 - No automated health checks for database
 - No alerting if database fails
 - No connection pool monitoring
@@ -68,6 +74,7 @@
 ### Issue 5: Volume Management Issues
 
 **Current State:**
+
 - Volumes defined in both blue and green compose files
 - No explicit volume lifecycle management
 - No backup strategy for volumes
@@ -77,7 +84,7 @@
 
 ### Current Blue/Green Flow
 
-```
+```text
 1. prepare-green.sh
    ├── docker compose -f docker-compose.green.yml up -d
    │   ├── crypto-ai-postgres-green (tries to mount crypto-ai-agent_pgdata)
@@ -87,11 +94,11 @@
    │
    └── While crypto-ai-postgres-blue is STILL RUNNING
        └── CONFLICT: Two PostgreSQL instances accessing same volume
-```
+```text
 
 ### What Should Happen
 
-```
+```text
 Shared Infrastructure (Always Running):
 ├── crypto-ai-postgres (singleton, always online)
 ├── crypto-ai-redis (singleton, always online)
@@ -102,7 +109,7 @@ Blue/Green Application Deployments:
 ├── crypto-ai-backend-green (connects to shared postgres/redis)
 ├── crypto-ai-frontend-blue
 └── crypto-ai-frontend-green
-```
+```text
 
 ## ✅ Required Changes for Zero Data Loss
 

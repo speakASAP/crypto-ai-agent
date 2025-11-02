@@ -29,7 +29,7 @@ The Crypto AI Agent now includes a comprehensive multi-user authentication syste
 │ • Portfolio API │    │ • Password Hash │    │ • portfolio_items│
 │ • Middleware    │    │ • Token Refresh │    │ • alerts        │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+```text
 
 ### Frontend Architecture
 
@@ -41,7 +41,7 @@ The Crypto AI Agent now includes a comprehensive multi-user authentication syste
 │ • Dashboard     │    │ • Token Mgmt    │    │ • Auto Refresh  │
 │ • Profile       │    │ • Persistence   │    │ • Error Handling│
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+```text
 
 ## Authentication Flow
 
@@ -64,7 +64,7 @@ sequenceDiagram
     B-->>F: Return tokens + user data
     F->>F: Store in auth store
     F->>F: Redirect to dashboard
-```
+```text
 
 ### 2. User Login
 
@@ -84,7 +84,7 @@ sequenceDiagram
     B-->>F: Return tokens + user data
     F->>F: Store in auth store
     F->>F: Redirect to dashboard
-```
+```text
 
 ### 3. Token Refresh
 
@@ -103,7 +103,7 @@ sequenceDiagram
     B-->>F: Return new tokens
     F->>F: Update auth store
     F->>B: Retry original request
-```
+```text
 
 ## Database Schema
 
@@ -121,7 +121,7 @@ CREATE TABLE users (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-```
+```text
 
 ### Password Reset Tokens Table
 
@@ -135,7 +135,7 @@ CREATE TABLE password_reset_tokens (
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-```
+```text
 
 ### User Sessions Table
 
@@ -148,7 +148,7 @@ CREATE TABLE user_sessions (
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-```
+```text
 
 ### Updated Portfolio Items Table
 
@@ -174,7 +174,7 @@ CREATE TABLE portfolio_items (
     pnl_percent REAL,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-```
+```text
 
 ## API Endpoints
 
@@ -231,7 +231,7 @@ interface AuthState {
   clearError: () => void
   setUser: (user: User) => void
 }
-```
+```text
 
 ### Pages
 
@@ -281,7 +281,7 @@ export function middleware(request: NextRequest) {
 
   // Redirect logic for protected and auth routes
 }
-```
+```text
 
 ## Security Features
 
@@ -323,7 +323,7 @@ DATABASE_FILE=data/crypto_portfolio.db
 
 # CORS
 CORS_ORIGINS=http://localhost:3100,https://yourdomain.com
-```
+```text
 
 ### Backend Configuration
 
@@ -334,7 +334,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
-```
+```text
 
 ## Testing Guide
 
@@ -351,7 +351,7 @@ class Settings(BaseSettings):
    
    # Test with different users
    # Verify data isolation
-   ```
+   ```text
 
 2. **Login Flow**
 
@@ -359,7 +359,7 @@ class Settings(BaseSettings):
    # Test login with valid credentials
    # Test login with invalid credentials
    # Test logout functionality
-   ```
+   ```text
 
 3. **Password Reset**
 
@@ -367,7 +367,7 @@ class Settings(BaseSettings):
    # Request password reset
    # Check backend logs for token
    # Use token to reset password
-   ```
+   ```text
 
 4. **Data Isolation**
 
@@ -375,7 +375,7 @@ class Settings(BaseSettings):
    # Create multiple user accounts
    # Add portfolio items for each user
    # Verify users only see their own data
-   ```
+   ```text
 
 ### API Testing
 
@@ -393,7 +393,7 @@ curl -X POST http://localhost:8100/api/auth/login \
 # Test protected endpoint
 curl -X GET http://localhost:8100/api/portfolio/ \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
+```text
 
 ## Troubleshooting
 
@@ -429,7 +429,7 @@ tail -f logs/frontend.log
 
 # Check database
 sqlite3 data/crypto_portfolio.db ".tables"
-```
+```text
 
 ## Migration Notes
 

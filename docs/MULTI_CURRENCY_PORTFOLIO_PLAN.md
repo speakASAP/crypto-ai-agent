@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS currency_rates (
     rate REAL,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-```
+```text
 
 #### PHASE 2: CURRENCY CONVERSION SYSTEM ✅
 
