@@ -1,29 +1,19 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
-import sqlite3
-import os
-from urllib.parse import urlparse
-import psycopg
 from ..core.config import settings
+from ..utils.db import connect_with_retry
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 def get_db_connection():
-    """Get database connection using Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
-    use_postgres = settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))
-    if use_postgres:
-        # Use psycopg for Postgres; strip +psycopg suffix if present
-        pg_url = settings.database_url.replace("+psycopg", "") if settings.database_url and "+psycopg" in settings.database_url else settings.database_url
-        conn = psycopg.connect(pg_url)
-        return conn
-    # Resolve database path relative to project root (SQLite fallback)
-    current_file = os.path.abspath(__file__)
-    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
-    project_root = os.path.dirname(backend_dir)
-    db_path = os.path.join(project_root, settings.database_file)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    """Get database connection with retry logic: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
+    # Use retry logic for runtime connections (max 3 retries, faster backoff)
+    conn = connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
+    # Set row_factory for SQLite (PostgreSQL doesn't need it)
+    if not (settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))):
+        import sqlite3
+        conn.row_factory = sqlite3.Row
     return conn
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):

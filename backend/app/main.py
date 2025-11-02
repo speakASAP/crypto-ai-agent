@@ -12,6 +12,7 @@ import asyncio
 import aiohttp
 import ssl
 import psycopg
+import time
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
@@ -36,6 +37,7 @@ from .utils.db import (
     normalize_placeholders as _normalize_placeholders,
     execute_insert_and_get_id as _execute_insert_and_get_id,
     is_postgres_connection,
+    connect_with_retry,
 )
 
 # Database file - resolve to absolute path
@@ -1097,17 +1099,9 @@ def load_migration_data():
             logger.error(f"Error loading migration data: {e}")
 
 def get_db_connection():
-    """Get database connection: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
-    use_postgres = settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))
-    if use_postgres:
-        # Remove +psycopg suffix if present for connection
-        pg_url = settings.database_url.replace("+psycopg", "") if settings.database_url and "+psycopg" in settings.database_url else settings.database_url
-        return psycopg.connect(pg_url)
-    conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=10000")
-    return conn
+    """Get database connection with retry logic: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
+    # Use retry logic for runtime connections (max 3 retries, faster backoff)
+    return connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
 
 def format_total_investment_text(amount: float, currency: str) -> str:
     """Format total investment text with proper currency symbol"""
@@ -1188,15 +1182,73 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
         return item
 
 
+def verify_database_connection_and_schema():
+    """
+    Verify database connection and check if schema already exists.
+    Returns (is_connected, schema_exists, has_data)
+    """
+    try:
+        conn = connect_with_retry(max_retries=3, initial_delay=1.0, max_delay=5.0, is_startup=False)
+        cur = conn.cursor()
+        
+        # Check if users table exists
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'users'
+            );
+        """)
+        schema_exists = cur.fetchone()[0]
+        
+        # If schema exists, check if there's data
+        has_data = False
+        if schema_exists:
+            cur.execute("SELECT COUNT(*) FROM users")
+            user_count = cur.fetchone()[0]
+            has_data = user_count > 0
+            logger.info(f"✅ Database schema exists with {user_count} users")
+        
+        cur.close()
+        conn.close()
+        return True, schema_exists, has_data
+    except Exception as e:
+        logger.error(f"❌ Database verification failed: {str(e)}")
+        return False, False, False
+
 def init_postgres_database():
-    """Initialize PostgreSQL database schema"""
-    pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
-    conn = psycopg.connect(pg_url)
-    cur = conn.cursor()
+    """Initialize PostgreSQL database schema with retry logic.
+    NEVER creates tables if database is not available or if schema already exists with data.
+    """
+    logger.info("🔄 Verifying database connection and schema...")
     
-    # Create users table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS users (
+    # First, verify database is available
+    is_connected, schema_exists, has_data = verify_database_connection_and_schema()
+    
+    if not is_connected:
+        error_msg = "❌ Database is not available. Cannot initialize schema. Aborting table creation."
+        logger.error(error_msg)
+        raise ConnectionError(error_msg)
+    
+    if schema_exists and has_data:
+        logger.info("✅ Database schema already exists with customer data. Skipping table creation.")
+        logger.info("⚠️ NEVER create tables when database has existing customer data.")
+        return  # Schema exists with data - do NOT create tables
+    
+    if schema_exists and not has_data:
+        logger.info("⚠️ Database schema exists but is empty. Skipping table creation (tables may be created by migration).")
+        return  # Schema exists but empty - might be a fresh database, but safer to skip
+    
+    # Only create tables if schema doesn't exist at all (new database)
+    logger.info("📋 Database schema does not exist. Creating tables...")
+    try:
+        # Use retry logic for startup (max 5 retries, exponential backoff)
+        conn = connect_with_retry(max_retries=5, initial_delay=2.0, max_delay=30.0, is_startup=True)
+        cur = conn.cursor()
+        
+        # Create users table
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
             username TEXT UNIQUE NOT NULL,
@@ -1213,11 +1265,11 @@ def init_postgres_database():
             default_alert_percentage_below REAL DEFAULT 0.10
         )
     ''')
-    
-    # Create password reset tokens table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS password_reset_tokens (
-            id SERIAL PRIMARY KEY,
+        
+        # Create password reset tokens table
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
             token TEXT UNIQUE NOT NULL,
             expires_at TIMESTAMP NOT NULL,
@@ -1225,9 +1277,9 @@ def init_postgres_database():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # Create user sessions table
-    cur.execute('''
+        
+        # Create user sessions table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS user_sessions (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1236,9 +1288,9 @@ def init_postgres_database():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # Create portfolio_items table
-    cur.execute('''
+        
+        # Create portfolio_items table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS portfolio_items (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1267,9 +1319,9 @@ def init_postgres_database():
             exchange_rate_at_purchase REAL
         )
     ''')
-    
-    # Create alerts table
-    cur.execute('''
+        
+        # Create alerts table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS alerts (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1281,20 +1333,20 @@ def init_postgres_database():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-
-    # Ensure alerts.id has a working sequence and default nextval (simple, robust approach)
-    cur.execute("""
-        CREATE SEQUENCE IF NOT EXISTS alerts_id_seq;
-    """)
-    cur.execute("""
-        ALTER TABLE alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq');
-    """)
-    cur.execute("""
-        SELECT setval('alerts_id_seq', COALESCE((SELECT MAX(id) FROM alerts), 0) + 1, false);
-    """)
-    
-    # Create tracked_symbols table
-    cur.execute('''
+        
+        # Ensure alerts.id has a working sequence and default nextval (simple, robust approach)
+        cur.execute("""
+            CREATE SEQUENCE IF NOT EXISTS alerts_id_seq;
+        """)
+        cur.execute("""
+            ALTER TABLE alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq');
+        """)
+        cur.execute("""
+            SELECT setval('alerts_id_seq', COALESCE((SELECT MAX(id) FROM alerts), 0) + 1, false);
+        """)
+        
+        # Create tracked_symbols table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS tracked_symbols (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1305,9 +1357,9 @@ def init_postgres_database():
             UNIQUE(user_id, symbol)
         )
     ''')
-    
-    # Create alert_history table
-    cur.execute('''
+        
+        # Create alert_history table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS alert_history (
             id SERIAL PRIMARY KEY,
             alert_id INTEGER REFERENCES alerts(id),
@@ -1318,9 +1370,9 @@ def init_postgres_database():
             check_type TEXT DEFAULT 'realtime'
         )
     ''')
-    
-    # Create price_check_tracking table
-    cur.execute('''
+        
+        # Create price_check_tracking table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS price_check_tracking (
             symbol TEXT PRIMARY KEY,
             last_check_timestamp TEXT NOT NULL,
@@ -1328,9 +1380,9 @@ def init_postgres_database():
             updated_at TEXT NOT NULL
         )
     ''')
-    
-    # Create import_history table
-    cur.execute('''
+        
+        # Create import_history table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS import_history (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1342,9 +1394,9 @@ def init_postgres_database():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # Create currency_rates table
-    cur.execute('''
+        
+        # Create currency_rates table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS currency_rates (
             id SERIAL PRIMARY KEY,
             from_currency TEXT NOT NULL,
@@ -1354,18 +1406,18 @@ def init_postgres_database():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-
-    # Create price_check_tracking table (used for missed-alert logic)
-    cur.execute('''
+        
+        # Create price_check_tracking table (used for missed-alert logic)
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS price_check_tracking (
             symbol TEXT PRIMARY KEY,
             last_check_timestamp TIMESTAMP,
             last_check_price REAL
         )
     ''')
-
-    # Create crypto_symbols table
-    cur.execute('''
+        
+        # Create crypto_symbols table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS crypto_symbols (
             id SERIAL PRIMARY KEY,
             symbol TEXT UNIQUE NOT NULL,
@@ -1375,9 +1427,9 @@ def init_postgres_database():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-
-    # Create user_api_credentials table (encrypted storage)
-    cur.execute('''
+        
+        # Create user_api_credentials table (encrypted storage)
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS user_api_credentials (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1388,9 +1440,9 @@ def init_postgres_database():
             UNIQUE(user_id, exchange)
         )
     ''')
-    
-    # Create csv_import_mappings table
-    cur.execute('''
+        
+        # Create csv_import_mappings table
+        cur.execute('''
         CREATE TABLE IF NOT EXISTS csv_import_mappings (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1402,10 +1454,18 @@ def init_postgres_database():
             UNIQUE(user_id, exchange)
         )
     ''')
-    
-    conn.commit()
-    conn.close()
-    logger.info("PostgreSQL schema initialized")
+        
+        conn.commit()
+        conn.close()
+        logger.info("✅ PostgreSQL schema initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize PostgreSQL database after retries: {str(e)}")
+        logger.warning("⚠️ Database initialization failed, but continuing startup. Database might be ready later.")
+        # Don't raise - allow service to start even if initialization fails
+        # The retry logic in get_db_connection() will handle runtime connections
+        # Re-raise only if we want to fail fast during startup
+        # For now, we'll let it fail and handle in lifespan()
+        raise
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1421,8 +1481,23 @@ async def lifespan(app: FastAPI):
     
     if settings.database_url:
         logger.info("🚀 Starting Crypto AI Agent API v2.0 (PostgreSQL Mode)")
-        init_postgres_database()
-        logger.info("✅ Database initialized")
+        try:
+            # Verify database is available before attempting initialization
+            is_connected, schema_exists, has_data = verify_database_connection_and_schema()
+            if not is_connected:
+                logger.error("❌ Database is not available. Service will start but will fail health checks.")
+                logger.error("❌ Deployment should verify database availability before switching traffic.")
+            elif has_data:
+                logger.info("✅ Database is available with customer data. No table creation needed.")
+            else:
+                # Only initialize if database is available but empty
+                init_postgres_database()
+            logger.info("✅ Database verification/initialization complete")
+        except Exception as e:
+            logger.error(f"❌ Database initialization failed during startup: {str(e)}")
+            logger.error("❌ Service will start but will fail health checks until database is available.")
+            logger.error("❌ Deployment scripts should verify database before switching traffic.")
+            # Continue startup - but health checks will fail until database is available
     else:
         logger.info("🚀 Starting Crypto AI Agent API v2.0 (SQLite Mode)")
     
