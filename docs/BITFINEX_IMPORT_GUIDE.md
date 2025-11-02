@@ -83,7 +83,7 @@ The Bitfinex Portfolio Import feature allows users to automatically import their
 
 # Start services
 ./start.sh
-```text
+```
 
 ## Usage
 
@@ -94,28 +94,28 @@ The Bitfinex Portfolio Import feature allows users to automatically import their
 ```bash
 curl -X POST "http://localhost:8100/api/import/bitfinex/test-connection" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 #### Preview Import
 
 ```bash
 curl -X POST "http://localhost:8100/api/import/bitfinex/preview" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 #### Execute Import
 
 ```bash
 curl -X POST "http://localhost:8100/api/import/bitfinex/execute" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 #### View Import History
 
 ```bash
 curl -X GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 ### Method 2: Web Interface
 
@@ -144,7 +144,7 @@ curl -X GET "http://localhost:8100/api/import/history" \
     "email": "user@example.com"
   }
 }
-```text
+```
 
 ### Portfolio Import Preview
 
@@ -166,7 +166,7 @@ curl -X GET "http://localhost:8100/api/import/history" \
     }
   ]
 }
-```text
+```
 
 ### Import Execution Result
 
@@ -177,7 +177,7 @@ curl -X GET "http://localhost:8100/api/import/history" \
   "items_imported": 8,
   "total_found": 8
 }
-```text
+```
 
 ## Technical Implementation
 
@@ -197,7 +197,7 @@ CREATE TABLE import_history (
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-```text
+```
 
 #### Portfolio Items Table
 
@@ -221,7 +221,7 @@ CREATE TABLE portfolio_items (
     pnl_percent REAL,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-```text
+```
 
 ### Service Architecture
 
@@ -291,7 +291,7 @@ CREATE TABLE portfolio_items (
 ```bash
 curl -X POST "http://localhost:8100/api/auth/test-bitfinex-connection" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 #### Check Configuration
 
@@ -300,7 +300,7 @@ curl -X POST "http://localhost:8100/api/auth/test-bitfinex-connection" \
 cd backend && python
 >>> from app.services.bitfinex_import_service import BitfinexImportService
 >>> # Test service
-```text
+```
 
 ## Performance Considerations
 

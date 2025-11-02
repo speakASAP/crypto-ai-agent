@@ -73,11 +73,10 @@ cd /path/to/nginx-microservice
 
 # 3. Verify data is accessible
 # Login to the application and confirm all data is present
-```text
+```
 
 ## Date
 
 **Fixed**: November 1, 2025  
 **Issue Discovered**: November 1, 2025  
 **Data Restored**: November 1, 2025
-

@@ -145,7 +145,7 @@ CREATE TABLE crypto_symbols (
     is_tradable INTEGER DEFAULT 1,
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-```text
+```
 
 ### **Search Algorithm**
 

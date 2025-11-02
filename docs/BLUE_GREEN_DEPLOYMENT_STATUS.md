@@ -86,14 +86,14 @@ The blue/green deployment system for crypto-ai-agent has been successfully imple
    ```bash
    cd /path/to/crypto-ai-agent
    docker compose -f docker-compose.blue.yml -p crypto_ai_agent_blue up -d
-   ```text
+   ```
 
 3. **Start Nginx**
 
    ```bash
    cd /path/to/nginx-microservice
    docker compose up -d
-   ```text
+   ```
 
 4. **Verify Setup**
 
@@ -106,7 +106,7 @@ The blue/green deployment system for crypto-ai-agent has been successfully imple
    
    # Check state
    cat state/crypto-ai-agent.json | jq .
-   ```text
+   ```
 
 ## Production Deployment Flow
 
@@ -115,9 +115,10 @@ The blue/green deployment system for crypto-ai-agent has been successfully imple
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```text
+```
 
 **What happens:**
+
 1. ✅ Prepares green containers (validated)
 2. ✅ Switches nginx traffic (< 2 seconds)
 3. ✅ Monitors health for 5 minutes
@@ -128,13 +129,14 @@ cd /path/to/nginx-microservice
 
 ```bash
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```text
+```
 
 ## Testing Validation
 
 ### Tests Passed: 11/18 Core Tests
 
 **Working:**
+
 - Container build and startup
 - Health check endpoints
 - State file management
@@ -143,6 +145,7 @@ cd /path/to/nginx-microservice
 - Error handling
 
 **Blocked by SSL (Expected):**
+
 - Nginx startup (requires certificates)
 - Full switch-traffic test (nginx reload)
 - Full rollback test (nginx reload)
@@ -160,6 +163,7 @@ cd /path/to/nginx-microservice
 ## Files Created/Modified
 
 ### Created (27 files)
+
 - Service registry and state files
 - 7 deployment scripts
 - Nginx templates
@@ -167,6 +171,7 @@ cd /path/to/nginx-microservice
 - 4 documentation files
 
 ### Modified (6 files)
+
 - .env and .env.example
 - Nginx config (upstream blocks)
 - README files (documentation)
@@ -224,12 +229,14 @@ Before first production deployment:
 ## Next Steps
 
 ### Immediate
+
 1. ✅ Implementation complete
 2. ✅ Core testing complete
 3. ⏸️ SSL certificate setup (for full nginx testing)
 4. ⏸️ Production validation
 
 ### Production
+
 1. Set up SSL certificates
 2. Deploy blue containers
 3. Test first deployment
@@ -242,6 +249,7 @@ Before first production deployment:
 All core functionality has been implemented and validated. The system will work correctly in production once SSL certificates are configured (standard nginx-microservice operation).
 
 **Key Achievements:**
+
 - Zero-downtime deployment capability
 - Automatic rollback on failure
 - Centralized management
@@ -250,4 +258,3 @@ All core functionality has been implemented and validated. The system will work 
 - Extensive testing
 
 The system is ready for production use.
-

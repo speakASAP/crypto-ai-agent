@@ -26,13 +26,15 @@ DASH,Sell,2.00002968,"1,483.42 CZK","2,966.89 CZK",59.00 CZK,"Nov 1, 2025, 4:38:
 IP,Sell,12,93.27 CZK,"1,119.21 CZK",59.00 CZK,"Nov 1, 2025, 4:42:26 PM"
 HBAR,Sell,528.49325905,4.15 CZK,"2,195.76 CZK",59.00 CZK,"Nov 1, 2025, 4:43:40 PM"
 BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4:54:09 PM"
-```text
+```
 
 ### Expected Behavior
+
 - ZEN, DASH, IP, HBAR should be **removed from portfolio** (or quantity reduced if user had more)
 - BTC should be **added to portfolio** (or quantity increased if BTC already exists)
 
 ### Actual Behavior (Current Code)
+
 - ❌ ZEN, DASH, IP, HBAR sells are **completely ignored** (filtered out)
 - ❌ BTC buy may create **duplicate entry** or be skipped if exact duplicate exists
 
@@ -59,9 +61,10 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
         if net_quantity <= 0:
             logger.info(f"Fully sold position for {symbol}, skipping")
             return None
-```text
+```
 
 **Problem**:
+
 - If CSV contains **only sells** (no buys), line 367-369 returns `None` immediately
 - This means sell-only symbols like ZEN, DASH, IP, HBAR in user's CSV will be completely ignored
 - Even if user had these coins in portfolio, they won't be removed
@@ -125,9 +128,10 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
             except Exception as e:
                 logger.warning(f"Failed to import item {item['symbol']}: {e}")
                 continue
-```text
+```
 
 **Problem**:
+
 1. **Duplicate check is flawed**: Line 117-124 checks if portfolio item exists with **exact same quantity**. This won't work for incremental updates:
    - If user had 5 BTC, and CSV shows 3 BTC net (after sells), it won't be detected as duplicate
    - Creates duplicate entries instead of updating
@@ -154,7 +158,7 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
 3. For each aggregated item:
    - Check duplicate by exact quantity match (won't match existing 5 BTC)
    - INSERT new portfolio item (creates duplicate BTC) ❌
-```text
+```
 
 ### Expected Flow (Correct)
 
@@ -174,7 +178,7 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
    - If doesn't exist:
      - If net_change > 0: INSERT new item
      - If net_change < 0: Log warning (selling non-existent position)
-```text
+```
 
 ## Code References
 
@@ -223,6 +227,7 @@ BTC,Buy,0.00430399,"2,353,779.41 CZK","10,130.66 CZK",150.94 CZK,"Nov 1, 2025, 4
 ## User Action Required
 
 **DO NOT UPLOAD CSV YET** - The current implementation will not correctly update your portfolio. The system will:
+
 - Ignore your sell transactions (ZEN, DASH, IP, HBAR)
 - Possibly create duplicate BTC entries
 - Not remove sold positions from portfolio
@@ -232,4 +237,3 @@ Wait for the fix to be implemented and tested.
 ---
 
 **Next Steps**: Fix implementation required before CSV can be safely imported.
-

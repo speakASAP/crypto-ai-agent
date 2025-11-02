@@ -94,7 +94,7 @@
    │
    └── While crypto-ai-postgres-blue is STILL RUNNING
        └── CONFLICT: Two PostgreSQL instances accessing same volume
-```text
+```
 
 ### What Should Happen
 
@@ -109,7 +109,7 @@ Blue/Green Application Deployments:
 ├── crypto-ai-backend-green (connects to shared postgres/redis)
 ├── crypto-ai-frontend-blue
 └── crypto-ai-frontend-green
-```text
+```
 
 ## ✅ Required Changes for Zero Data Loss
 
@@ -118,6 +118,7 @@ Blue/Green Application Deployments:
 **Action:** Create separate docker-compose file for shared infrastructure (database, Redis)
 
 **Benefits:**
+
 - Database always online, independent of deployments
 - No conflicts during blue/green switches
 - Clear separation of concerns
@@ -127,6 +128,7 @@ Blue/Green Application Deployments:
 **Action:** Remove `postgres` and `redis` services from `docker-compose.blue.yml` and `docker-compose.green.yml`
 
 **Benefits:**
+
 - Database never stops during deployments
 - Zero downtime for database
 - No volume conflicts
@@ -135,13 +137,15 @@ Blue/Green Application Deployments:
 
 **Options:**
 
-**Option A: Single Instance with Robust Restart Policy (Recommended for Start)**
+#### Option A: Single Instance with Robust Restart Policy
+
 - `restart: always` or `restart: unless-stopped`
 - Health checks
 - Automatic restart on failure
 - Volume backups
 
-**Option B: PostgreSQL Replication (Future Enhancement)**
+#### Option B: PostgreSQL Replication (Future Enhancement)
+
 - Primary + Standby setup
 - Automatic failover
 - Zero data loss with synchronous replication
@@ -150,6 +154,7 @@ Blue/Green Application Deployments:
 ### 4. Database Monitoring
 
 **Required:**
+
 - Health check endpoint for database
 - Connection pool monitoring
 - Disk space monitoring
@@ -159,6 +164,7 @@ Blue/Green Application Deployments:
 ### 5. Backup Strategy
 
 **Required:**
+
 - Automated daily backups
 - Point-in-time recovery capability
 - Backup verification
@@ -167,6 +173,7 @@ Blue/Green Application Deployments:
 ### 6. Volume Management
 
 **Required:**
+
 - Explicit volume naming and management
 - Volume lifecycle documentation
 - Backup/restore procedures
@@ -211,4 +218,3 @@ After refactoring, verify:
 **Status:** 🔴 CRITICAL - Immediate Action Required  
 **Risk Level:** 🔴 HIGH - Data Corruption and Loss Risk  
 **Priority:** 🔴 P0 - Fix Before Next Deployment
-

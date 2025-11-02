@@ -64,7 +64,7 @@ Update your `.env` file with the new Binance credentials:
 BINANCE_API_KEY=your_new_api_key_here
 BINANCE_API_SECRET=your_new_secret_key_here
 BINANCE_API_URL=https://api.binance.com/api/v3
-```text
+```
 
 ### Step 3: Restart Services
 
@@ -74,7 +74,7 @@ BINANCE_API_URL=https://api.binance.com/api/v3
 
 # Start services with new credentials
 ./start.sh
-```text
+```
 
 ## Usage
 
@@ -85,28 +85,28 @@ BINANCE_API_URL=https://api.binance.com/api/v3
 ```bash
 curl -X POST "http://localhost:8100/api/import/binance/test-connection" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 #### Preview Import
 
 ```bash
 curl -X POST "http://localhost:8100/api/import/binance/preview" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 #### Execute Import
 
 ```bash
 curl -X POST "http://localhost:8100/api/import/binance/execute" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 #### View Import History
 
 ```bash
 curl -X GET "http://localhost:8100/api/import/history" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```text
+```
 
 ### Method 2: Test Script
 
@@ -114,7 +114,7 @@ Use the provided test script for easy testing:
 
 ```bash
 python test_binance_import.py
-```text
+```
 
 ## API Response Examples
 
@@ -130,7 +130,7 @@ python test_binance_import.py
   "can_deposit": true,
   "balances_count": 724
 }
-```text
+```
 
 ### Portfolio Import Preview
 
@@ -152,7 +152,7 @@ python test_binance_import.py
     }
   ]
 }
-```text
+```
 
 ### Import Execution Result
 
@@ -163,7 +163,7 @@ python test_binance_import.py
   "items_imported": 12,
   "total_found": 12
 }
-```text
+```
 
 ## Technical Implementation
 
@@ -183,7 +183,7 @@ CREATE TABLE import_history (
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-```text
+```
 
 #### Portfolio Items Table
 
@@ -207,7 +207,7 @@ CREATE TABLE portfolio_items (
     pnl_percent REAL,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
-```text
+```
 
 ### Service Architecture
 
@@ -272,13 +272,13 @@ CREATE TABLE portfolio_items (
 
 ```bash
 python test_binance_direct.py
-```text
+```
 
 #### Test Import Service
 
 ```bash
 python test_binance_service.py
-```text
+```
 
 #### Check Configuration
 
@@ -288,7 +288,7 @@ from app.core.config import settings
 print(f'API Key: {settings.binance_api_key[:10]}...')
 print(f'API Secret: {settings.binance_api_secret[:10]}...')
 "
-```text
+```
 
 ## Performance Considerations
 

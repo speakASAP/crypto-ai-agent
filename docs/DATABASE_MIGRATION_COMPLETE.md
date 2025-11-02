@@ -40,17 +40,19 @@ Successfully migrated `crypto-ai-agent` from local database containers to the ce
 ```bash
 DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@db-server-postgres:5432/crypto_ai_agent
 REDIS_URL=redis://db-server-redis:6379/0
-```text
+```
 
 ### 5. Containers Updated ✅
 
 **Running:**
+
 - ✅ `db-server-postgres` - Centralized PostgreSQL
 - ✅ `db-server-redis` - Centralized Redis
 - ✅ `crypto-ai-backend-green` - Connected to centralized DB
 - ✅ `crypto-ai-frontend-green` - Running
 
 **Removed:**
+
 - ✅ `crypto-ai-postgres-green` - Removed (using centralized)
 - ✅ `crypto-ai-redis-green` - Removed (using centralized)
 
@@ -64,7 +66,7 @@ crypto-ai-agent/
 ├── crypto-ai-redis (local)
 ├── crypto-ai-backend
 └── crypto-ai-frontend
-```text
+```
 
 ### After
 
@@ -76,7 +78,7 @@ database-server/          (centralized)
 crypto-ai-agent/
 ├── crypto-ai-backend    (connects to db-server-postgres)
 └── crypto-ai-frontend
-```text
+```
 
 ## Benefits
 
@@ -97,7 +99,7 @@ docker volume rm crypto_ai_agent_blue_pgdata-blue
 docker volume rm crypto_ai_agent_blue_redisdata-blue
 docker volume rm crypto_ai_agent_green_pgdata-green
 docker volume rm crypto_ai_agent_green_redisdata-green
-```text
+```
 
 ⚠️ **Warning**: Only remove after confirming all data is migrated and accessible!
 
@@ -108,19 +110,19 @@ docker volume rm crypto_ai_agent_green_redisdata-green
 ```bash
 cd /home/statex/database-server
 ./scripts/backup-database.sh crypto-ai-agent
-```text
+```
 
 ### Backup All Databases
 
 ```bash
 ./scripts/backup-all-databases.sh
-```text
+```
 
 ### Automated Backups
 
 ```bash
 ./scripts/setup-backup-cron.sh
-```text
+```
 
 This sets up daily backups at 2:00 AM.
 
@@ -131,7 +133,7 @@ This sets up daily backups at 2:00 AM.
 ```bash
 cd /home/statex/database-server
 ./scripts/status.sh
-```text
+```
 
 ### Test Connection
 
@@ -144,34 +146,37 @@ cur = conn.cursor()
 cur.execute('SELECT COUNT(*) FROM users')
 print('Users:', cur.fetchone()[0])
 "
-```text
+```
 
 ### List All Databases
 
 ```bash
 cd /home/statex/database-server
 ./scripts/list-databases.sh
-```text
+```
 
 ## Next Steps for Other Projects
 
 To migrate other projects to the centralized server:
 
 1. **Create Database:**
+
    ```bash
    cd /home/statex/database-server
    ./scripts/create-database.sh project-name user password db_name
-   ```text
+   ```
 
 2. **Backup Existing Database:**
+
    ```bash
    docker exec old-postgres-container pg_dump -U user db_name > backup.sql
-   ```text
+   ```
 
 3. **Restore to Centralized:**
+
    ```bash
    cat backup.sql | docker exec -i db-server-postgres psql -U dbadmin -d db_name
-   ```text
+   ```
 
 4. **Update Project Configuration:**
    - Update `DATABASE_URL` to point to `db-server-postgres`
@@ -190,4 +195,3 @@ To migrate other projects to the centralized server:
 
 **Migration Date**: 2025-11-01  
 **Status**: ✅ Production Ready
-
