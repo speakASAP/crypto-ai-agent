@@ -196,21 +196,28 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                 symbol = item['symbol']
                 net_change = item.get('net_change', item.get('quantity', 0))
                 is_sell_only = item.get('is_sell_only', False)
+                logger.info(f"📦 Processing aggregated item: {symbol}, net_change={net_change}, is_sell_only={is_sell_only}, quantity={item.get('quantity', 0)}")
 
                 # Check if portfolio item exists by symbol only (not quantity)
                 # Use UPPER() for case-insensitive comparison since CSV symbols are normalized to uppercase
+                # Also trim whitespace from symbol for matching
+                symbol_normalized = symbol.strip().upper() if symbol else symbol
                 if is_pg:
                     check_existing_sql = (
                         "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase "
-                        "FROM portfolio_items WHERE user_id = %s AND UPPER(symbol) = UPPER(%s)"
+                        "FROM portfolio_items WHERE user_id = %s AND UPPER(TRIM(symbol)) = UPPER(TRIM(%s))"
                     )
                 else:
                     check_existing_sql = (
                         "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase "
-                        "FROM portfolio_items WHERE user_id = ? AND UPPER(symbol) = UPPER(?)"
+                        "FROM portfolio_items WHERE user_id = ? AND UPPER(TRIM(symbol)) = UPPER(TRIM(?))"
                     )
-                cursor.execute(check_existing_sql, (current_user["id"], symbol))
+                cursor.execute(check_existing_sql, (current_user["id"], symbol_normalized))
                 existing_item = cursor.fetchone()
+                if existing_item:
+                    logger.info(f"✅ Found existing portfolio item for {symbol}: id={existing_item[0]}, amount={existing_item[1]}")
+                else:
+                    logger.info(f"ℹ️ No existing portfolio item found for {symbol}")
 
                 currency = item.get('currency', 'USD')
                 currency_service.ensure_rates_initialized()
@@ -227,18 +234,26 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                     existing_exchange_rate = existing_item[7]
 
                     # Calculate new amount after applying CSV net change
+                    # Use a small epsilon to handle floating point precision issues
                     new_amount = existing_amount + net_change
+                    epsilon = 1e-10  # Very small threshold for floating point comparison only
 
-                    if new_amount <= 0:
+                    logger.info(f"🔍 Processing {symbol}: existing={existing_amount}, net_change={net_change}, new_amount={new_amount}")
+
+                    # Only delete if amount is 0 or effectively 0 (due to floating point precision)
+                    # Keep small amounts - only delete when truly zero
+                    if new_amount <= epsilon:
                         # Fully sold or over-sold: DELETE portfolio item
                         delete_sql = _normalize_placeholders(
                             "DELETE FROM portfolio_items WHERE id = ? AND user_id = ?",
                             is_pg
                         )
+                        logger.info(f"🗑️ Executing DELETE for {symbol}: id={existing_id}, user_id={current_user['id']}")
                         cursor.execute(delete_sql, (existing_id, current_user["id"]))
                         deleted_count += 1
-                        logger.info(f"🗑️ Deleted {symbol} (sold completely, was {existing_amount}, sold {abs(net_change)})")
+                        logger.info(f"🗑️ Deleted {symbol} (sold completely, was {existing_amount}, sold {abs(net_change)}, new_amount={new_amount})")
                     else:
+                        logger.info(f"⚠️ {symbol} NOT deleted: new_amount={new_amount} > epsilon={epsilon} (partial sell or net increase)")
                         # Partial sell or additional buy: UPDATE portfolio item
                         # Calculate weighted average price
                         if is_sell_only:
@@ -351,6 +366,7 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                         logger.info(f"🔄 Updated {symbol}: {existing_amount} -> {new_amount} (change: {net_change:+.8f})")
                 else:
                     # Portfolio item doesn't exist
+                    logger.info(f"📋 {symbol} not found in portfolio (net_change={net_change})")
                     if net_change > 0:
                         # Insert new item (net change is positive = buy)
                         if currency != 'USD':

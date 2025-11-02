@@ -17,11 +17,11 @@ The blue/green deployment system uses:
 
 1. **Nginx Microservice Running**: Blue/green scripts are managed from nginx-microservice
 2. **Service Registered**: Service must be in `/nginx-microservice/service-registry/crypto-ai-agent.json`
-3. **Docker Compose Files**: 
+3. **Docker Compose Files**:
    - `docker-compose.blue.yml` - Blue environment
    - `docker-compose.green.yml` - Green environment
    - `docker-compose.infrastructure.yml` (optional - if using shared database-server, not needed)
-4. **Health Endpoints**: 
+4. **Health Endpoints**:
    - Backend: `/health`
    - Frontend: `/`
 
@@ -43,6 +43,7 @@ cd /path/to/database-server
 The blue/green deployment scripts automatically detect and use shared infrastructure.
 
 **Connection Details:**
+
 - PostgreSQL: `db-server-postgres:5432`
 - Redis: `db-server-redis:6379`
 
@@ -56,6 +57,7 @@ docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastru
 ```
 
 **Connection Details:**
+
 - PostgreSQL: `crypto-ai-postgres:5432`
 - Redis: `crypto-ai-redis:6379`
 
@@ -107,6 +109,7 @@ cd /path/to/nginx-microservice
 ```
 
 This will:
+
 - Switch traffic back to previous color
 - Stop failed color containers
 - Update state file
@@ -118,6 +121,7 @@ cat /path/to/nginx-microservice/state/crypto-ai-agent.json | jq .
 ```
 
 **State Values:**
+
 - `active_color`: Currently active color (blue or green)
 - `blue.status`: blue container status (running, stopped, backup)
 - `green.status`: green container status (running, stopped, backup)
@@ -130,6 +134,7 @@ cat /path/to/nginx-microservice/state/crypto-ai-agent.json | jq .
 **Cause:** Script can't find `docker-compose.infrastructure.yml` and shared database-server is not running.
 
 **Solution:**
+
 1. Start shared database-server: `cd database-server && ./scripts/start.sh`
 2. OR copy `docker-compose.infrastructure.yml` to production server
 
@@ -138,6 +143,7 @@ cat /path/to/nginx-microservice/state/crypto-ai-agent.json | jq .
 **Cause:** Nginx config references containers that don't exist.
 
 **Solution:**
+
 - The `update_nginx_upstream` function automatically comments out missing containers
 - Ensure at least one color (blue or green) has running containers
 - Run: `./scripts/blue-green/switch-traffic.sh crypto-ai-agent` to fix config
@@ -147,11 +153,13 @@ cat /path/to/nginx-microservice/state/crypto-ai-agent.json | jq .
 **Cause:** New deployment failed health checks.
 
 **Actions Taken:**
+
 - Automatic rollback to previous color
 - Failed containers stopped
 - Traffic switched back immediately
 
 **Investigation:**
+
 ```bash
 # Check container logs
 docker logs crypto-ai-backend-green
@@ -166,6 +174,7 @@ tail -f /path/to/nginx-microservice/logs/blue-green/deploy.log
 **Cause:** Nginx references a container that doesn't exist or isn't on nginx-network.
 
 **Solution:**
+
 1. Verify containers are running: `docker ps | grep crypto-ai`
 2. Verify containers are on nginx-network: `docker inspect crypto-ai-backend-blue | grep nginx-network`
 3. Use switch-traffic script to update config: `./scripts/blue-green/switch-traffic.sh crypto-ai-agent`
@@ -175,6 +184,7 @@ tail -f /path/to/nginx-microservice/logs/blue-green/deploy.log
 **Cause:** Nginx config issue or firewall blocking port 443.
 
 **Solution:**
+
 1. Check nginx status: `docker ps | grep nginx-microservice`
 2. Test config: `docker compose exec nginx nginx -t`
 3. Check logs: `docker compose logs nginx | tail -50`
@@ -266,6 +276,7 @@ Managed automatically by `switch-traffic.sh`. **DO NOT** edit manually unless tr
 ```
 
 **Format:**
+
 ```text
 [TIMESTAMP] [LEVEL] [SERVICE] [COLOR] [ACTION] [MESSAGE]
 ```
@@ -346,4 +357,3 @@ docker compose -f docker-compose.blue.yml -p crypto_ai_agent_blue restart
 - [Blue/Green Deployment Overview](../nginx-microservice/docs/BLUE_GREEN_DEPLOYMENT.md)
 - [Docker Deployment Guide](./DEPLOYMENT_DOCKER.md)
 - [Database Server Documentation](../database-server/README.md)
-
