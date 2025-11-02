@@ -28,11 +28,11 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
   - File Storage: `data/crypto_portfolio.db`
   - Backup: Simple file copy
   - Zero Configuration: No database server needed
-- **Production**: PostgreSQL (service-specific infrastructure)
-  - Database Server: `crypto-ai-postgres:5432`
+- **Production**: PostgreSQL (shared database server)
+  - Database Server: `db-server-postgres:5432`
   - Database Name: `crypto_ai_agent`
-  - Infrastructure: Managed separately via `docker-compose.infrastructure.yml`
-  - Shared by Blue/Green: Both environments use the same database instance
+  - Infrastructure: Managed by centralized `database-server` microservice
+  - Shared by Blue/Green: Both environments use the same shared database instance
   - Persistent Storage: Data persists across deployments
 
 ## Main Features
@@ -450,7 +450,7 @@ The production environment uses blue/green deployment for zero-downtime restarts
 
 - Nginx microservice must be running
 - Service must be registered in `/nginx-microservice/service-registry/crypto-ai-agent.json`
-- Infrastructure (PostgreSQL and Redis) must be running (see [Database Management](#database-management))
+- Shared database server must be running (see [Database Management](#database-management))
 
 #### Restarting the Service
 
@@ -503,7 +503,7 @@ cat nginx-microservice/state/crypto-ai-agent.json | jq .
 
 #### Database Configuration
 
-**IMPORTANT**: Both blue and green environments connect to the **same production database** (`crypto-ai-postgres`) to ensure:
+**IMPORTANT**: Both blue and green environments connect to the **same shared production database** (`db-server-postgres`) to ensure:
 
 - ✅ Zero data loss during deployments
 - ✅ Consistent data across environments
@@ -513,14 +513,15 @@ Configuration in `docker-compose.blue.yml` and `docker-compose.green.yml`:
 
 ```yaml
 environment:
-  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@crypto-ai-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
-  - REDIS_URL=redis://crypto-ai-redis:6379/0
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://db-server-redis:6379/0
 ```
 
-Infrastructure is started separately:
+Shared database server must be running:
 
 ```bash
-docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
+cd database-server
+./scripts/start.sh
 ```
 
 #### Verification After Deployment
@@ -545,9 +546,9 @@ docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastru
 
 ##### Issue: "Infrastructure not found"
 
-- Ensure infrastructure is running: `docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure ps`
-- Start infrastructure if needed: `cd crypto-ai-agent && docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d`
-- Verify containers are healthy: Check `crypto-ai-postgres` and `crypto-ai-redis` are running
+- Ensure database-server is running: `cd database-server && ./scripts/status.sh`
+- Start database-server if needed: `cd database-server && ./scripts/start.sh`
+- Verify containers are healthy: Check `db-server-postgres` and `db-server-redis` are running
 
 ##### Issue: "Health check failed"
 
@@ -557,91 +558,113 @@ docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastru
 
 ##### Issue: "Login fails after deployment"
 
-- Verify infrastructure is running: `docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure ps`
+- Verify database-server is running: `cd database-server && ./scripts/status.sh`
 - Verify database connection: Check `DATABASE_URL` in container
 - Verify database has customer data: Check user count in database
-- Ensure backend connects to `crypto-ai-postgres` (not empty database)
-- Start infrastructure if needed: `docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d`
+- Ensure backend connects to `db-server-postgres` (shared database with customer data)
+- Start database-server if needed: `cd database-server && ./scripts/start.sh`
 
 For detailed troubleshooting, see [Blue/Green Deployment Guide](docs/BLUE_GREEN_DEPLOYMENT_GUIDE.md).
 
 ### Database Management
 
-The production environment uses a **separate infrastructure microservice** managed by `docker-compose.infrastructure.yml`. This ensures data persistence, zero-downtime deployments, and isolated infrastructure for the crypto-ai-agent service.
+The production environment uses a **shared database server** (`database-server`) that provides centralized PostgreSQL and Redis infrastructure. This ensures data persistence, zero-downtime deployments, and centralized management across all services.
 
 #### Database Architecture
 
 **Production Setup:**
 
-- **PostgreSQL**: `crypto-ai-postgres:5432` (service-specific infrastructure)
-- **Redis**: `crypto-ai-redis:6379` (service-specific cache)
+- **PostgreSQL**: `db-server-postgres:5432` (shared database server)
+- **Redis**: `db-server-redis:6379` (shared cache)
 - **Database Name**: `crypto_ai_agent`
-- **Infrastructure**: Managed separately via `docker-compose.infrastructure.yml`
-- **Connection**: Both blue and green environments use the same database instance
+- **Infrastructure**: Managed by the centralized `database-server` microservice
+- **Connection**: Both blue and green environments use the same shared database instance
 
 #### Database Connection
 
-Both `docker-compose.blue.yml` and `docker-compose.green.yml` are configured to connect to the service-specific infrastructure:
+Both `docker-compose.blue.yml` and `docker-compose.green.yml` are configured to connect to the shared database server:
 
 ```yaml
 environment:
-  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@crypto-ai-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
-  - REDIS_URL=redis://crypto-ai-redis:6379/0
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://db-server-redis:6379/0
 ```
 
 **Important Points:**
 
-- ✅ Both environments use the **same database** (zero data loss during deployments)
-- ✅ Database hostname is `crypto-ai-postgres` (Docker network hostname)
-- ✅ Infrastructure is managed separately from blue/green deployments
+- ✅ Both environments use the **same shared database** (zero data loss during deployments)
+- ✅ Database hostname is `db-server-postgres` (Docker network hostname)
+- ✅ Infrastructure is managed centrally by `database-server` microservice
 - ✅ Database is **never stopped** during blue/green deployments
 - ✅ Customer data is **always available** in both blue and green environments
 
 #### Infrastructure Management
 
-**Start Infrastructure** (PostgreSQL and Redis):
+The shared database server is managed separately from crypto-ai-agent. To manage it:
+
+**Check Database Server Status:**
 
 ```bash
-cd crypto-ai-agent
-docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
+cd database-server
+./scripts/status.sh
 ```
 
-**Check Infrastructure Status:**
+**Start Database Server** (if not running):
 
 ```bash
-docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure ps
+cd database-server
+./scripts/start.sh
 ```
 
-**Stop Infrastructure** (⚠️ Use with caution - affects service availability):
+**Stop Database Server** (⚠️ Use with caution - affects all services using it):
 
 ```bash
-docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure down
+cd database-server
+./scripts/stop.sh
 ```
 
-**Restart Infrastructure:**
+**View Database Server Logs:**
 
 ```bash
-docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure restart
-```
-
-**View Infrastructure Logs:**
-
-```bash
-docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure logs -f
+cd database-server
+docker compose logs -f
 ```
 
 #### Database Backups
 
-**Manual Backup** (using docker exec):
+**Manual Backup** (using database-server scripts):
 
 ```bash
-docker exec crypto-ai-postgres pg_dump -U crypto crypto_ai_agent > backup_$(date +%Y%m%d_%H%M%S).sql
+cd database-server
+./scripts/backup-database.sh crypto-ai-agent
+```
+
+**Backup All Databases:**
+
+```bash
+cd database-server
+./scripts/backup-all-databases.sh
+```
+
+**Automated Backups:**
+
+```bash
+cd database-server
+./scripts/setup-backup-cron.sh
+```
+
+This sets up daily backups at 2:00 AM.
+
+**Manual Backup** (using docker exec directly):
+
+```bash
+docker exec db-server-postgres pg_dump -U crypto crypto_ai_agent > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
 **Restore from Backup:**
 
 ```bash
-cat backup_file.sql | docker exec -i crypto-ai-postgres psql -U crypto crypto_ai_agent
+cat backup_file.sql | docker exec -i db-server-postgres psql -U crypto crypto_ai_agent
 ```
 
 #### Verify Database Connection
@@ -670,7 +693,14 @@ print('Portfolio Items:', cur.fetchone()[0])
 **List All Databases:**
 
 ```bash
-docker exec crypto-ai-postgres psql -U crypto -c "\l"
+cd database-server
+./scripts/list-databases.sh
+```
+
+Or directly:
+
+```bash
+docker exec db-server-postgres psql -U crypto -c "\l"
 ```
 
 #### Database Safety Features
@@ -709,15 +739,15 @@ The database includes the following tables:
 
 #### Database Migration Notes
 
-- Database uses service-specific infrastructure (`crypto-ai-postgres`)
-- Infrastructure is managed separately via `docker-compose.infrastructure.yml`
-- All customer data is stored in production database
+- Database uses shared infrastructure (`db-server-postgres`) from `database-server` microservice
+- Infrastructure is managed centrally by the `database-server` service
+- All customer data is stored in the shared production database
 - **Never migrate from local to production** - production is source of truth
 - Blue/green deployments share the same database instance
 - Data persistence is guaranteed across deployments
-- Infrastructure must be started before blue/green deployments
+- Database server must be running before blue/green deployments
 
-For more details, see [Database Safety Refactoring Plan](docs/DATABASE_SAFETY_REFACTORING_PLAN.md).
+For more details, see [Database Migration Guide](docs/DATABASE_MIGRATION_COMPLETE.md) and [Production Database Setup](docs/PRODUCTION_DATABASE_SETUP.md).
 
 ## Environment Variables
 
