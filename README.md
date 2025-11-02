@@ -22,12 +22,18 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 - **Real-time**: Live price updates and alerts
 - **Deployment**: Local development or simple server
 
-### Database: SQLite
+### Database: SQLite (Development) / PostgreSQL (Production)
 
-- **Primary DB**: SQLite (built into Python)
-- **File Storage**: `data/crypto_portfolio.db`
-- **Backup**: Simple file copy
-- **Zero Configuration**: No database server needed
+- **Development**: SQLite (file-based, no server required)
+  - File Storage: `data/crypto_portfolio.db`
+  - Backup: Simple file copy
+  - Zero Configuration: No database server needed
+- **Production**: PostgreSQL (service-specific infrastructure)
+  - Database Server: `crypto-ai-postgres:5432`
+  - Database Name: `crypto_ai_agent`
+  - Infrastructure: Managed separately via `docker-compose.infrastructure.yml`
+  - Shared by Blue/Green: Both environments use the same database instance
+  - Persistent Storage: Data persists across deployments
 
 ## Main Features
 
@@ -435,6 +441,283 @@ docker compose up -d --build
 # Backend API: http://localhost:8100
 # API Docs: http://localhost:8100/docs
 ```
+
+### Blue/Green Deployment (Production Restart)
+
+The production environment uses blue/green deployment for zero-downtime restarts and updates.
+
+#### Deployment Prerequisites
+
+- Nginx microservice must be running
+- Service must be registered in `/nginx-microservice/service-registry/crypto-ai-agent.json`
+- Infrastructure (PostgreSQL and Redis) must be running (see [Database Management](#database-management))
+
+#### Restarting the Service
+
+**From the nginx-microservice directory:**
+
+```bash
+ssh statex
+cd nginx-microservice
+./scripts/blue-green/deploy.sh crypto-ai-agent
+```
+
+This will:
+
+1. **Check Infrastructure**: Verify database and Redis are running
+2. **Prepare New Environment**: Build and start the inactive color (blue or green)
+3. **Health Checks**: Verify the new environment is healthy
+4. **Switch Traffic**: Instantly switch traffic to the new environment (< 2 seconds downtime)
+5. **Monitor**: Monitor health for 5 minutes with automatic rollback on failure
+6. **Cleanup**: Remove old environment if deployment is successful
+
+#### Deployment Phases
+
+- **Phase 0**: Infrastructure verification (database/Redis availability)
+- **Phase 1**: Build and start new containers, verify health
+- **Phase 2**: Switch nginx traffic to new environment
+- **Phase 3**: Monitor for 5 minutes (health checks every 30 seconds)
+- **Phase 4**: Cleanup old environment if successful
+
+#### Manual Rollback
+
+If you need to rollback to the previous deployment:
+
+```bash
+cd nginx-microservice
+./scripts/blue-green/rollback.sh crypto-ai-agent
+```
+
+#### Check Deployment Status
+
+```bash
+cat nginx-microservice/state/crypto-ai-agent.json | jq .
+```
+
+**Status Fields:**
+
+- `active_color`: Currently active environment (blue or green)
+- `blue.status`: Status of blue containers
+- `green.status`: Status of green containers
+- `last_deployment`: Last deployment timestamp and success status
+
+#### Database Configuration
+
+**IMPORTANT**: Both blue and green environments connect to the **same production database** (`crypto-ai-postgres`) to ensure:
+
+- ✅ Zero data loss during deployments
+- ✅ Consistent data across environments
+- ✅ Customer data always available
+
+Configuration in `docker-compose.blue.yml` and `docker-compose.green.yml`:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@crypto-ai-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://crypto-ai-redis:6379/0
+```
+
+Infrastructure is started separately:
+
+```bash
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
+```
+
+#### Verification After Deployment
+
+1. **Test Login**:
+
+   ```bash
+   curl -X POST https://crypto-ai-agent.statex.cz/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"your-email@example.com","password":"your-password"}'
+   ```
+
+2. **Check Health**:
+
+   ```bash
+   curl https://crypto-ai-agent.statex.cz/api/health
+   ```
+
+3. **Verify Portfolio**: Login and confirm portfolio items are accessible
+
+#### Deployment Troubleshooting
+
+##### Issue: "Infrastructure not found"
+
+- Ensure infrastructure is running: `docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure ps`
+- Start infrastructure if needed: `cd crypto-ai-agent && docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d`
+- Verify containers are healthy: Check `crypto-ai-postgres` and `crypto-ai-redis` are running
+
+##### Issue: "Health check failed"
+
+- Deployment automatically rolls back on health check failure
+- Check logs: `docker logs crypto-ai-backend-green`
+- Check deployment logs: `tail -f nginx-microservice/logs/blue-green/deploy.log`
+
+##### Issue: "Login fails after deployment"
+
+- Verify infrastructure is running: `docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure ps`
+- Verify database connection: Check `DATABASE_URL` in container
+- Verify database has customer data: Check user count in database
+- Ensure backend connects to `crypto-ai-postgres` (not empty database)
+- Start infrastructure if needed: `docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d`
+
+For detailed troubleshooting, see [Blue/Green Deployment Guide](docs/BLUE_GREEN_DEPLOYMENT_GUIDE.md).
+
+### Database Management
+
+The production environment uses a **separate infrastructure microservice** managed by `docker-compose.infrastructure.yml`. This ensures data persistence, zero-downtime deployments, and isolated infrastructure for the crypto-ai-agent service.
+
+#### Database Architecture
+
+**Production Setup:**
+
+- **PostgreSQL**: `crypto-ai-postgres:5432` (service-specific infrastructure)
+- **Redis**: `crypto-ai-redis:6379` (service-specific cache)
+- **Database Name**: `crypto_ai_agent`
+- **Infrastructure**: Managed separately via `docker-compose.infrastructure.yml`
+- **Connection**: Both blue and green environments use the same database instance
+
+#### Database Connection
+
+Both `docker-compose.blue.yml` and `docker-compose.green.yml` are configured to connect to the service-specific infrastructure:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@crypto-ai-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://crypto-ai-redis:6379/0
+```
+
+**Important Points:**
+
+- ✅ Both environments use the **same database** (zero data loss during deployments)
+- ✅ Database hostname is `crypto-ai-postgres` (Docker network hostname)
+- ✅ Infrastructure is managed separately from blue/green deployments
+- ✅ Database is **never stopped** during blue/green deployments
+- ✅ Customer data is **always available** in both blue and green environments
+
+#### Infrastructure Management
+
+**Start Infrastructure** (PostgreSQL and Redis):
+
+```bash
+cd crypto-ai-agent
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
+```
+
+**Check Infrastructure Status:**
+
+```bash
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure ps
+```
+
+**Stop Infrastructure** (⚠️ Use with caution - affects service availability):
+
+```bash
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure down
+```
+
+**Restart Infrastructure:**
+
+```bash
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure restart
+```
+
+**View Infrastructure Logs:**
+
+```bash
+docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure logs -f
+```
+
+#### Database Backups
+
+**Manual Backup** (using docker exec):
+
+```bash
+docker exec crypto-ai-postgres pg_dump -U crypto crypto_ai_agent > backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
+**Restore from Backup:**
+
+```bash
+cat backup_file.sql | docker exec -i crypto-ai-postgres psql -U crypto crypto_ai_agent
+```
+
+#### Verify Database Connection
+
+**From Backend Container:**
+
+```bash
+docker exec crypto-ai-backend-green env | grep DATABASE_URL
+```
+
+**Test Database Connection:**
+
+```bash
+docker exec crypto-ai-backend-green python -c "
+import os, psycopg
+url = os.getenv('DATABASE_URL', '').replace('+psycopg', '')
+conn = psycopg.connect(url)
+cur = conn.cursor()
+cur.execute('SELECT COUNT(*) FROM users')
+print('Users:', cur.fetchone()[0])
+cur.execute('SELECT COUNT(*) FROM portfolio_items')
+print('Portfolio Items:', cur.fetchone()[0])
+"
+```
+
+**List All Databases:**
+
+```bash
+docker exec crypto-ai-postgres psql -U crypto -c "\l"
+```
+
+#### Database Safety Features
+
+**Never Create Tables if Database Has Data:**
+
+- The application verifies database connection before creating tables
+- If database already has customer data, table creation is **skipped**
+- This protects thousands of customer accounts from accidental deletion
+
+**Automatic Retry Logic:**
+
+- Database connections use exponential backoff retry logic
+- Startup: 5 retries with 2s initial delay (max 30s)
+- Runtime: 3 retries with 0.5s initial delay (max 2s)
+- Health checks verify database connectivity before deployment
+
+**Connection Resilience:**
+
+- All database operations use retry logic
+- Transient connection failures are automatically retried
+- Health endpoints verify database connectivity and data presence
+
+#### Database Schema
+
+The database includes the following tables:
+
+- `users` - User accounts and profiles
+- `portfolio_items` - Cryptocurrency portfolio holdings
+- `price_alerts` - Price alert configurations
+- `alert_history` - Alert trigger history
+- `symbols` - Supported cryptocurrency symbols
+- `user_api_credentials` - Encrypted user API credentials
+- `password_reset_tokens` - Password reset tokens
+- And other supporting tables
+
+#### Database Migration Notes
+
+- Database uses service-specific infrastructure (`crypto-ai-postgres`)
+- Infrastructure is managed separately via `docker-compose.infrastructure.yml`
+- All customer data is stored in production database
+- **Never migrate from local to production** - production is source of truth
+- Blue/green deployments share the same database instance
+- Data persistence is guaranteed across deployments
+- Infrastructure must be started before blue/green deployments
+
+For more details, see [Database Safety Refactoring Plan](docs/DATABASE_SAFETY_REFACTORING_PLAN.md).
 
 ## Environment Variables
 

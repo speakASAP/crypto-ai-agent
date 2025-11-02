@@ -1256,7 +1256,7 @@ export default function Home() {
                 Clear Filters
               </Button>
               <div className="ml-auto text-sm text-muted-foreground">
-                Showing {sortedItems.length} of {items.length} items
+                Showing {sortedItems.length} of {filteredItems.length} items
               </div>
             </div>
           </div>
