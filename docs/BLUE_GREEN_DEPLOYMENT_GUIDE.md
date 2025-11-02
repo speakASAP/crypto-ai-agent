@@ -38,7 +38,7 @@ cd /path/to/database-server
 
 # Verify it's running
 ./scripts/status.sh
-```text
+```
 
 The blue/green deployment scripts automatically detect and use shared infrastructure.
 
@@ -53,7 +53,7 @@ If using `docker-compose.infrastructure.yml` (for development or isolated deploy
 ```bash
 cd /path/to/crypto-ai-agent
 docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
-```text
+```
 
 **Connection Details:**
 - PostgreSQL: `crypto-ai-postgres:5432`
@@ -68,7 +68,7 @@ From nginx-microservice directory:
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```text
+```
 
 **What This Does:**
 
@@ -104,7 +104,7 @@ If you need to rollback manually:
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```text
+```
 
 This will:
 - Switch traffic back to previous color
@@ -115,7 +115,7 @@ This will:
 
 ```bash
 cat /path/to/nginx-microservice/state/crypto-ai-agent.json | jq .
-```text
+```
 
 **State Values:**
 - `active_color`: Currently active color (blue or green)
@@ -159,7 +159,7 @@ docker logs crypto-ai-frontend-green
 
 # Check deployment logs
 tail -f /path/to/nginx-microservice/logs/blue-green/deploy.log
-```text
+```
 
 ### Issue: "Container not found in upstream"
 
@@ -195,7 +195,7 @@ docker logs crypto-ai-frontend-green
 
 # Then proceed with full deployment
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```text
+```
 
 ### 2. Monitor After Deployment
 
@@ -209,7 +209,7 @@ watch -n 5 'docker ps | grep crypto-ai'
 # Check application logs
 docker logs -f crypto-ai-backend-green
 docker logs -f crypto-ai-frontend-green
-```text
+```
 
 ### 3. Keep State File Accurate
 
@@ -219,7 +219,7 @@ The state file must match actual running containers. If you manually restart con
 # Update state file to reflect current status
 cd /path/to/nginx-microservice
 ./scripts/blue-green/switch-traffic.sh crypto-ai-agent
-```text
+```
 
 ### 4. Infrastructure Management
 
@@ -233,7 +233,7 @@ After successful deployment, old color is automatically cleaned up. To manually 
 
 ```bash
 ./scripts/blue-green/cleanup.sh crypto-ai-agent
-```text
+```
 
 **Warning:** Only run cleanup if you're sure the other color is healthy and running.
 
@@ -263,12 +263,12 @@ Managed automatically by `switch-traffic.sh`. **DO NOT** edit manually unless tr
 
 ```text
 /path/to/nginx-microservice/logs/blue-green/deploy.log
-```text
+```
 
 **Format:**
 ```text
 [TIMESTAMP] [LEVEL] [SERVICE] [COLOR] [ACTION] [MESSAGE]
-```text
+```
 
 ### Application Logs
 
@@ -283,14 +283,14 @@ docker logs crypto-ai-frontend-green
 
 # Follow logs
 docker logs -f crypto-ai-backend-green
-```text
+```
 
 ### Nginx Logs
 
 ```bash
 docker compose logs nginx
 docker compose logs nginx --tail 100 -f
-```text
+```
 
 ## Production Deployment Checklist
 
@@ -312,7 +312,7 @@ docker compose logs nginx --tail 100 -f
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```text
+```
 
 ### Stop All Deployments
 
@@ -323,7 +323,7 @@ docker compose -f /path/to/crypto-ai-agent/docker-compose.green.yml \
 
 # Keep blue running (active)
 # Infrastructure stays running
-```text
+```
 
 ### Full Restart
 
@@ -339,7 +339,7 @@ cd /path/to/database-server
 # Restart crypto-ai-agent blue (if needed)
 cd /path/to/crypto-ai-agent
 docker compose -f docker-compose.blue.yml -p crypto_ai_agent_blue restart
-```text
+```
 
 ## Related Documentation
 

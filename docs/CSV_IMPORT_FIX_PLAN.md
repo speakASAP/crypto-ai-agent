@@ -167,12 +167,14 @@ for item in aggregated_items:
         else:
             # Selling non-existent position - log warning
             logger.warning(f"Selling {symbol} that doesn't exist in portfolio")
-```text
+```
 
 ## Testing Scenarios
 
 ### Test Case 1: Sell-Only Transactions (User's Current Scenario)
+
 **Input CSV**:
+
 - ZEN: Sell 7.65
 - DASH: Sell 2.00
 - IP: Sell 12
@@ -180,22 +182,27 @@ for item in aggregated_items:
 - BTC: Buy 0.0043
 
 **Expected Result**:
+
 - ZEN, DASH, IP, HBAR removed from portfolio (if they existed)
 - BTC added to portfolio (or updated if exists)
 
 ### Test Case 2: Merge with Existing Portfolio
+
 **Portfolio State**: BTC 5.0 @ $50,000
 **CSV Input**: BTC Sell 2.0
 **Expected Result**: BTC updated to 3.0 @ $50,000
 
 ### Test Case 3: Multiple Transactions Same Symbol
-**CSV Input**: 
+
+**CSV Input**:
+
 - BTC Buy 1.0 @ $45,000
 - BTC Sell 0.5 @ $50,000
 - BTC Buy 2.0 @ $55,000
 **Expected Result**: BTC net = 2.5 @ weighted average price
 
 ### Test Case 4: Fully Sold Position
+
 **Portfolio State**: ETH 2.0
 **CSV Input**: ETH Sell 2.0
 **Expected Result**: ETH deleted from portfolio
@@ -203,6 +210,7 @@ for item in aggregated_items:
 ## Rollback Plan
 
 If issues arise:
+
 1. Restore previous version of `csv_import_service.py`
 2. Restore previous version of `csv_import.py`
 3. Re-import affected portfolios manually
@@ -215,4 +223,3 @@ If issues arise:
 ✅ Weighted average prices calculated correctly after merge  
 ✅ Import statistics accurately reflect insert/update/delete counts  
 ✅ User's CSV can be imported without data loss or duplication
-

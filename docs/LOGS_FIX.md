@@ -40,17 +40,19 @@ ls -la ~/crypto-ai-agent/logs/
 
 # View log file
 tail -f ~/crypto-ai-agent/logs/crypto_agent.log
-```text
+```
 
 Logs are now being written successfully to:
+
 - **File**: `~/crypto-ai-agent/logs/crypto_agent.log` (on host)
 - **Container path**: `/app/logs/crypto_agent.log` (inside container)
 - **Volume mount**: `./logs:/app/logs` (docker-compose.yml)
 
 ## Additional Cleanup
+
 Removed build artifact log files:
+
 - `start.err.log` - From a failed frontend build
 - `start.out.log` - From a failed frontend build
 
 These were created during a build failure and are not related to application logging.
-

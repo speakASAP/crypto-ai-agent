@@ -120,7 +120,7 @@ The blue/green deployment system is **functionally complete** with all implement
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/add-domain.sh crypto-ai-agent.statex.cz crypto-ai-frontend 3100
-```text
+```
 
 **Why Needed**:
 
@@ -139,7 +139,7 @@ cd /path/to/nginx-microservice
 ```bash
 cd /path/to/crypto-ai-agent
 docker compose -f docker-compose.blue.yml -p crypto_ai_agent_blue up -d
-```text
+```
 
 **Why Needed**:
 
@@ -165,7 +165,7 @@ cd /path/to/nginx-microservice
 
 # Test cleanup
 ./scripts/blue-green/cleanup.sh crypto-ai-agent
-```text
+```
 
 This will validate:
 
@@ -241,21 +241,21 @@ The core functionality is complete and validated. The remaining tests provide co
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/add-domain.sh crypto-ai-agent.statex.cz crypto-ai-frontend 3100
-```text
+```
 
 ### Step 2: Initial Blue Deployment
 
 ```bash
 cd /path/to/crypto-ai-agent
 docker compose -f docker-compose.blue.yml -p crypto_ai_agent_blue up -d
-```text
+```
 
 ### Step 3: Start Nginx
 
 ```bash
 cd /path/to/nginx-microservice
 docker compose up -d
-```text
+```
 
 ### Step 4: Test Rollback
 
@@ -266,21 +266,21 @@ cd /path/to/nginx-microservice
 ./scripts/blue-green/switch-traffic.sh crypto-ai-agent
 # Test rollback
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```text
+```
 
 ### Step 5: Test Cleanup
 
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/cleanup.sh crypto-ai-agent
-```text
+```
 
 ### Step 6: Test End-to-End
 
 ```bash
 cd /path/to/nginx-microservice
 ./scripts/blue-green/deploy.sh crypto-ai-agent
-```text
+```
 
 ---
 
@@ -296,4 +296,3 @@ cd /path/to/nginx-microservice
 **Status**: Core functionality is complete and validated. Remaining tests are validation/confidence-building exercises.
 
 **Recommendation**: System is ready for production use. Complete testing phases when SSL certificates are available, or proceed with production deployment and validate in real environment.
-

@@ -106,9 +106,10 @@ Green Deployment:
 └── frontend-green
 
 Result: Data corruption risk, multiple instances
-```text
+```
 
 ### After (SAFE)
+
 ```text
 Shared Infrastructure (Always Running):
 ├── postgres (singleton, restart: always)
@@ -123,7 +124,7 @@ Green Deployment:
 └── frontend-green
 
 Result: Zero data loss, zero conflicts
-```text
+```
 
 ## Verification Checklist
 
@@ -141,21 +142,25 @@ Result: Zero data loss, zero conflicts
 ## Benefits
 
 ✅ **Zero Data Loss**
+
 - Only one database instance prevents data corruption
 - Shared volumes ensure data persistence
 - No lock conflicts
 
 ✅ **Always Online**
+
 - Database never stops during deployments
 - Automatic restart on failure
 - Infrastructure independent of application deployments
 
 ✅ **Zero Fault Tolerance**
+
 - Automatic infrastructure startup
 - Health checks ensure availability
 - Clear error messages if infrastructure fails
 
 ✅ **Scalable Architecture**
+
 - Easy to add more projects
 - Each project can have its own infrastructure or share
 - Clear separation of concerns
@@ -163,6 +168,7 @@ Result: Zero data loss, zero conflicts
 ## Next Steps for Production
 
 1. **Test on Staging:**
+
    ```bash
    # Start infrastructure
    docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
@@ -170,7 +176,7 @@ Result: Zero data loss, zero conflicts
    # Test deployment
    cd /path/to/nginx-microservice
    ./scripts/blue-green/deploy.sh crypto-ai-agent
-   ```text
+   ```
 
 2. **Verify Database Safety:**
    - Check only one postgres container running
@@ -202,4 +208,3 @@ Result: Zero data loss, zero conflicts
 **Date Completed:** $(date +%Y-%m-%d)
 **Refactoring Time:** ~2 hours
 **Impact:** Critical - Prevents data corruption and loss
-

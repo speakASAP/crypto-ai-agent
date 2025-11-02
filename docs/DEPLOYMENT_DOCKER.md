@@ -20,25 +20,26 @@
 1. Copy and fill environment variables
    - Use `.env.example` as a reference (do not commit secrets)
    - Ensure these are set: `DATABASE_URL`, `POSTGRES_*`, `REDIS_URL`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, `CORS_ORIGINS`, `JWT_SECRET`
-2. Start the stack
+
+1. Start the stack
 
 ```bash
 # From repo root
 # Preferred: use scripts (sets project name and supports per-service)
 echo "ENVIRONMENT=production" >> .env
 ./start.sh --env production
-```text
+```
 
-3. Verify services
+1. Verify services
 
 ```bash
 # Backend
 curl -f http://127.0.0.1:8100/docs
 # Frontend
 curl -f http://127.0.0.1:3100
-```text
+```
 
-4. Configure external Nginx
+1. Configure external Nginx
 
 - Point `app.example.com` to 127.0.0.1:3100
 - Point `api.example.com` to 127.0.0.1:8100
@@ -69,7 +70,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
-```text
+```
 
 ### Frontend
 
@@ -86,7 +87,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
-```text
+```
 
 ## Volumes and logs
 
@@ -146,13 +147,13 @@ The scripts wrap `docker compose` with a fixed project name via `COMPOSE_PROJECT
 # Status and logs
 ./status.sh --env production --logs 100
 ./status.sh --env production --service backend --logs 200
-```text
+```
 
 ## Blue/Green Deployment (Zero-Downtime)
 
 The project supports zero-downtime blue/green deployments managed from the nginx-microservice.
 
-### Prerequisites
+### Blue/Green Deployment Prerequisites
 
 - Nginx microservice running
 - Service registered in nginx-microservice service registry
@@ -176,7 +177,7 @@ From the nginx-microservice directory:
 # 3. Switch traffic to green (< 2 seconds)
 # 4. Monitor for 5 minutes
 # 5. Clean up old blue containers if healthy
-```text
+```
 
 ### Shared Infrastructure Management
 
@@ -196,7 +197,7 @@ docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastru
 
 # Verify it's running
 docker ps | grep -E 'postgres|redis'
-```text
+```
 
 **Infrastructure is automatically checked** before each blue/green deployment. If not running, it will be started automatically.
 
@@ -204,7 +205,7 @@ docker ps | grep -E 'postgres|redis'
 
 ```bash
 docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure down
-```text
+```
 
 **Note**: Infrastructure containers use `restart: always` and will automatically restart on failure.
 
@@ -214,7 +215,7 @@ If something goes wrong:
 
 ```bash
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```text
+```
 
 ### What Gets Deployed
 
@@ -251,7 +252,7 @@ REDIS_PORT_GREEN=6380
 REDIS_APPENDONLY=no
 API_PORT_GREEN=8101
 FRONTEND_PORT_GREEN=3101
-```text
+```
 
 ### Docker Compose Files
 
@@ -262,6 +263,7 @@ The deployment uses:
 - `docker-compose.green.yml` - Green environment configuration (backend, frontend only)
 
 **Architecture:**
+
 - Infrastructure runs independently with `restart: always`
 - Blue/green deployments only manage application containers
 - Both blue and green connect to the same shared database/Redis
@@ -282,7 +284,7 @@ After switching traffic, the system monitors for 5 minutes:
 - Automatic rollback if any check fails
 - Cleanup after successful monitoring period
 
-### Troubleshooting
+### Blue/Green Deployment Troubleshooting
 
 **Deployment fails during prepare:**
 

@@ -6,14 +6,14 @@
 
 ```bash
 ./start.sh
-```text
+```
 
 ### Start the Application (production via Docker)
 
 ```bash
 # Ensure .env contains ENVIRONMENT=production
 ./start.sh --env production
-```text
+```
 
 ### Stop the Application
 
@@ -32,7 +32,7 @@
 # Production
 ./start.sh --env production restart
 ./start.sh --env production restart --service backend
-```text
+```
 
 ### Per-service operations
 
@@ -40,7 +40,7 @@
 # Start a single service
 ./start.sh --service backend                    # development
 ./start.sh --env production --service backend   # production (docker compose up backend)
-```text
+```
 
 ### Environment selection
 
@@ -110,7 +110,7 @@ python3.12 agent_advanced.py
 # Terminal 2 - Start UI
 cd crypto-ai-agent
 python3.12 -m streamlit run ui_dashboard/app.py --server.port 8501
-```text
+```
 
 ## Production Deployment
 

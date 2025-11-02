@@ -124,7 +124,7 @@ Located at: `/Users/sergiystashok/Downloads/Telegram Lite/AAC6A2B8-59F5-4458-AE2
      -H "Authorization: Bearer <TOKEN>" \
      -F "file=@/Users/sergiystashok/Downloads/Telegram\ Lite/AAC6A2B8-59F5-4458-AE29-B1443FC30BE2.csv" \
      -F "exchange=revolut"
-   ```text
+   ```
 
 3. **Verify Results**:
 

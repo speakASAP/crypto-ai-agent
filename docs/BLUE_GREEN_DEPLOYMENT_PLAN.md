@@ -39,7 +39,7 @@ crypto-ai-agent/
 ├── docker-compose.blue.yml              # Blue environment config
 ├── docker-compose.green.yml             # Green environment config
 └── .env (updated with blue/green vars)
-```text
+```
 
 ## Service Registry Format
 
@@ -74,7 +74,7 @@ crypto-ai-agent/
   "shared_services": ["postgres", "redis"],
   "network": "nginx-network"
 }
-```text
+```
 
 ## Nginx Configuration Updates
 
@@ -104,7 +104,7 @@ location /api/ {
     proxy_pass http://crypto-ai-backend/api/;
     # ... proxy settings ...
 }
-```text
+```
 
 ## State Management
 
@@ -132,7 +132,7 @@ Tracks current deployment state:
     "success": true
   }
 }
-```text
+```
 
 ## Deployment Workflow
 
@@ -277,7 +277,7 @@ services:
   postgres:
     container_name: crypto-ai-postgres-blue
     # ... rest of config ...
-```text
+```
 
 ### `docker-compose.green.yml`
 
@@ -294,7 +294,7 @@ services:
   postgres:
     container_name: crypto-ai-postgres-green
     # ... rest of config ...
-```text
+```
 
 **Note**: Shared services (postgres, redis) can either:
 
@@ -314,7 +314,7 @@ Add blue/green specific variables:
 DEPLOYMENT_COLOR=blue
 COMPOSE_PROJECT_NAME_BLUE=crypto_ai_agent_blue
 COMPOSE_PROJECT_NAME_GREEN=crypto_ai_agent_green
-```text
+```
 
 ## Nginx Config Generation
 
@@ -569,7 +569,7 @@ When adding a domain that supports blue/green:
 2025-01-XX 10:30:15 INFO deploy.sh crypto-ai-agent green prepare Starting green deployment
 2025-01-XX 10:32:00 SUCCESS switch-traffic.sh crypto-ai-agent green switch Traffic switched to green
 2025-01-XX 10:35:00 ERROR health-check.sh crypto-ai-agent green rollback Health check failed, rolling back
-```text
+```
 
 ## Rollback Scenarios
 
@@ -592,7 +592,7 @@ When adding a domain that supports blue/green:
 
 ```bash
 ./scripts/blue-green/rollback.sh crypto-ai-agent
-```text
+```
 
 ## Monitoring
 
