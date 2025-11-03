@@ -80,6 +80,7 @@ async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_
             "pnl_usd": row[22] if len(row) > 22 else None,
             "pnl_percent_usd": row[23] if len(row) > 23 else None,
             "exchange_rate_at_purchase": row[24] if len(row) > 24 else None,
+            "comments": row[25] if len(row) > 25 else None,
         }
         items.append(convert_portfolio_item(item, currency))
     return items
@@ -156,15 +157,15 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
          total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
          price_buy_usd, commission_usd, current_price_usd, current_value_usd, pnl_usd, pnl_percent_usd,
-         exchange_rate_at_purchase)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         exchange_rate_at_purchase, comments)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     '''
     params = (
         current_user["id"], item.symbol, item.amount, item.price_buy, item.purchase_date, item.base_currency,
         item.source, item.commission, formatted_total_investment, now, now,
         round(item.price_buy, 8), round(item.amount * item.price_buy, 8), 0.0, 0.0,
         round(price_buy_usd, 8), round(commission_usd, 8), round(price_buy_usd, 8),
-        round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate,
+        round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate, item.comments,
     )
     sql = _normalize_placeholders(insert_sql, is_pg)
     item_id = _execute_insert_and_get_id(cursor, sql, params, is_pg)
@@ -204,6 +205,7 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         pnl_usd=0.0,
         pnl_percent_usd=0.0,
         exchange_rate_at_purchase=exchange_rate,
+        comments=item.comments,
     )
 
 
@@ -245,6 +247,9 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
     if item.total_investment_text is not None:
         update_fields.append("total_investment_text = ?")
         update_values.append(item.total_investment_text)
+    if item.comments is not None:
+        update_fields.append("comments = ?")
+        update_values.append(item.comments)
 
     if update_fields:
         # Special-case formatting and USD recalcs
@@ -343,6 +348,7 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
         pnl_usd=row[22] if len(row) > 22 else None,
         pnl_percent_usd=row[23] if len(row) > 23 else None,
         exchange_rate_at_purchase=row[24] if len(row) > 24 else None,
+        comments=row[25] if len(row) > 25 else None,
     )
 
 

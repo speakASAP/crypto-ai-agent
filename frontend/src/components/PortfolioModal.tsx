@@ -33,7 +33,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
     base_currency: selectedCurrency,
     source: '',
     commission: '0',
-    total_investment_text: ''
+    total_investment_text: '',
+    comments: ''
   })
 
   // Helper function to parse total investment text
@@ -127,7 +128,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         base_currency: item.base_currency as 'USD' | 'EUR' | 'CZK',
         source: item.source || '',
         commission: item.commission ? item.commission.toFixed(8) : '0.00000000',
-        total_investment_text: item.total_investment_text || ''
+        total_investment_text: item.total_investment_text || '',
+        comments: item.comments || ''
       })
     } else {
       // Set today's date as default for new items
@@ -140,7 +142,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         base_currency: selectedCurrency,
         source: '',
         commission: '0',
-        total_investment_text: ''
+        total_investment_text: '',
+        comments: ''
       })
     }
   }, [item, selectedCurrency, isOpen])
@@ -259,6 +262,16 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                     placeholder="Binance, Coinbase, etc."
                   />
                 </div>
+              </div>
+              {/* Comments Field */}
+              <div className="space-y-2">
+                <Label htmlFor="comments">Comments</Label>
+                <Input
+                  id="comments"
+                  value={formData.comments}
+                  onChange={(e) => handleChange('comments', e.target.value)}
+                  placeholder="Add any comments or notes..."
+                />
               </div>
             </div>
 
