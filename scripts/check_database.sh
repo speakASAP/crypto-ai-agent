@@ -88,4 +88,3 @@ echo ""
 echo "✅ Database is ready for blue/green deployment"
 
 exit 0
-

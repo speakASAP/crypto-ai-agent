@@ -192,4 +192,3 @@ def verify_customer_data():
 if __name__ == "__main__":
     success = verify_customer_data()
     sys.exit(0 if success else 1)
-

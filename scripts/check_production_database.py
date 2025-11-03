@@ -144,4 +144,3 @@ def check_production_database():
 if __name__ == "__main__":
     success = check_production_database()
     sys.exit(0 if success else 1)
-
