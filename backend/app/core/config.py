@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     currency_api_url: str = "https://api.exchangerate-api.com/v4/latest/USD"
     telegram_api_url: str = "https://api.telegram.org/bot"
     
+    # AI Advisor Configuration
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4")
+    news_api_key: str = os.getenv("NEWS_API_KEY", "")
+    ai_prediction_interval_hours: int = int(os.getenv("AI_PREDICTION_INTERVAL_HOURS", "24"))
+    openrouter_api_url: str = "https://openrouter.ai/api/v1"
+    news_api_url: str = "https://newsapi.org/v2"
+    
     # Redis (optional, for caching/session)
     redis_url: str | None = None
     telegram_bot_token: str = ""

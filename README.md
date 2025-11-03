@@ -64,6 +64,16 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 - **Database Reliability**: WAL mode and connection pooling for high availability
 - **Missed Alert Detection**: Automatic recovery on service startup with detailed notifications
 
+### 🤖 AI Advisor
+
+- **Price Predictions**: AI-powered price predictions for 24 hours, 1 week, 1 month, and 1 year
+- **Confidence Scores**: Each prediction includes a confidence percentage based on data quality
+- **News Analysis**: Automatic analysis of cryptocurrency news with sentiment scoring
+- **Performance Tracking**: Historical accuracy tracking to compare prediction performance
+- **Model Comparison**: Track which AI models perform best for different cryptocurrencies
+- **Interactive Charts**: Mini price charts on portfolio items, clickable for detailed 1-year view
+- **Detailed Symbol Pages**: Comprehensive analysis pages with full charts, predictions, and news
+
 ## Quick Start
 
 ### Prerequisites
@@ -116,6 +126,7 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
    - Navigate to <http://localhost:3100/register>
    - Create your account
    - Login and start managing your portfolio
+   - Configure AI Advisor (see [AI Advisor Documentation](docs/AI_ADVISOR.md))
 
 ## 🚀 Binance Portfolio Import
 

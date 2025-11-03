@@ -12,6 +12,8 @@ import { useWebSocket } from '@/hooks/useWebSocket'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { PortfolioModal } from '@/components/PortfolioModal'
 import { AlertModal } from '@/components/AlertModal'
+import { PriceChart } from '@/components/PriceChart'
+import { AIAdvisorCard } from '@/components/AIAdvisorCard'
 import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PriceAlert, PriceAlertCreate, PriceAlertUpdate } from '@/types'
 import { apiClient } from '@/lib/api'
 import { getRelativeTime, getDataFreshness, getFreshnessColorClass, getTimestampDisplay } from '@/lib/timeUtils'
@@ -1273,22 +1275,28 @@ export default function Home() {
               {sortedItems.map((item) => {
                 const investment = (item.amount * item.price_buy) + item.commission
                 return (
-                <div key={item.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <div className="font-semibold">{item.symbol}</div>
-                    <div className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                      {formatInvestmentAmount(investment)}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatCryptoAmountValue(item.amount, item.symbol)} @ {formatCurrencyAmount(item.price_buy)}
-                    </div>
-                    {item.source && (
-                      <div className="text-sm text-muted-foreground">
-                        via {item.source}
+                <div key={item.id} className="border rounded-lg overflow-hidden">
+                  {/* Main Portfolio Item Row */}
+                  <div className="flex items-center justify-between p-4 bg-white">
+                    <div className="flex items-center space-x-4 flex-1">
+                      <div className="font-semibold">{item.symbol}</div>
+                      <div className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                        {formatInvestmentAmount(investment)}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex items-center space-x-4">
+                      <div className="text-sm text-muted-foreground">
+                        {formatCryptoAmountValue(item.amount, item.symbol)} @ {formatCurrencyAmount(item.price_buy)}
+                      </div>
+                      {item.source && (
+                        <div className="text-sm text-muted-foreground">
+                          via {item.source}
+                        </div>
+                      )}
+                    </div>
+                    {/* Mini Chart */}
+                    <div className="w-32 mx-4">
+                      <PriceChart symbol={item.symbol} days={7} mini={true} />
+                    </div>
+                    <div className="flex items-center space-x-4">
                     <div className="text-right">
                       <div className="text-sm text-muted-foreground transition-all duration-300 ease-in-out">
                         {(loading || currencyChanging) ? (
@@ -1350,6 +1358,13 @@ export default function Home() {
                         Delete
                       </Button>
                     </div>
+                  </div>
+                  {/* AI Predictions Row */}
+                  <div className="bg-gray-50 p-4 border-t">
+                    <AIAdvisorCard 
+                      symbol={item.symbol} 
+                      currentPrice={item.current_price_usd || item.current_price}
+                    />
                   </div>
                 </div>
               )})}

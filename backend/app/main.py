@@ -194,6 +194,137 @@ async def background_price_fetcher():
         # Wait 60 seconds before next fetch
         await asyncio.sleep(60)
 
+async def background_ai_advisor_updater():
+    """Background task to periodically generate/update AI predictions for portfolio and alert symbols"""
+    from .services.ai_advisor_service import ai_advisor_service
+    from .utils.db import get_db_connection, is_postgres_connection, normalize_placeholders
+
+    while True:
+        try:
+            # Wait for the interval before starting
+            await asyncio.sleep(settings.ai_prediction_interval_hours * 3600)
+
+            logger.info("🔄 Starting AI advisor prediction update cycle")
+
+            # Get all unique symbols from portfolios and alerts
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            is_pg = is_postgres_connection(conn)
+
+            # Get symbols from portfolios
+            sql = normalize_placeholders(
+                "SELECT DISTINCT symbol FROM portfolio_items", is_pg
+            )
+            cursor.execute(sql)
+            portfolio_symbols = [row[0] for row in cursor.fetchall()]
+
+            # Get symbols from alerts
+            sql = normalize_placeholders(
+                "SELECT DISTINCT symbol FROM alerts WHERE is_active = ?", is_pg
+            )
+            cursor.execute(sql, (True,))
+            alert_symbols = [row[0] for row in cursor.fetchall()]
+
+            conn.close()
+
+            # Combine and deduplicate
+            all_symbols = list(set(portfolio_symbols + alert_symbols))
+
+            if not all_symbols:
+                logger.debug("No symbols found for AI prediction update")
+                continue
+
+            logger.info(f"🔄 Generating predictions for {len(all_symbols)} symbols")
+
+            # Generate predictions for each symbol (one user per symbol for now)
+            # In the future, we could optimize to generate per user
+            for symbol in all_symbols:
+                try:
+                    # Get first user who has this symbol (for now)
+                    # TODO: Generate predictions per user
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    is_pg = is_postgres_connection(conn)
+
+                    sql = normalize_placeholders(
+                        "SELECT DISTINCT user_id FROM portfolio_items WHERE symbol = ? LIMIT 1",
+                        is_pg,
+                    )
+                    cursor.execute(sql, (symbol,))
+                    row = cursor.fetchone()
+                    conn.close()
+
+                    if row:
+                        user_id = row[0]
+                        await ai_advisor_service.generate_predictions(
+                            user_id=user_id,
+                            symbol=symbol,
+                            force_regenerate=False,  # Only generate if needed
+                        )
+                        logger.debug(f"✅ Updated predictions for {symbol}")
+                except Exception as e:
+                    logger.error(
+                        f"Error generating predictions for {symbol}: {e}",
+                        exc_info=True,
+                    )
+                    continue
+
+            logger.info("✅ AI advisor prediction update cycle completed")
+
+        except Exception as e:
+            logger.error(f"Error in AI advisor updater: {e}", exc_info=True)
+            await asyncio.sleep(3600)  # Wait 1 hour before retrying
+
+
+async def background_prediction_verifier():
+    """Background task to verify past predictions against actual prices"""
+    from .services.ai_advisor_service import ai_advisor_service
+    from .utils.db import get_db_connection, is_postgres_connection, normalize_placeholders
+
+    while True:
+        try:
+            # Run verification every 6 hours
+            await asyncio.sleep(6 * 3600)
+
+            logger.info("🔄 Starting prediction verification cycle")
+
+            # Get all symbols with unverified predictions
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            is_pg = is_postgres_connection(conn)
+
+            sql = normalize_placeholders(
+                "SELECT DISTINCT symbol FROM ai_predictions WHERE is_verified = 0", is_pg
+            )
+            cursor.execute(sql)
+            symbols = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
+            if not symbols:
+                logger.debug("No unverified predictions found")
+                continue
+
+            logger.info(f"🔄 Verifying predictions for {len(symbols)} symbols")
+
+            # Verify predictions for each symbol
+            for symbol in symbols:
+                try:
+                    await ai_advisor_service.verify_predictions(symbol)
+                    logger.debug(f"✅ Verified predictions for {symbol}")
+                except Exception as e:
+                    logger.error(
+                        f"Error verifying predictions for {symbol}: {e}",
+                        exc_info=True,
+                    )
+                    continue
+
+            logger.info("✅ Prediction verification cycle completed")
+
+        except Exception as e:
+            logger.error(f"Error in prediction verifier: {e}", exc_info=True)
+            await asyncio.sleep(3600)  # Wait 1 hour before retrying
+
+
 async def background_currency_fetcher():
     """Background task to periodically fetch currency rates"""
     while True:
@@ -1036,9 +1167,52 @@ def init_database():
         )
     ''')
     
+    # Create ai_predictions table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ai_predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            prediction_type TEXT NOT NULL,
+            predicted_price REAL NOT NULL,
+            confidence_percent REAL NOT NULL,
+            prediction_reasoning TEXT,
+            model_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            actual_price_at_target REAL,
+            is_verified BOOLEAN DEFAULT 0,
+            accuracy_percent REAL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Create news_analysis table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS news_analysis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            news_date TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            sentiment_score REAL,
+            relevance_score REAL,
+            source TEXT,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    
+    # Create price_history_cache table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS price_history_cache (
+            symbol TEXT PRIMARY KEY,
+            history_data TEXT NOT NULL,
+            last_updated TEXT NOT NULL
+        )
+    ''')
+    
     conn.commit()
     conn.close()
-    logger.info("✅ Database initialized with user management and import functionality")
+    logger.info("✅ Database initialized with user management, import functionality, and AI advisor tables")
 
 def load_migration_data():
     """Load data from migration file if it exists"""
@@ -1467,9 +1641,51 @@ def init_postgres_database():
         )
     ''')
         
+        # Create ai_predictions table
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS ai_predictions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            symbol TEXT NOT NULL,
+            prediction_type TEXT NOT NULL,
+            predicted_price REAL NOT NULL,
+            confidence_percent REAL NOT NULL,
+            prediction_reasoning TEXT,
+            model_name TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            actual_price_at_target REAL,
+            is_verified BOOLEAN DEFAULT FALSE,
+            accuracy_percent REAL
+        )
+    ''')
+        
+        # Create news_analysis table
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS news_analysis (
+            id SERIAL PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            news_date TIMESTAMP NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            sentiment_score REAL,
+            relevance_score REAL,
+            source TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+        
+        # Create price_history_cache table
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS price_history_cache (
+            symbol TEXT PRIMARY KEY,
+            history_data TEXT NOT NULL,
+            last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+        
         conn.commit()
         conn.close()
-        logger.info("✅ PostgreSQL schema initialized successfully")
+        logger.info("✅ PostgreSQL schema initialized successfully with AI advisor tables")
     except Exception as e:
         logger.error(f"❌ Failed to initialize PostgreSQL database after retries: {str(e)}")
         logger.warning("⚠️ Database initialization failed, but continuing startup. Database might be ready later.")
@@ -1537,12 +1753,25 @@ async def lifespan(app: FastAPI):
     # Start background currency update task
     currency_task = asyncio.create_task(background_currency_fetcher())
     logger.info("✅ Currency update task started")
+
+    # Start background AI advisor update task
+    ai_advisor_task = asyncio.create_task(background_ai_advisor_updater())
+    logger.info("✅ AI advisor update task started")
+
+    # Start background prediction verification task
+    prediction_verifier_task = asyncio.create_task(background_prediction_verifier())
+    logger.info("✅ Prediction verification task started")
     
     yield
     
     # Shutdown
     price_task.cancel()
     currency_task.cancel()
+    try:
+        ai_advisor_task.cancel()
+        prediction_verifier_task.cancel()
+    except NameError:
+        pass  # Tasks may not have been created if startup failed
     logger.info("🛑 Shutting down Crypto AI Agent API v2.0")
 
 # Create FastAPI app
@@ -1598,6 +1827,12 @@ app.include_router(ws_router)
 
 from .api.health import router as health_router
 app.include_router(health_router)
+
+from .api.ai_advisor import router as ai_advisor_router
+app.include_router(ai_advisor_router)
+
+from .api.charts import router as charts_router
+app.include_router(charts_router)
 
 if __name__ == "__main__":
     pass
