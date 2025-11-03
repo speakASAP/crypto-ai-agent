@@ -40,7 +40,7 @@ export default function SymbolDetailPage() {
           apiClient.getAIPredictions(symbol),
           apiClient.getAINews(symbol, 7),
           apiClient.getAIPerformance(symbol),
-          apiClient.getSymbolPrices(symbol),
+          apiClient.getSymbolPrices([symbol]),
         ])
 
         if (chart.status === 'fulfilled') {

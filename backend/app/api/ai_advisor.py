@@ -41,6 +41,9 @@ async def get_predictions(
 
         return PredictionResponse(symbol=symbol.upper(), predictions=predictions)
 
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
         logger.error(f"Error getting predictions for {symbol}: {e}", exc_info=True)
         raise HTTPException(

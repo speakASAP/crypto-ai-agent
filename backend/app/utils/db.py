@@ -91,3 +91,8 @@ def connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_start
     
     # All retries exhausted, raise the last error
     raise ConnectionError(f"Failed to connect to database after {max_retries} attempts: {str(last_error)}")
+
+
+def get_db_connection():
+    """Get database connection with retry logic: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
+    return connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
