@@ -1272,16 +1272,14 @@ export default function Home() {
             </div>
           ) : viewMode === 'cards' ? (
             <div className="space-y-4">
-              {sortedItems.map((item) => {
-                const investment = (item.amount * item.price_buy) + item.commission
-                return (
+              {sortedItems.map((item) => (
                 <div key={item.id} className="border rounded-lg overflow-hidden">
                   {/* Main Portfolio Item Row */}
                   <div className="flex items-center justify-between p-4 bg-white">
                     <div className="flex items-center space-x-4 flex-1">
                       <div className="font-semibold">{item.symbol}</div>
                       <div className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                        {formatInvestmentAmount(investment)}
+                        {formatInvestmentAmount((item.amount * item.price_buy) + item.commission)}
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {formatCryptoAmountValue(item.amount, item.symbol)} @ {formatCurrencyAmount(item.price_buy)}
@@ -1359,6 +1357,7 @@ export default function Home() {
                       </Button>
                     </div>
                   </div>
+                  </div>
                   {/* AI Predictions Row */}
                   <div className="bg-gray-50 p-4 border-t">
                     <AIAdvisorCard 
@@ -1367,7 +1366,7 @@ export default function Home() {
                     />
                   </div>
                 </div>
-              )})}
+              ))}
             </div>
           ) : (
             <div className="overflow-x-auto">

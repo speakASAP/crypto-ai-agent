@@ -1695,6 +1695,123 @@ def init_postgres_database():
         # For now, we'll let it fail and handle in lifespan()
         raise
 
+def ensure_ai_advisor_tables():
+    """Ensure ai_predictions and price_history_cache tables exist.
+    This function checks for missing tables and creates them if needed,
+    even if other tables already exist (handles partial schema scenarios).
+    """
+    try:
+        from .utils.db import get_db_connection, is_postgres_connection
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        is_pg = is_postgres_connection(conn)
+        
+        tables_created = []
+        
+        # Check and create ai_predictions table
+        if is_pg:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'ai_predictions'
+                )
+            """)
+            ai_predictions_exists = cursor.fetchone()[0]
+        else:
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='ai_predictions'
+            """)
+            ai_predictions_exists = cursor.fetchone() is not None
+        
+        if not ai_predictions_exists:
+            logger.info("📋 Creating missing ai_predictions table...")
+            if is_pg:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS ai_predictions (
+                        id SERIAL PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id),
+                        symbol TEXT NOT NULL,
+                        prediction_type TEXT NOT NULL,
+                        predicted_price REAL NOT NULL,
+                        confidence_percent REAL NOT NULL,
+                        prediction_reasoning TEXT,
+                        model_name TEXT NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        actual_price_at_target REAL,
+                        is_verified BOOLEAN DEFAULT FALSE,
+                        accuracy_percent REAL
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS ai_predictions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        symbol TEXT NOT NULL,
+                        prediction_type TEXT NOT NULL,
+                        predicted_price REAL NOT NULL,
+                        confidence_percent REAL NOT NULL,
+                        prediction_reasoning TEXT,
+                        model_name TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        actual_price_at_target REAL,
+                        is_verified BOOLEAN DEFAULT 0,
+                        accuracy_percent REAL,
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                ''')
+            tables_created.append("ai_predictions")
+        
+        # Check and create price_history_cache table
+        if is_pg:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'price_history_cache'
+                )
+            """)
+            cache_exists = cursor.fetchone()[0]
+        else:
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='price_history_cache'
+            """)
+            cache_exists = cursor.fetchone() is not None
+        
+        if not cache_exists:
+            logger.info("📋 Creating missing price_history_cache table...")
+            if is_pg:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS price_history_cache (
+                        symbol TEXT PRIMARY KEY,
+                        history_data TEXT NOT NULL,
+                        last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+            else:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS price_history_cache (
+                        symbol TEXT PRIMARY KEY,
+                        history_data TEXT NOT NULL,
+                        last_updated TEXT NOT NULL
+                    )
+                ''')
+            tables_created.append("price_history_cache")
+        
+        conn.commit()
+        conn.close()
+        
+        if tables_created:
+            logger.info(f"✅ Created missing AI advisor tables: {', '.join(tables_created)}")
+        else:
+            logger.debug("✅ AI advisor tables already exist")
+            
+    except Exception as e:
+        logger.error(f"❌ Error ensuring AI advisor tables: {e}", exc_info=True)
+        # Don't raise - allow service to continue even if table creation fails
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -1737,6 +1854,10 @@ async def lifespan(app: FastAPI):
     # Load migration data if exists (SQLite only)
     if not settings.database_url:
         load_migration_data()
+    
+    # Ensure AI advisor tables exist (works for both PostgreSQL and SQLite)
+    ensure_ai_advisor_tables()
+    logger.info("✅ AI advisor tables migration check complete")
     
     # Initialize currency service
     await currency_service.get_exchange_rates()
