@@ -46,8 +46,7 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
 async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = ? ORDER BY created_at DESC", is_pg)
+    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = %s ORDER BY created_at DESC")
     cursor.execute(sql, (current_user["id"],))
     rows = cursor.fetchall()
     conn.close()
@@ -90,8 +89,7 @@ async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_
 async def get_portfolio_summary(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = ?", is_pg)
+    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = %s")
     cursor.execute(sql, (current_user["id"],))
     rows = cursor.fetchall()
     conn.close()
@@ -137,7 +135,6 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
 
     now = datetime.now().isoformat() + "Z"
     exchange_rate = 1.0
@@ -158,7 +155,7 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
          total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
          price_buy_usd, commission_usd, current_price_usd, current_value_usd, pnl_usd, pnl_percent_usd,
          exchange_rate_at_purchase, comments)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     '''
     params = (
         current_user["id"], item.symbol, item.amount, item.price_buy, item.purchase_date, item.base_currency,
@@ -167,8 +164,8 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         round(price_buy_usd, 8), round(commission_usd, 8), round(price_buy_usd, 8),
         round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate, item.comments,
     )
-    sql = _normalize_placeholders(insert_sql, is_pg)
-    item_id = _execute_insert_and_get_id(cursor, sql, params, is_pg)
+    sql = _normalize_placeholders(insert_sql)
+    item_id = _execute_insert_and_get_id(cursor, sql, params)
     conn.commit()
     conn.close()
 
@@ -213,8 +210,7 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
 async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql_sel = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = ? AND user_id = ?", is_pg)
+    sql_sel = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = %s AND user_id = %s")
     cursor.execute(sql_sel, (item_id, current_user["id"]))
     row = cursor.fetchone()
     if not row:
@@ -224,41 +220,41 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
     update_fields = []
     update_values = []
     if item.symbol is not None:
-        update_fields.append("symbol = ?")
+        update_fields.append("symbol = %s")
         update_values.append(item.symbol)
     if item.amount is not None:
-        update_fields.append("amount = ?")
+        update_fields.append("amount = %s")
         update_values.append(item.amount)
     if item.price_buy is not None:
-        update_fields.append("price_buy = ?")
+        update_fields.append("price_buy = %s")
         update_values.append(item.price_buy)
     if item.purchase_date is not None:
-        update_fields.append("purchase_date = ?")
+        update_fields.append("purchase_date = %s")
         update_values.append(item.purchase_date)
     if item.base_currency is not None:
-        update_fields.append("base_currency = ?")
+        update_fields.append("base_currency = %s")
         update_values.append(item.base_currency)
     if item.source is not None:
-        update_fields.append("source = ?")
+        update_fields.append("source = %s")
         update_values.append(item.source)
     if item.commission is not None:
-        update_fields.append("commission = ?")
+        update_fields.append("commission = %s")
         update_values.append(item.commission)
     if item.total_investment_text is not None:
-        update_fields.append("total_investment_text = ?")
+        update_fields.append("total_investment_text = %s")
         update_values.append(item.total_investment_text)
     if item.comments is not None:
-        update_fields.append("comments = ?")
+        update_fields.append("comments = %s")
         update_values.append(item.comments)
 
     if update_fields:
         # Special-case formatting and USD recalcs
         if "total_investment_text" in [f.split(" = ")[0] for f in update_fields]:
-            total_investment_text_idx = next((i for i, f in enumerate(update_fields) if f.startswith("total_investment_text = ?")), None)
+            total_investment_text_idx = next((i for i, f in enumerate(update_fields) if f.startswith("total_investment_text = %s")), None)
             if total_investment_text_idx is not None:
                 total_investment_text = update_values[total_investment_text_idx]
                 if not total_investment_text or not any(s in total_investment_text for s in ["$", "€", "Kč", "£", "¥"]):
-                    sql_sel_cur = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", is_pg)
+                    sql_sel_cur = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = %s")
                     cursor.execute(sql_sel_cur, (item_id,))
                     current_data = cursor.fetchone()
                     if current_data:
@@ -266,24 +262,24 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
                         total_investment = (amount * price_buy) + commission
                         update_values[total_investment_text_idx] = format_total_investment_text(total_investment, base_currency)
 
-        needs_usd_recalc = any(f in update_fields for f in ["price_buy = ?", "amount = ?", "commission = ?", "base_currency = ?"])
+        needs_usd_recalc = any(f in update_fields for f in ["price_buy = %s", "amount = %s", "commission = %s", "base_currency = %s"])
         if needs_usd_recalc:
-            sql_sel_old = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", is_pg)
+            sql_sel_old = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = %s")
             cursor.execute(sql_sel_old, (item_id,))
             old_data = cursor.fetchone()
-            update_fields.append("updated_at = ?")
+            update_fields.append("updated_at = %s")
             update_values.append(datetime.now().isoformat() + "Z")
             update_values.append(item_id)
             dyn_sql = f"""
                 UPDATE portfolio_items 
                 SET {', '.join(update_fields)}
-                WHERE id = ?
+                WHERE id = %s
             """
-            sql_upd = _normalize_placeholders(dyn_sql, is_pg)
+            sql_upd = _normalize_placeholders(dyn_sql)
             cursor.execute(sql_upd, update_values)
             conn.commit()
 
-            sql_sel_new = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", is_pg)
+            sql_sel_new = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = %s")
             cursor.execute(sql_sel_new, (item_id,))
             new_data = cursor.fetchone()
             if new_data:
@@ -293,11 +289,11 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
                 commission_usd = commission / exchange_rate if base_currency != "USD" else commission
                 upd_sql2 = '''
                     UPDATE portfolio_items 
-                    SET price_buy_usd = ?, commission_usd = ?, exchange_rate_at_purchase = ?,
-                        current_value = ?, current_value_usd = ?, pnl = ?, pnl_percent = ?, pnl_usd = ?, pnl_percent_usd = ?
-                    WHERE id = ?
+                    SET price_buy_usd = %s, commission_usd = %s, exchange_rate_at_purchase = %s,
+                        current_value = %s, current_value_usd = %s, pnl = %s, pnl_percent = %s, pnl_usd = %s, pnl_percent_usd = %s
+                    WHERE id = %s
                 '''
-                upd_sql2 = _normalize_placeholders(upd_sql2, is_pg)
+                upd_sql2 = _normalize_placeholders(upd_sql2)
                 cursor.execute(
                     upd_sql2,
                     (
@@ -314,15 +310,15 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
                 except Exception:
                     pass
         else:
-            update_fields.append("updated_at = ?")
+            update_fields.append("updated_at = %s")
             update_values.append(datetime.now().isoformat() + "Z")
             update_values.append(item_id)
             dyn_sql2 = f"""
                 UPDATE portfolio_items 
                 SET {', '.join(update_fields)}
-                WHERE id = ?
+                WHERE id = %s
             """
-            sql_upd2 = _normalize_placeholders(dyn_sql2, is_pg)
+            sql_upd2 = _normalize_placeholders(dyn_sql2)
             cursor.execute(sql_upd2, update_values)
             conn.commit()
 
@@ -330,7 +326,7 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    sql_sel_final = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = ?", is_pg)
+    sql_sel_final = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = %s")
     cursor.execute(sql_sel_final, (item_id,))
     row = cursor.fetchone()
     conn.close()
@@ -356,8 +352,7 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
 async def delete_portfolio_item(item_id: int, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql_del = _normalize_placeholders("DELETE FROM portfolio_items WHERE id = ? AND user_id = ?", is_pg)
+    sql_del = _normalize_placeholders("DELETE FROM portfolio_items WHERE id = %s AND user_id = %s")
     cursor.execute(sql_del, (item_id, current_user["id"]))
     deleted = cursor.rowcount
     conn.commit()

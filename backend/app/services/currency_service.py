@@ -2,11 +2,9 @@ import httpx
 import asyncio
 from typing import Dict, Optional
 import logging
-import sqlite3
 import psycopg
 import json
 import redis
-import os
 from datetime import datetime, timezone
 from ..core.config import settings
 from ..utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
@@ -19,60 +17,38 @@ class CurrencyService:
         self.base_currency = "USD"
         self.last_updated = None
         self.last_updated_timestamp = None
-        self._db_path = self._get_db_path()
         self._redis = None
         if settings.redis_url:
             try:
                 self._redis = redis.Redis.from_url(settings.redis_url, decode_responses=True)
             except Exception:
                 self._redis = None
-        
-    def _get_db_path(self) -> str:
-        """Get database path relative to project root"""
-        current_file = os.path.abspath(__file__)  # /path/to/backend/app/services/currency_service.py
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))  # /path/to/backend
-        project_root = os.path.dirname(backend_dir)  # /path/to/project
-        return os.path.join(project_root, settings.database_file)
     
     def _save_rates_to_db(self, rates: Dict[str, float], timestamp: str):
-        """Save exchange rates to database"""
+        """Save exchange rates to PostgreSQL database"""
         try:
             # Save to Redis if configured
             if self._redis:
                 payload = {"rates": rates, "timestamp": timestamp}
                 self._redis.set("currency:USD", json.dumps(payload), ex=settings.currency_cache_duration)
-            if settings.environment.lower() == "production":
-                pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
-                with psycopg.connect(pg_url) as conn:
-                    with conn.cursor() as cursor:
-                        cursor.execute("DELETE FROM currency_rates")
-                        for currency, rate in rates.items():
-                            cursor.execute(
-                                "INSERT INTO currency_rates (from_currency, to_currency, rate, timestamp) VALUES (%s, %s, %s, %s)",
-                                ("USD", currency, rate, timestamp)
-                            )
-                        conn.commit()
-            else:
-                conn = sqlite3.connect(self._db_path)
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM currency_rates")
-                for currency, rate in rates.items():
-                    cursor.execute(
-                        """
-                    INSERT INTO currency_rates (from_currency, to_currency, rate, timestamp)
-                    VALUES (?, ?, ?, ?)
-                """,
-                        ("USD", currency, rate, timestamp),
-                    )
-                conn.commit()
-                conn.close()
+            
+            pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
+            with psycopg.connect(pg_url) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("DELETE FROM currency_rates")
+                    for currency, rate in rates.items():
+                        cursor.execute(
+                            "INSERT INTO currency_rates (from_currency, to_currency, rate, timestamp) VALUES (%s, %s, %s, %s)",
+                            ("USD", currency, rate, timestamp)
+                        )
+                    conn.commit()
             logger.info(f"Saved {len(rates)} currency rates to database")
             
         except Exception as e:
             logger.error(f"Failed to save rates to database: {e}")
     
     def _load_rates_from_db(self) -> Dict[str, float]:
-        """Load exchange rates from database"""
+        """Load exchange rates from PostgreSQL database"""
         try:
             # Try Redis first
             if self._redis:
@@ -82,27 +58,14 @@ class CurrencyService:
                     self.last_updated = obj.get("timestamp")
                     self.last_updated_timestamp = get_current_timestamp()
                     return obj.get("rates", {})
-            if settings.environment.lower() == "production":
-                pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
-                with psycopg.connect(pg_url) as conn:
-                    with conn.cursor() as cursor:
-                        cursor.execute(
-                            "SELECT to_currency, rate, timestamp FROM currency_rates WHERE from_currency = 'USD' ORDER BY timestamp DESC"
-                        )
-                        rows = cursor.fetchall()
-            else:
-                conn = sqlite3.connect(self._db_path)
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                SELECT to_currency, rate, timestamp 
-                FROM currency_rates 
-                WHERE from_currency = 'USD'
-                ORDER BY created_at DESC
-            """
-                )
-                rows = cursor.fetchall()
-                conn.close()
+            
+            pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
+            with psycopg.connect(pg_url) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT to_currency, rate, timestamp FROM currency_rates WHERE from_currency = 'USD' ORDER BY timestamp DESC"
+                    )
+                    rows = cursor.fetchall()
 
             rates = {}
             for currency, rate, timestamp in rows:

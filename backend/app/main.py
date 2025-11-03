@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Set, Any
 from pydantic import BaseModel, EmailStr, validator
 import logging
-import sqlite3
 import json
 import os
 import asyncio
@@ -40,14 +39,6 @@ from .utils.db import (
     connect_with_retry,
 )
 
-# Database file - resolve to absolute path
-import os
-# Get the project root directory (parent of backend directory)
-current_file = os.path.abspath(__file__)  # /path/to/backend/app/main.py
-backend_dir = os.path.dirname(os.path.dirname(current_file))  # /path/to/backend
-project_root = os.path.dirname(backend_dir)  # /path/to/project
-DB_FILE = os.path.join(project_root, settings.database_file)
-
 # Initialize services
 price_service = PriceService()
 
@@ -70,11 +61,10 @@ async def fetch_prices_for_symbols(symbols: List[str]):
         # Update database with new prices
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         
         for symbol, price in prices.items():
             # Get the base currency for this symbol from the database
-            sql = _normalize_placeholders("SELECT DISTINCT base_currency FROM portfolio_items WHERE symbol = ?", is_pg)
+            sql = _normalize_placeholders("SELECT DISTINCT base_currency FROM portfolio_items WHERE symbol = ?")
             cursor.execute(sql, (symbol,))
             base_currencies = cursor.fetchall()
             
@@ -88,25 +78,17 @@ async def fetch_prices_for_symbols(symbols: List[str]):
                     converted_price = price
                 
                 # Update current_price for all items with this symbol and base currency
-                if is_pg:
-                    update_sql = (
-                        "UPDATE portfolio_items "
-                        "SET current_price = %s, current_value = amount * %s, updated_at = NOW() "
-                        "WHERE symbol = %s AND base_currency = %s"
-                    )
-                else:
-                    update_sql = (
-                        "UPDATE portfolio_items "
-                        "SET current_price = ?, current_value = amount * ?, updated_at = datetime('now') "
-                        "WHERE symbol = ? AND base_currency = ?"
-                    )
+                update_sql = (
+                    "UPDATE portfolio_items "
+                    "SET current_price = %s, current_value = amount * %s, updated_at = NOW() "
+                    "WHERE symbol = %s AND base_currency = %s"
+                )
                 cursor.execute(update_sql, (converted_price, converted_price, symbol, base_currency))
             
             # Calculate P&L for each item using USD-based calculations
             sql = _normalize_placeholders(
                 "SELECT id, amount, price_buy, price_buy_usd, commission, commission_usd, base_currency, exchange_rate_at_purchase "
-                "FROM portfolio_items WHERE symbol = ?",
-                is_pg
+                "FROM portfolio_items WHERE symbol = ?"
             )
             cursor.execute(sql, (symbol,))
             
@@ -143,8 +125,7 @@ async def fetch_prices_for_symbols(symbols: List[str]):
                     "UPDATE portfolio_items "
                     "SET current_price = ?, current_value = ?, pnl = ?, pnl_percent = ?, "
                     "current_price_usd = ?, current_value_usd = ?, pnl_usd = ?, pnl_percent_usd = ?, "
-                    "price_buy_usd = ?, commission_usd = ? WHERE id = ?",
-                    is_pg
+                    "price_buy_usd = ?, commission_usd = ? WHERE id = ?"
                 )
                 cursor.execute(update_sql, (current_price_display, current_value_display, pnl_display, pnl_percent_usd,
                       price, current_value_usd, pnl_usd, pnl_percent_usd, 
@@ -197,7 +178,7 @@ async def background_price_fetcher():
 async def background_ai_advisor_updater():
     """Background task to periodically generate/update AI predictions for portfolio and alert symbols"""
     from .services.ai_advisor_service import ai_advisor_service
-    from .utils.db import get_db_connection, is_postgres_connection, normalize_placeholders
+    from .utils.db import get_db_connection, normalize_placeholders
 
     while True:
         try:
@@ -209,18 +190,17 @@ async def background_ai_advisor_updater():
             # Get all unique symbols from portfolios and alerts
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
             # Get symbols from portfolios
             sql = normalize_placeholders(
-                "SELECT DISTINCT symbol FROM portfolio_items", is_pg
+                "SELECT DISTINCT symbol FROM portfolio_items"
             )
             cursor.execute(sql)
             portfolio_symbols = [row[0] for row in cursor.fetchall()]
 
             # Get symbols from alerts
             sql = normalize_placeholders(
-                "SELECT DISTINCT symbol FROM alerts WHERE is_active = ?", is_pg
+                "SELECT DISTINCT symbol FROM alerts WHERE is_active = %s"
             )
             cursor.execute(sql, (True,))
             alert_symbols = [row[0] for row in cursor.fetchall()]
@@ -238,17 +218,15 @@ async def background_ai_advisor_updater():
 
             # Generate predictions for each symbol (one user per symbol for now)
             # In the future, we could optimize to generate per user
-            for symbol in all_symbols:
+            for idx, symbol in enumerate(all_symbols):
                 try:
                     # Get first user who has this symbol (for now)
                     # TODO: Generate predictions per user
                     conn = get_db_connection()
                     cursor = conn.cursor()
-                    is_pg = is_postgres_connection(conn)
 
                     sql = normalize_placeholders(
-                        "SELECT DISTINCT user_id FROM portfolio_items WHERE symbol = ? LIMIT 1",
-                        is_pg,
+                        "SELECT DISTINCT user_id FROM portfolio_items WHERE symbol = %s LIMIT 1"
                     )
                     cursor.execute(sql, (symbol,))
                     row = cursor.fetchone()
@@ -262,11 +240,18 @@ async def background_ai_advisor_updater():
                             force_regenerate=False,  # Only generate if needed
                         )
                         logger.debug(f"✅ Updated predictions for {symbol}")
+                        
+                        # Add delay between symbols to avoid rate limits (except for last symbol)
+                        if idx < len(all_symbols) - 1:
+                            await asyncio.sleep(3)  # 3 second delay between symbols
                 except Exception as e:
                     logger.error(
                         f"Error generating predictions for {symbol}: {e}",
                         exc_info=True,
                     )
+                    # Add delay even on error to avoid rapid retries hitting rate limits
+                    if idx < len(all_symbols) - 1:
+                        await asyncio.sleep(3)
                     continue
 
             logger.info("✅ AI advisor prediction update cycle completed")
@@ -279,7 +264,7 @@ async def background_ai_advisor_updater():
 async def background_prediction_verifier():
     """Background task to verify past predictions against actual prices"""
     from .services.ai_advisor_service import ai_advisor_service
-    from .utils.db import get_db_connection, is_postgres_connection, normalize_placeholders
+    from .utils.db import get_db_connection, normalize_placeholders
 
     while True:
         try:
@@ -291,10 +276,9 @@ async def background_prediction_verifier():
             # Get all symbols with unverified predictions
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
             sql = normalize_placeholders(
-                "SELECT DISTINCT symbol FROM ai_predictions WHERE is_verified = 0", is_pg
+                "SELECT DISTINCT symbol FROM ai_predictions WHERE is_verified = FALSE"
             )
             cursor.execute(sql)
             symbols = [row[0] for row in cursor.fetchall()]
@@ -351,10 +335,7 @@ async def check_missed_alerts_on_startup():
         cursor = conn.cursor()
         
         # Get all active alerts
-        if settings.database_url:
-            cursor.execute("SELECT * FROM alerts WHERE is_active = TRUE")
-        else:
-            cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
+        cursor.execute("SELECT * FROM alerts WHERE is_active = TRUE")
         alerts = cursor.fetchall()
         
         if not alerts:
@@ -365,7 +346,7 @@ async def check_missed_alerts_on_startup():
         logger.info(f"Checking {len(alerts)} active alerts for missed triggers")
         
         for alert in alerts:
-            # Handle both schemas: SQLite may include extended columns, Postgres has core columns only
+            # Handle schema: PostgreSQL has core columns
             alert_id = alert[0]
             user_id = alert[1]
             symbol = alert[2]
@@ -382,16 +363,10 @@ async def check_missed_alerts_on_startup():
                 exchange_rate_at_creation = alert[10]
             
             # Get last price check for this symbol
-            if settings.database_url:
-                cursor.execute(
-                    "SELECT last_check_timestamp, last_check_price FROM price_check_tracking WHERE symbol = %s",
-                    (symbol,)
-                )
-            else:
-                cursor.execute(
-                    "SELECT last_check_timestamp, last_check_price FROM price_check_tracking WHERE symbol = ?",
-                    (symbol,)
-                )
+            cursor.execute(
+                "SELECT last_check_timestamp, last_check_price FROM price_check_tracking WHERE symbol = %s",
+                (symbol,)
+            )
             tracking = cursor.fetchone()
             
             if not tracking:
@@ -491,7 +466,7 @@ async def trigger_alert(
     trigger_price: float,
     trigger_time: datetime,
     was_missed: bool = False,
-    conn: Optional[sqlite3.Connection] = None
+    conn: Optional[psycopg.Connection] = None
 ):
     """Trigger an alert and send notifications"""
     should_close = False
@@ -501,22 +476,14 @@ async def trigger_alert(
     
     try:
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         
         # Get portfolio information for this symbol
         # First, get all base currencies for this symbol
-        if is_pg:
-            cursor.execute("""
-                SELECT DISTINCT base_currency 
-                FROM portfolio_items 
-                WHERE symbol = %s AND base_currency IS NOT NULL
-            """, (symbol,))
-        else:
-            cursor.execute("""
-                SELECT DISTINCT base_currency 
-                FROM portfolio_items 
-                WHERE symbol = ? AND base_currency IS NOT NULL
-            """, (symbol,))
+        cursor.execute("""
+            SELECT DISTINCT base_currency 
+            FROM portfolio_items 
+            WHERE symbol = %s AND base_currency IS NOT NULL
+        """, (symbol,))
         
         base_currencies = [row[0] for row in cursor.fetchall()]
         portfolio_data = []
@@ -530,28 +497,16 @@ async def trigger_alert(
                 converted_price = trigger_price
             
             # Get portfolio data for this base currency
-            if is_pg:
-                cursor.execute("""
-                    SELECT 
-                        SUM(amount) as total_amount,
-                        SUM(amount * price_buy + commission) as total_investment,
-                        SUM(amount * %s) as current_value,
-                        base_currency
-                    FROM portfolio_items 
-                    WHERE symbol = %s AND base_currency = %s
-                    GROUP BY base_currency
-                """, (converted_price, symbol, base_currency))
-            else:
-                cursor.execute("""
-                    SELECT 
-                        SUM(amount) as total_amount,
-                        SUM(amount * price_buy + commission) as total_investment,
-                        SUM(amount * ?) as current_value,
-                        base_currency
-                    FROM portfolio_items 
-                    WHERE symbol = ? AND base_currency = ?
-                    GROUP BY base_currency
-                """, (converted_price, symbol, base_currency))
+            cursor.execute("""
+                SELECT 
+                    SUM(amount) as total_amount,
+                    SUM(amount * price_buy + commission) as total_investment,
+                    SUM(amount * %s) as current_value,
+                    base_currency
+                FROM portfolio_items 
+                WHERE symbol = %s AND base_currency = %s
+                GROUP BY base_currency
+            """, (converted_price, symbol, base_currency))
             
             result = cursor.fetchone()
             if result:
@@ -560,45 +515,30 @@ async def trigger_alert(
         # Log alert history with missed flag
         check_type = 'historical' if was_missed else 'realtime'
         # Format timestamp for database
-        if is_pg:
-            # PostgreSQL: format as ISO timestamp without timezone
-            # Convert to UTC first, then format without timezone info
-            if trigger_time.tzinfo:
-                # Convert to UTC if timezone-aware
-                trigger_time_utc = trigger_time.astimezone(timezone.utc)
-            else:
-                # Assume UTC if timezone-naive
-                trigger_time_utc = trigger_time.replace(tzinfo=timezone.utc)
-            # Format as ISO string: YYYY-MM-DDTHH:MM:SS[.microseconds]
-            # Use strftime to avoid timezone suffix issues
-            trigger_timestamp = trigger_time_utc.strftime('%Y-%m-%dT%H:%M:%S')
-            # Add microseconds if present
-            if trigger_time_utc.microsecond:
-                trigger_timestamp += f".{trigger_time_utc.microsecond:06d}"
+        # PostgreSQL: format as ISO timestamp without timezone
+        # Convert to UTC first, then format without timezone info
+        if trigger_time.tzinfo:
+            # Convert to UTC if timezone-aware
+            trigger_time_utc = trigger_time.astimezone(timezone.utc)
         else:
-            # SQLite: use ISO format with Z
-            trigger_timestamp = trigger_time.isoformat() + "Z"
+            # Assume UTC if timezone-naive
+            trigger_time_utc = trigger_time.replace(tzinfo=timezone.utc)
+        # Format as ISO string: YYYY-MM-DDTHH:MM:SS[.microseconds]
+        # Use strftime to avoid timezone suffix issues
+        trigger_timestamp = trigger_time_utc.strftime('%Y-%m-%dT%H:%M:%S')
+        # Add microseconds if present
+        if trigger_time_utc.microsecond:
+            trigger_timestamp += f".{trigger_time_utc.microsecond:06d}"
         
-        if is_pg:
-            # PostgreSQL schema doesn't have symbol column
-            cursor.execute('''
-                INSERT INTO alert_history 
-                (alert_id, user_id, triggered_price, triggered_at, was_missed, check_type)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (alert_id, user_id, trigger_price, trigger_timestamp, was_missed, check_type))
-        else:
-            # SQLite schema has symbol column
-            cursor.execute('''
-                INSERT INTO alert_history 
-                (alert_id, user_id, symbol, triggered_price, triggered_at, was_missed, check_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (alert_id, user_id, symbol, trigger_price, trigger_timestamp, was_missed, check_type))
+        # PostgreSQL schema doesn't have symbol column
+        cursor.execute('''
+            INSERT INTO alert_history 
+            (alert_id, user_id, triggered_price, triggered_at, was_missed, check_type)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (alert_id, user_id, trigger_price, trigger_timestamp, was_missed, check_type))
         
         # Deactivate the alert (one-time alert behavior)
-        if is_pg:
-            cursor.execute("UPDATE alerts SET is_active = FALSE WHERE id = %s", (alert_id,))
-        else:
-            cursor.execute("UPDATE alerts SET is_active = 0 WHERE id = ?", (alert_id,))
+        cursor.execute("UPDATE alerts SET is_active = FALSE WHERE id = %s", (alert_id,))
         
         # Prepare notification message
         alert_message = f"🚨 <b>Price Alert Triggered!</b>\n\n"
@@ -668,7 +608,6 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         
         current_time = datetime.now(timezone.utc)
         
@@ -676,24 +615,16 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
         # Commit price tracking updates separately to avoid transaction issues
         try:
             for symbol, price in current_prices.items():
-                if is_pg:
-                    # PostgreSQL: use ON CONFLICT
-                    cursor.execute('''
-                        INSERT INTO price_check_tracking 
-                        (symbol, last_check_timestamp, last_check_price, updated_at)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (symbol) DO UPDATE SET
-                            last_check_timestamp = EXCLUDED.last_check_timestamp,
-                            last_check_price = EXCLUDED.last_check_price,
-                            updated_at = EXCLUDED.updated_at
-                    ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
-                else:
-                    # SQLite: use INSERT OR REPLACE
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO price_check_tracking 
-                        (symbol, last_check_timestamp, last_check_price, updated_at)
-                        VALUES (?, ?, ?, ?)
-                    ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
+                # PostgreSQL: use ON CONFLICT
+                cursor.execute('''
+                    INSERT INTO price_check_tracking 
+                    (symbol, last_check_timestamp, last_check_price, updated_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (symbol) DO UPDATE SET
+                        last_check_timestamp = EXCLUDED.last_check_timestamp,
+                        last_check_price = EXCLUDED.last_check_price,
+                        updated_at = EXCLUDED.updated_at
+                ''', (symbol, current_time.isoformat(), price, current_time.isoformat()))
             
             # Commit price tracking before processing alerts
             conn.commit()
@@ -702,16 +633,13 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
             conn.rollback()
         
         # Get all active alerts
-        if settings.database_url:
-            cursor.execute("SELECT * FROM alerts WHERE is_active = TRUE")
-        else:
-            cursor.execute("SELECT * FROM alerts WHERE is_active = 1")
+        cursor.execute("SELECT * FROM alerts WHERE is_active = TRUE")
         alerts = cursor.fetchall()
         
         triggered_count = 0
         
         for alert in alerts:
-            # Handle both schemas: SQLite may include extended columns, Postgres has core columns only
+            # Handle schema: PostgreSQL has core columns
             alert_id = alert[0]
             user_id = alert[1]
             symbol = alert[2]
@@ -776,9 +704,8 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                 # Use savepoint for each alert to prevent transaction abort cascading
                 savepoint_name = f"alert_{alert_id}_{int(current_time.timestamp() * 1000)}"
                 try:
-                    if is_pg:
-                        # Create savepoint before triggering alert
-                        cursor.execute(f"SAVEPOINT {savepoint_name}")
+                    # Create savepoint before triggering alert
+                    cursor.execute(f"SAVEPOINT {savepoint_name}")
                     
                     await trigger_alert(
                         alert_id, user_id, symbol, threshold_price, alert_type,
@@ -787,28 +714,22 @@ async def check_and_trigger_alerts(current_prices: Dict[str, float]):
                     )
                     triggered_count += 1
                     
-                    if is_pg:
-                        # Release savepoint on success
-                        cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
-                        conn.commit()
+                    # Release savepoint on success
+                    cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                    conn.commit()
                 except Exception as e:
                     logger.error(f"Error triggering alert {alert_id} in batch: {e}")
-                    # Rollback to savepoint for PostgreSQL to continue with next alert
-                    if is_pg:
+                    # Rollback to savepoint to continue with next alert
+                    try:
+                        cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                        cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                    except Exception as savepoint_error:
+                        # If savepoint operations fail, do full rollback
+                        logger.error(f"Error with savepoint for alert {alert_id}: {savepoint_error}")
                         try:
-                            cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-                            cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
-                        except Exception as savepoint_error:
-                            # If savepoint operations fail, do full rollback
-                            logger.error(f"Error with savepoint for alert {alert_id}: {savepoint_error}")
-                            try:
-                                conn.rollback()
-                            except Exception as rollback_error:
-                                logger.error(f"Error during rollback for alert {alert_id}: {rollback_error}")
-        
-        # No final commit needed - PostgreSQL commits per alert, SQLite commits at end
-        if not is_pg:
-            conn.commit()
+                            conn.rollback()
+                        except Exception as rollback_error:
+                            logger.error(f"Error during rollback for alert {alert_id}: {rollback_error}")
         
         if triggered_count > 0:
             logger.info(f"Triggered {triggered_count} alerts in real-time check")
@@ -843,443 +764,10 @@ from .schemas.auth import (
 )
 from .schemas.csv_import import CSVUploadResponse, CSVExecuteRequest
 
-def init_database():
-    """Initialize SQLite database with user management tables"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
-    # Create users table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            username TEXT UNIQUE NOT NULL,
-            hashed_password TEXT NOT NULL,
-            full_name TEXT,
-            preferred_currency TEXT DEFAULT 'USD',
-            is_active BOOLEAN DEFAULT 1,
-            is_verified BOOLEAN DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-    ''')
-
-    # Create password reset tokens table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS password_reset_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            expires_at TEXT NOT NULL,
-            used BOOLEAN DEFAULT 0,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-
-    # Create user sessions table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-
-    # Create portfolio table with user_id
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS portfolio_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
-            amount REAL NOT NULL,
-            price_buy REAL NOT NULL,
-            purchase_date TEXT,
-            base_currency TEXT NOT NULL,
-            purchase_price_eur REAL,
-            purchase_price_czk REAL,
-            source TEXT,
-            commission REAL DEFAULT 0.0,
-            total_investment_text TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            current_price REAL,
-            current_value REAL,
-            pnl REAL,
-            pnl_percent REAL,
-            -- New USD-based columns for calculations
-            price_buy_usd REAL,
-            commission_usd REAL,
-            current_price_usd REAL,
-            current_value_usd REAL,
-            pnl_usd REAL,
-            pnl_percent_usd REAL,
-            -- Exchange rate at time of purchase
-            exchange_rate_at_purchase REAL,
-            comments TEXT,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    # Add comments column if it doesn't exist (for existing databases)
-    try:
-        cursor.execute('ALTER TABLE portfolio_items ADD COLUMN comments TEXT')
-    except Exception:
-        pass  # Column already exists
-
-    # Create alerts table with user_id
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
-            threshold_price REAL NOT NULL,
-            alert_type TEXT NOT NULL,
-            message TEXT,
-            is_active BOOLEAN DEFAULT 1,
-            created_at TEXT NOT NULL,
-            -- New USD-based columns for calculations
-            threshold_price_usd REAL,
-            base_currency TEXT,
-            exchange_rate_at_creation REAL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-
-    # Create tracked_symbols table with user_id
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS tracked_symbols (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
-            name TEXT NOT NULL,
-            active BOOLEAN DEFAULT 1,
-            last_updated TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            UNIQUE(user_id, symbol)
-        )
-    ''')
-
-    # Create crypto_symbols table for storing available cryptocurrencies
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS crypto_symbols (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT UNIQUE NOT NULL,
-            name TEXT NOT NULL,
-            market_cap_rank INTEGER,
-            last_updated TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    ''')
-
-    # Create alert_history table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS alert_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alert_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
-            triggered_price REAL NOT NULL,
-            triggered_at TEXT NOT NULL,
-            was_missed BOOLEAN DEFAULT 0,
-            check_type TEXT DEFAULT 'realtime',
-            FOREIGN KEY (alert_id) REFERENCES alerts (id),
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-
-    # Create price_check_tracking table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS price_check_tracking (
-            symbol TEXT PRIMARY KEY,
-            last_check_timestamp TEXT NOT NULL,
-            last_check_price REAL NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-    ''')
-
-    # Add preferred_currency column to existing users table if it doesn't exist
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN preferred_currency TEXT DEFAULT 'USD'")
-        logger.info("✅ Added preferred_currency column to users table")
-    except sqlite3.OperationalError:
-        # Column already exists, ignore
-        pass
-    
-    # Add telegram_bot_token column to existing users table if it doesn't exist
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN telegram_bot_token TEXT")
-        logger.info("✅ Added telegram_bot_token column to users table")
-    except sqlite3.OperationalError:
-        # Column already exists, ignore
-        pass
-    
-    # Add telegram_chat_id column to existing users table if it doesn't exist
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN telegram_chat_id TEXT")
-        logger.info("✅ Added telegram_chat_id column to users table")
-    except sqlite3.OperationalError:
-        # Column already exists, ignore
-        pass
-    
-    # Add default_alert_percentage_above column to existing users table if it doesn't exist
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN default_alert_percentage_above REAL DEFAULT 60.0")
-        logger.info("✅ Added default_alert_percentage_above column to users table")
-    except sqlite3.OperationalError:
-        # Column already exists, ignore
-        pass
-    
-    # Add default_alert_percentage_below column to existing users table if it doesn't exist
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN default_alert_percentage_below REAL DEFAULT 20.0")
-        logger.info("✅ Added default_alert_percentage_below column to users table")
-    except sqlite3.OperationalError:
-        # Column already exists, ignore
-        pass
-    
-    # Add symbol column to existing alert_history table if it doesn't exist
-    try:
-        cursor.execute("ALTER TABLE alert_history ADD COLUMN symbol TEXT")
-        logger.info("✅ Added symbol column to alert_history table")
-    except sqlite3.OperationalError:
-        # Column already exists, ignore
-        pass
-    
-    # Add new USD-based columns to portfolio_items table if they don't exist
-    try:
-        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN price_buy_usd REAL")
-        logger.info("✅ Added price_buy_usd column to portfolio_items table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN commission_usd REAL")
-        logger.info("✅ Added commission_usd column to portfolio_items table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN current_price_usd REAL")
-        logger.info("✅ Added current_price_usd column to portfolio_items table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN current_value_usd REAL")
-        logger.info("✅ Added current_value_usd column to portfolio_items table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN pnl_usd REAL")
-        logger.info("✅ Added pnl_usd column to portfolio_items table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN pnl_percent_usd REAL")
-        logger.info("✅ Added pnl_percent_usd column to portfolio_items table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE portfolio_items ADD COLUMN exchange_rate_at_purchase REAL")
-        logger.info("✅ Added exchange_rate_at_purchase column to portfolio_items table")
-    except sqlite3.OperationalError:
-        pass
-    
-    # Add new USD-based columns to alerts table if they don't exist
-    try:
-        cursor.execute("ALTER TABLE alerts ADD COLUMN threshold_price_usd REAL")
-        logger.info("✅ Added threshold_price_usd column to alerts table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE alerts ADD COLUMN base_currency TEXT")
-        logger.info("✅ Added base_currency column to alerts table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE alerts ADD COLUMN exchange_rate_at_creation REAL")
-        logger.info("✅ Added exchange_rate_at_creation column to alerts table")
-    except sqlite3.OperationalError:
-        pass
-    
-    # Add new columns to alert_history table if they don't exist
-    try:
-        cursor.execute("ALTER TABLE alert_history ADD COLUMN was_missed BOOLEAN DEFAULT 0")
-        logger.info("✅ Added was_missed column to alert_history table")
-    except sqlite3.OperationalError:
-        pass
-    
-    try:
-        cursor.execute("ALTER TABLE alert_history ADD COLUMN check_type TEXT DEFAULT 'realtime'")
-        logger.info("✅ Added check_type column to alert_history table")
-    except sqlite3.OperationalError:
-        pass
-    
-    # Create import history table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS import_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            source TEXT NOT NULL,
-            import_date TEXT NOT NULL,
-            items_imported INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            error_message TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Create user API credentials table (encrypted storage)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_api_credentials (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            exchange TEXT NOT NULL,
-            encrypted_credentials TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            UNIQUE(user_id, exchange)
-        )
-    ''')
-    
-    # Create CSV import mappings table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS csv_import_mappings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            exchange TEXT NOT NULL,
-            column_mapping TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            last_used TEXT,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            UNIQUE(user_id, exchange)
-        )
-    ''')
-    
-    # Create ai_predictions table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ai_predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
-            prediction_type TEXT NOT NULL,
-            predicted_price REAL NOT NULL,
-            confidence_percent REAL NOT NULL,
-            prediction_reasoning TEXT,
-            model_name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            actual_price_at_target REAL,
-            is_verified BOOLEAN DEFAULT 0,
-            accuracy_percent REAL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Create news_analysis table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS news_analysis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT NOT NULL,
-            news_date TEXT NOT NULL,
-            title TEXT NOT NULL,
-            summary TEXT,
-            sentiment_score REAL,
-            relevance_score REAL,
-            source TEXT,
-            created_at TEXT NOT NULL
-        )
-    ''')
-    
-    # Create price_history_cache table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS price_history_cache (
-            symbol TEXT PRIMARY KEY,
-            history_data TEXT NOT NULL,
-            last_updated TEXT NOT NULL
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    logger.info("✅ Database initialized with user management, import functionality, and AI advisor tables")
-
-def load_migration_data():
-    """Load data from migration file if it exists"""
-    migration_file = "data_migration.json"
-    if os.path.exists(migration_file):
-        try:
-            with open(migration_file, 'r') as f:
-                data = json.load(f)
-            
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            
-            # Insert portfolio items
-            for item in data.get('portfolio_items', []):
-                cursor.execute('''
-                    INSERT OR REPLACE INTO portfolio_items 
-                    (id, symbol, amount, price_buy, purchase_date, base_currency, 
-                     purchase_price_eur, purchase_price_czk, source, commission, 
-                     total_investment_text, created_at, updated_at, current_price, 
-                     current_value, pnl, pnl_percent)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    item['id'], item['symbol'], item['amount'], item['price_buy'],
-                    item['purchase_date'], item['base_currency'], item['purchase_price_eur'],
-                    item['purchase_price_czk'], item['source'], item['commission'],
-                    item['total_investment_text'], item['created_at'], item['updated_at'],
-                    item['current_price'], item['current_value'], item['pnl'], item['pnl_percent']
-                ))
-            
-            # Insert alerts
-            for alert in data.get('alerts', []):
-                cursor.execute('''
-                    INSERT OR REPLACE INTO alerts 
-                    (id, symbol, threshold_price, alert_type, message, is_active, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    alert['id'], alert['symbol'], alert['threshold_price'],
-                    alert['alert_type'], alert.get('message'), alert.get('is_active', True),
-                    alert['created_at']
-                ))
-            
-            # Insert tracked symbols
-            for symbol in data.get('tracked_symbols', []):
-                cursor.execute('''
-                    INSERT OR REPLACE INTO tracked_symbols 
-                    (symbol, name, active, last_updated)
-                    VALUES (?, ?, ?, ?)
-                ''', (
-                    symbol['symbol'], symbol['name'], symbol['active'], symbol['last_updated']
-                ))
-            
-            conn.commit()
-            conn.close()
-            
-            logger.info(f"✅ Migrated {len(data.get('portfolio_items', []))} portfolio items")
-            logger.info(f"✅ Migrated {len(data.get('alerts', []))} alerts")
-            logger.info(f"✅ Migrated {len(data.get('tracked_symbols', []))} tracked symbols")
-            
-            # Remove migration file after successful migration
-            os.remove(migration_file)
-            logger.info("✅ Migration file removed")
-            
-        except Exception as e:
-            logger.error(f"Error loading migration data: {e}")
+# init_database() and load_migration_data() functions removed - PostgreSQL only
 
 def get_db_connection():
-    """Get database connection with retry logic: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
+    """Get PostgreSQL database connection with retry logic."""
     # Use retry logic for runtime connections (max 3 retries, faster backoff)
     return connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
 
@@ -1294,7 +782,7 @@ def format_total_investment_text(amount: float, currency: str) -> str:
     # Add currency symbol
     currency_symbols = {
         "USD": "$",
-        "EUR": "€", 
+        "EUR": "€",
         "CZK": "Kč",
         "GBP": "£",
         "JPY": "¥"
@@ -1326,13 +814,13 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
             commission_usd = currency_service.convert_amount(item.get("commission", 0), item["base_currency"], "USD")
             current_value_usd = currency_service.convert_amount(item.get("current_value", 0), item["base_currency"], "USD") if item.get("current_value") else 0
             pnl_usd = currency_service.convert_amount(item.get("pnl", 0), item["base_currency"], "USD") if item.get("pnl") else 0
-        
+
         # Convert USD values to target currency for display
         converted_price_buy = currency_service.convert_amount(price_buy_usd, "USD", target_currency)
         converted_commission = currency_service.convert_amount(commission_usd, "USD", target_currency)
         converted_current_value = currency_service.convert_amount(current_value_usd, "USD", target_currency) if current_value_usd else None
         converted_pnl = currency_service.convert_amount(pnl_usd, "USD", target_currency) if pnl_usd else None
-        
+
         # Convert current price for display
         converted_current_price = None
         if item.get("current_price_usd") is not None:
@@ -1342,10 +830,10 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
 
         # Calculate total investment in target currency
         total_investment = (item["amount"] * converted_price_buy) + converted_commission
-        
+
         # Calculate P&L percentage using USD values for accuracy
         pnl_percent = item.get("pnl_percent_usd") if item.get("pnl_percent_usd") is not None else item.get("pnl_percent", 0)
-        
+
         return {
             **item,
             "base_currency": target_currency,
@@ -1370,17 +858,17 @@ def verify_database_connection_and_schema():
     try:
         conn = connect_with_retry(max_retries=3, initial_delay=1.0, max_delay=5.0, is_startup=False)
         cur = conn.cursor()
-        
+
         # Check if users table exists
         cur.execute("""
             SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
                 AND table_name = 'users'
             );
         """)
         schema_exists = cur.fetchone()[0]
-        
+
         # If schema exists, check if there's data
         has_data = False
         if schema_exists:
@@ -1388,7 +876,7 @@ def verify_database_connection_and_schema():
             user_count = cur.fetchone()[0]
             has_data = user_count > 0
             logger.info(f"✅ Database schema exists with {user_count} users")
-        
+
         cur.close()
         conn.close()
         return True, schema_exists, has_data
@@ -1401,31 +889,31 @@ def init_postgres_database():
     NEVER creates tables if database is not available or if schema already exists with data.
     """
     logger.info("🔄 Verifying database connection and schema...")
-    
+
     # First, verify database is available
     is_connected, schema_exists, has_data = verify_database_connection_and_schema()
-    
+
     if not is_connected:
         error_msg = "❌ Database is not available. Cannot initialize schema. Aborting table creation."
         logger.error(error_msg)
         raise ConnectionError(error_msg)
-    
+
     if schema_exists and has_data:
         logger.info("✅ Database schema already exists with customer data. Skipping table creation.")
         logger.info("⚠️ NEVER create tables when database has existing customer data.")
         return  # Schema exists with data - do NOT create tables
-    
+
     if schema_exists and not has_data:
         logger.info("⚠️ Database schema exists but is empty. Skipping table creation (tables may be created by migration).")
         return  # Schema exists but empty - might be a fresh database, but safer to skip
-    
+
     # Only create tables if schema doesn't exist at all (new database)
     logger.info("📋 Database schema does not exist. Creating tables...")
     try:
         # Use retry logic for startup (max 5 retries, exponential backoff)
         conn = connect_with_retry(max_retries=5, initial_delay=2.0, max_delay=30.0, is_startup=True)
         cur = conn.cursor()
-        
+
         # Create users table
         cur.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -1444,20 +932,20 @@ def init_postgres_database():
             default_alert_percentage_above REAL DEFAULT 0.10,
             default_alert_percentage_below REAL DEFAULT 0.10
         )
-    ''')
-        
+        ''')
+
         # Create password reset tokens table
         cur.execute('''
             CREATE TABLE IF NOT EXISTS password_reset_tokens (
                 id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            token TEXT UNIQUE NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            used BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-        
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                token TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Create user sessions table
         cur.execute('''
         CREATE TABLE IF NOT EXISTS user_sessions (
@@ -1468,7 +956,7 @@ def init_postgres_database():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-        
+
         # Create portfolio_items table
         cur.execute('''
         CREATE TABLE IF NOT EXISTS portfolio_items (
@@ -1505,7 +993,7 @@ def init_postgres_database():
             cur.execute('ALTER TABLE portfolio_items ADD COLUMN comments TEXT')
         except Exception:
             pass  # Column already exists
-        
+
         # Create alerts table
         cur.execute('''
         CREATE TABLE IF NOT EXISTS alerts (
@@ -1590,15 +1078,6 @@ def init_postgres_database():
             rate REAL NOT NULL,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-        
-        # Create price_check_tracking table (used for missed-alert logic)
-        cur.execute('''
-        CREATE TABLE IF NOT EXISTS price_check_tracking (
-            symbol TEXT PRIMARY KEY,
-            last_check_timestamp TIMESTAMP,
-            last_check_price REAL
         )
     ''')
         
@@ -1689,11 +1168,62 @@ def init_postgres_database():
     except Exception as e:
         logger.error(f"❌ Failed to initialize PostgreSQL database after retries: {str(e)}")
         logger.warning("⚠️ Database initialization failed, but continuing startup. Database might be ready later.")
-        # Don't raise - allow service to start even if initialization fails
-        # The retry logic in get_db_connection() will handle runtime connections
-        # Re-raise only if we want to fail fast during startup
-        # For now, we'll let it fail and handle in lifespan()
         raise
+
+def ensure_comments_column():
+    """Ensure comments column exists in portfolio_items table.
+    This function checks for missing column and adds it if needed,
+    even if the table already exists (handles schema migrations).
+    """
+    try:
+        from .utils.db import get_db_connection
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # First check if portfolio_items table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'portfolio_items'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
+        
+        if not table_exists:
+            logger.debug("⚠️ portfolio_items table does not exist yet. Comments column will be added when table is created.")
+            conn.close()
+            return
+        
+        # Check if comments column exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.columns
+                WHERE table_schema = 'public'
+                AND table_name = 'portfolio_items'
+                AND column_name = 'comments'
+            )
+        """)
+        column_exists = cursor.fetchone()[0]
+        
+        if not column_exists:
+            logger.info("📋 Adding missing comments column to portfolio_items table...")
+            cursor.execute("ALTER TABLE portfolio_items ADD COLUMN comments TEXT")
+            conn.commit()
+            logger.info("✅ Successfully added comments column to portfolio_items table")
+        else:
+            logger.debug("✅ comments column already exists in portfolio_items table")
+        
+        conn.close()
+    except Exception as e:
+        logger.error(f"❌ Error ensuring comments column: {e}", exc_info=True)
+        # Don't raise - allow service to continue even if column addition fails
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
 def ensure_ai_advisor_tables():
     """Ensure ai_predictions and price_history_cache tables exist.
@@ -1701,103 +1231,60 @@ def ensure_ai_advisor_tables():
     even if other tables already exist (handles partial schema scenarios).
     """
     try:
-        from .utils.db import get_db_connection, is_postgres_connection
+        from .utils.db import get_db_connection
         
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         
         tables_created = []
         
         # Check and create ai_predictions table
-        if is_pg:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'ai_predictions'
-                )
-            """)
-            ai_predictions_exists = cursor.fetchone()[0]
-        else:
-            cursor.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='ai_predictions'
-            """)
-            ai_predictions_exists = cursor.fetchone() is not None
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'ai_predictions'
+            )
+        """)
+        ai_predictions_exists = cursor.fetchone()[0]
         
         if not ai_predictions_exists:
             logger.info("📋 Creating missing ai_predictions table...")
-            if is_pg:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS ai_predictions (
-                        id SERIAL PRIMARY KEY,
-                        user_id INTEGER NOT NULL REFERENCES users(id),
-                        symbol TEXT NOT NULL,
-                        prediction_type TEXT NOT NULL,
-                        predicted_price REAL NOT NULL,
-                        confidence_percent REAL NOT NULL,
-                        prediction_reasoning TEXT,
-                        model_name TEXT NOT NULL,
-                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        actual_price_at_target REAL,
-                        is_verified BOOLEAN DEFAULT FALSE,
-                        accuracy_percent REAL
-                    )
-                ''')
-            else:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS ai_predictions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER NOT NULL,
-                        symbol TEXT NOT NULL,
-                        prediction_type TEXT NOT NULL,
-                        predicted_price REAL NOT NULL,
-                        confidence_percent REAL NOT NULL,
-                        prediction_reasoning TEXT,
-                        model_name TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        actual_price_at_target REAL,
-                        is_verified BOOLEAN DEFAULT 0,
-                        accuracy_percent REAL,
-                        FOREIGN KEY (user_id) REFERENCES users (id)
-                    )
-                ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ai_predictions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    symbol TEXT NOT NULL,
+                    prediction_type TEXT NOT NULL,
+                    predicted_price REAL NOT NULL,
+                    confidence_percent REAL NOT NULL,
+                    prediction_reasoning TEXT,
+                    model_name TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    actual_price_at_target REAL,
+                    is_verified BOOLEAN DEFAULT FALSE,
+                    accuracy_percent REAL
+                )
+            ''')
             tables_created.append("ai_predictions")
         
         # Check and create price_history_cache table
-        if is_pg:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'price_history_cache'
-                )
-            """)
-            cache_exists = cursor.fetchone()[0]
-        else:
-            cursor.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='price_history_cache'
-            """)
-            cache_exists = cursor.fetchone() is not None
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'price_history_cache'
+            )
+        """)
+        cache_exists = cursor.fetchone()[0]
         
         if not cache_exists:
             logger.info("📋 Creating missing price_history_cache table...")
-            if is_pg:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS price_history_cache (
-                        symbol TEXT PRIMARY KEY,
-                        history_data TEXT NOT NULL,
-                        last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
-            else:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS price_history_cache (
-                        symbol TEXT PRIMARY KEY,
-                        history_data TEXT NOT NULL,
-                        last_updated TEXT NOT NULL
-                    )
-                ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS price_history_cache (
+                    symbol TEXT PRIMARY KEY,
+                    history_data TEXT NOT NULL,
+                    last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             tables_created.append("price_history_cache")
         
         conn.commit()
@@ -1824,40 +1311,36 @@ async def lifespan(app: FastAPI):
         root_logger.addHandler(file_handler)
         logger.info("✅ File handler re-attached to root logger")
     
-    if settings.database_url:
-        logger.info("🚀 Starting Crypto AI Agent API v2.0 (PostgreSQL Mode)")
-        try:
-            # Verify database is available before attempting initialization
-            is_connected, schema_exists, has_data = verify_database_connection_and_schema()
-            if not is_connected:
-                logger.error("❌ Database is not available. Service will start but will fail health checks.")
-                logger.error("❌ Deployment should verify database availability before switching traffic.")
-            elif has_data:
-                logger.info("✅ Database is available with customer data. No table creation needed.")
-            else:
-                # Only initialize if database is available but empty
-                init_postgres_database()
-            logger.info("✅ Database verification/initialization complete")
-        except Exception as e:
-            logger.error(f"❌ Database initialization failed during startup: {str(e)}")
-            logger.error("❌ Service will start but will fail health checks until database is available.")
-            logger.error("❌ Deployment scripts should verify database before switching traffic.")
-            # Continue startup - but health checks will fail until database is available
-    else:
-        logger.info("🚀 Starting Crypto AI Agent API v2.0 (SQLite Mode)")
-    
-    # Initialize database (only for SQLite)
     if not settings.database_url:
-        init_database()
-        logger.info("✅ Database initialized")
+        logger.error("❌ DATABASE_URL environment variable is required. PostgreSQL database connection is mandatory.")
+        raise ConnectionError("DATABASE_URL environment variable is required. PostgreSQL database connection is mandatory.")
     
-    # Load migration data if exists (SQLite only)
-    if not settings.database_url:
-        load_migration_data()
+    logger.info("🚀 Starting Crypto AI Agent API v2.0 (PostgreSQL Mode)")
+    try:
+        # Verify database is available before attempting initialization
+        is_connected, schema_exists, has_data = verify_database_connection_and_schema()
+        if not is_connected:
+            logger.error("❌ Database is not available. Service will start but will fail health checks.")
+            logger.error("❌ Deployment should verify database availability before switching traffic.")
+        elif has_data:
+            logger.info("✅ Database is available with customer data. No table creation needed.")
+        else:
+            # Only initialize if database is available but empty
+            init_postgres_database()
+        logger.info("✅ Database verification/initialization complete")
+    except Exception as e:
+        logger.error(f"❌ Database initialization failed during startup: {str(e)}")
+        logger.error("❌ Service will start but will fail health checks until database is available.")
+        logger.error("❌ Deployment scripts should verify database before switching traffic.")
+        # Continue startup - but health checks will fail until database is available
     
-    # Ensure AI advisor tables exist (works for both PostgreSQL and SQLite)
+    # Ensure AI advisor tables exist
     ensure_ai_advisor_tables()
     logger.info("✅ AI advisor tables migration check complete")
+    
+    # Ensure comments column exists in portfolio_items table
+    ensure_comments_column()
+    logger.info("✅ Portfolio items comments column migration check complete")
     
     # Initialize currency service
     await currency_service.get_exchange_rates()

@@ -22,17 +22,16 @@ logger = get_logger("backend.app.api.alerts")
 async def get_alerts(active_only: bool = False, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
 
     base_select = "SELECT id, user_id, symbol, threshold_price, alert_type, message, is_active, created_at FROM alerts"
     if active_only:
-        sql = base_select + " WHERE user_id = ? AND is_active = ? ORDER BY created_at DESC"
-        sql = _normalize_placeholders(sql, is_pg)
-        params = (current_user["id"], True if is_pg else 1)
+        sql = base_select + " WHERE user_id = %s AND is_active = %s ORDER BY created_at DESC"
+        sql = _normalize_placeholders(sql)
+        params = (current_user["id"], True)
         cursor.execute(sql, params)
     else:
-        sql = base_select + " WHERE user_id = ? ORDER BY created_at DESC"
-        sql = _normalize_placeholders(sql, is_pg)
+        sql = base_select + " WHERE user_id = %s ORDER BY created_at DESC"
+        sql = _normalize_placeholders(sql)
         params = (current_user["id"],)
         cursor.execute(sql, params)
 
@@ -55,7 +54,6 @@ async def get_alerts(active_only: bool = False, current_user: dict = Depends(get
 async def create_alert(alert: PriceAlertCreate, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
 
     now = datetime.now().isoformat() + "Z"
     base_currency = alert.base_currency or "USD"
@@ -64,11 +62,11 @@ async def create_alert(alert: PriceAlertCreate, current_user: dict = Depends(get
 
     insert_sql = '''
         INSERT INTO alerts (user_id, symbol, threshold_price, alert_type, message, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     '''
     params = (current_user["id"], alert.symbol, alert.threshold_price, alert.alert_type, alert.message, True, now)
-    sql = _normalize_placeholders(insert_sql, is_pg)
-    alert_id = _execute_insert_and_get_id(cursor, sql, params, is_pg)
+    sql = _normalize_placeholders(insert_sql)
+    alert_id = _execute_insert_and_get_id(cursor, sql, params)
     conn.commit()
     conn.close()
 
@@ -84,8 +82,7 @@ async def create_alert(alert: PriceAlertCreate, current_user: dict = Depends(get
 async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql_sel = _normalize_placeholders("SELECT * FROM alerts WHERE id = ? AND user_id = ?", is_pg)
+    sql_sel = _normalize_placeholders("SELECT * FROM alerts WHERE id = %s AND user_id = %s")
     cursor.execute(sql_sel, (alert_id, current_user["id"]))
     row = cursor.fetchone()
     if not row:
@@ -95,19 +92,19 @@ async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dic
     update_fields = []
     update_values = []
     if alert.symbol is not None:
-        update_fields.append("symbol = ?")
+        update_fields.append("symbol = %s")
         update_values.append(alert.symbol)
     if alert.threshold_price is not None:
-        update_fields.append("threshold_price = ?")
+        update_fields.append("threshold_price = %s")
         update_values.append(alert.threshold_price)
     if alert.alert_type is not None:
-        update_fields.append("alert_type = ?")
+        update_fields.append("alert_type = %s")
         update_values.append(alert.alert_type)
     if alert.message is not None:
-        update_fields.append("message = ?")
+        update_fields.append("message = %s")
         update_values.append(alert.message)
     if alert.is_active is not None:
-        update_fields.append("is_active = ?")
+        update_fields.append("is_active = %s")
         update_values.append(alert.is_active)
 
     if update_fields:
@@ -115,9 +112,9 @@ async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dic
         dyn_sql = f"""
             UPDATE alerts 
             SET {', '.join(update_fields)}
-            WHERE id = ?
+            WHERE id = %s
         """
-        sql_upd = _normalize_placeholders(dyn_sql, is_pg)
+        sql_upd = _normalize_placeholders(dyn_sql)
         cursor.execute(sql_upd, update_values)
         conn.commit()
 
@@ -125,7 +122,7 @@ async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dic
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    sql_sel2 = _normalize_placeholders("SELECT * FROM alerts WHERE id = ?", is_pg)
+    sql_sel2 = _normalize_placeholders("SELECT * FROM alerts WHERE id = %s")
     cursor.execute(sql_sel2, (alert_id,))
     row = cursor.fetchone()
     conn.close()
@@ -141,8 +138,7 @@ async def update_alert(alert_id: int, alert: PriceAlertUpdate, current_user: dic
 async def delete_alert(alert_id: int, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql_del = _normalize_placeholders("DELETE FROM alerts WHERE id = ? AND user_id = ?", is_pg)
+    sql_del = _normalize_placeholders("DELETE FROM alerts WHERE id = %s AND user_id = %s")
     cursor.execute(sql_del, (alert_id, current_user["id"]))
     deleted = cursor.rowcount
     conn.commit()
@@ -157,36 +153,20 @@ async def get_alert_history(limit: int = 100, current_user: dict = Depends(get_c
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-        if is_pg:
-            # PostgreSQL: join with alerts table to get symbol
-            history_sql = """
-                SELECT 
-                    ah.id,
-                    ah.alert_id,
-                    a.symbol,
-                    ah.triggered_price,
-                    ah.triggered_at
-                FROM alert_history ah
-                JOIN alerts a ON ah.alert_id = a.id
-                WHERE ah.user_id = %s
-                ORDER BY ah.triggered_at DESC
-                LIMIT %s
-            """
-        else:
-            # SQLite: symbol is directly in alert_history
-            history_sql = """
-                SELECT 
-                    ah.id,
-                    ah.alert_id,
-                    ah.symbol,
-                    ah.triggered_price,
-                    ah.triggered_at
-                FROM alert_history ah
-                WHERE ah.user_id = ?
-                ORDER BY ah.triggered_at DESC
-                LIMIT ?
-            """
+        # PostgreSQL: join with alerts table to get symbol
+        history_sql = """
+            SELECT 
+                ah.id,
+                ah.alert_id,
+                a.symbol,
+                ah.triggered_price,
+                ah.triggered_at
+            FROM alert_history ah
+            JOIN alerts a ON ah.alert_id = a.id
+            WHERE ah.user_id = %s
+            ORDER BY ah.triggered_at DESC
+            LIMIT %s
+        """
         cursor.execute(history_sql, (current_user["id"], limit))
         history = []
         for row in cursor.fetchall():

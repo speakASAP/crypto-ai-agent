@@ -194,7 +194,7 @@ services:
 
 ### Issue 4: ENVIRONMENT not set to production
 
-**Symptom:** Backend uses SQLite instead of PostgreSQL
+**Symptom:** Backend cannot connect to PostgreSQL database
 
 **Solution:**
 

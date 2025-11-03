@@ -112,12 +112,11 @@ Set in `.env` or in server environment:
 
 - Compose defines HTTP healthchecks for backend and frontend
 
-## Data migration (SQLite → Postgres)
+## Database Setup
 
-- Stop services (`docker compose down`)
-- Backup `data/crypto_portfolio.db`
-- Run migration script to populate Postgres (see migration doc)
-- Start services and verify
+- Ensure PostgreSQL database is available and accessible
+- Configure `DATABASE_URL` environment variable
+- Start services and verify database connectivity
 
 ## Troubleshooting
 

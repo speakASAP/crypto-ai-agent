@@ -19,11 +19,15 @@ def test_connection():
     """Test database connection and verify data."""
     print("🔍 Testing database connection using application credentials...")
     print(f"   Environment: {settings.environment}")
-    print(f"   Database URL: {'SET' if settings.database_url else 'NOT SET (will use SQLite)'}")
+    print(f"   Database URL: {'SET' if settings.database_url else 'NOT SET'}")
+    
+    if not settings.database_url:
+        print("\n❌ DATABASE_URL is required for PostgreSQL connection")
+        return False
     
     try:
         # Test connection with retry logic
-        print("\n📡 Attempting connection...")
+        print("\n📡 Attempting PostgreSQL connection...")
         conn = connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
         
         cur = conn.cursor()
@@ -31,42 +35,31 @@ def test_connection():
         # Test basic connectivity
         print("✅ Connection established")
         
-        # Check if we're using PostgreSQL
-        if settings.environment.lower() == "production" or settings.database_url:
-            # Check if users table exists
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'users'
-                )
-            """)
-            table_exists = cur.fetchone()[0]
+        # Check if users table exists
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'users'
+            )
+        """)
+        table_exists = cur.fetchone()[0]
+        
+        if table_exists:
+            # Count users
+            cur.execute("SELECT COUNT(*) FROM users")
+            user_count = cur.fetchone()[0]
+            print(f"✅ Users table exists with {user_count} users")
             
-            if table_exists:
-                # Count users
-                cur.execute("SELECT COUNT(*) FROM users")
-                user_count = cur.fetchone()[0]
-                print(f"✅ Users table exists with {user_count} users")
-                
-                # Get some sample data (without sensitive info)
-                cur.execute("SELECT id, email, username FROM users LIMIT 5")
-                users = cur.fetchall()
-                if users:
-                    print("\n📊 Sample users (first 5):")
-                    for user in users:
-                        print(f"   ID: {user[0]}, Email: {user[1]}, Username: {user[2]}")
-            else:
-                print("⚠️  Users table does not exist")
+            # Get some sample data (without sensitive info)
+            cur.execute("SELECT id, email, username FROM users LIMIT 5")
+            users = cur.fetchall()
+            if users:
+                print("\n📊 Sample users (first 5):")
+                for user in users:
+                    print(f"   ID: {user[0]}, Email: {user[1]}, Username: {user[2]}")
         else:
-            # SQLite
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-            if cur.fetchone():
-                cur.execute("SELECT COUNT(*) FROM users")
-                user_count = cur.fetchone()[0]
-                print(f"✅ Users table exists with {user_count} users")
-            else:
-                print("⚠️  Users table does not exist")
+            print("⚠️  Users table does not exist")
         
         cur.close()
         conn.close()

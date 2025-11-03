@@ -5,7 +5,8 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta, timezone
 from ..core.config import settings
 from ..utils.logger import get_logger
-from ..utils.db import get_db_connection, is_postgres_connection, normalize_placeholders
+from .multi_exchange_price_service import multi_exchange_price_service
+from ..utils.db import get_db_connection, normalize_placeholders
 
 logger = get_logger("backend.app.services.historical_price_service")
 
@@ -117,12 +118,14 @@ class HistoricalPriceService:
                         logger.error(
                             f"CoinGecko API error {response.status} for {symbol}: {error_text}"
                         )
-                        return []
+                        # Final fallback: synthesize minimal history from current price
+                        return await self._fallback_from_current_price(symbol, days)
         except Exception as e:
             logger.error(
                 f"Error fetching price history for {symbol}: {e}", exc_info=True
             )
-            return []
+            # Final fallback: synthesize minimal history from current price
+            return await self._fallback_from_current_price(symbol, days)
 
     async def _fetch_alternative(self, symbol: str, days: int) -> List[Dict[str, any]]:
         """Alternative fetch method using coin list search"""
@@ -171,26 +174,72 @@ class HistoricalPriceService:
 
         return []
 
+    async def _fallback_from_current_price(self, symbol: str, days: int) -> List[Dict[str, any]]:
+        """Synthesize a minimal price history using the current price when external APIs are unavailable.
+
+        Returns a flat series for the requested window so UI can render mini charts instead of 404.
+        """
+        try:
+            prices = await multi_exchange_price_service.get_current_prices([symbol])
+            current = prices.get(symbol.upper())
+            if current is None:
+                return []
+
+            now = datetime.now(timezone.utc)
+            # Build daily points for the requested period (at least 7 points)
+            num_days = max(7, days)
+            history = []
+            for i in range(num_days, 0, -1):
+                dt = now - timedelta(days=i)
+                history.append({
+                    "timestamp": int(dt.timestamp()),
+                    "price": float(current),
+                    "date": dt.isoformat(),
+                })
+            # Include a point for now
+            history.append({
+                "timestamp": int(now.timestamp()),
+                "price": float(current),
+                "date": now.isoformat(),
+            })
+
+            # Cache synthesized data to unblock mini charts
+            self._save_to_cache(symbol, history)
+            logger.warning(f"Using synthesized price history for {symbol} due to upstream limits")
+            return history
+        except Exception:
+            return []
+
     def _get_from_cache(self, symbol: str) -> Optional[List[Dict[str, any]]]:
         """Get cached price history from database"""
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
             sql = normalize_placeholders(
-                "SELECT history_data, last_updated FROM price_history_cache WHERE symbol = ?",
-                is_pg,
+                "SELECT history_data, last_updated FROM price_history_cache WHERE symbol = %s"
             )
             cursor.execute(sql, (symbol.upper(),))
             row = cursor.fetchone()
             conn.close()
 
             if row:
-                history_data_str, last_updated_str = row
-                last_updated = datetime.fromisoformat(
-                    last_updated_str.replace("Z", "+00:00")
-                )
+                history_data_str, last_updated_value = row
+                
+                # Handle both string and datetime objects from database
+                if isinstance(last_updated_value, datetime):
+                    last_updated = last_updated_value
+                    # Ensure timezone-aware
+                    if last_updated.tzinfo is None:
+                        last_updated = last_updated.replace(tzinfo=timezone.utc)
+                elif isinstance(last_updated_value, str):
+                    # Parse string timestamp
+                    last_updated_str = last_updated_value.replace("Z", "+00:00")
+                    last_updated = datetime.fromisoformat(last_updated_str)
+                else:
+                    # Try to parse as ISO format
+                    last_updated_str = str(last_updated_value).replace("Z", "+00:00")
+                    last_updated = datetime.fromisoformat(last_updated_str)
 
                 # Check if cache is still valid
                 if datetime.now(timezone.utc) - last_updated < self.cache_duration:
@@ -213,24 +262,17 @@ class HistoricalPriceService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
             history_json = json.dumps(history)
             now = datetime.now(timezone.utc).isoformat()
 
-            if is_pg:
-                sql = """
-                    INSERT INTO price_history_cache (symbol, history_data, last_updated)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (symbol) DO UPDATE SET
-                        history_data = EXCLUDED.history_data,
-                        last_updated = EXCLUDED.last_updated
-                """
-            else:
-                sql = """
-                    INSERT OR REPLACE INTO price_history_cache (symbol, history_data, last_updated)
-                    VALUES (?, ?, ?)
-                """
+            sql = """
+                INSERT INTO price_history_cache (symbol, history_data, last_updated)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (symbol) DO UPDATE SET
+                    history_data = EXCLUDED.history_data,
+                    last_updated = EXCLUDED.last_updated
+            """
 
             cursor.execute(sql, (symbol.upper(), history_json, now))
             conn.commit()
@@ -246,10 +288,9 @@ class HistoricalPriceService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
             sql = normalize_placeholders(
-                "DELETE FROM price_history_cache WHERE symbol = ?", is_pg
+                "DELETE FROM price_history_cache WHERE symbol = %s"
             )
             cursor.execute(sql, (symbol.upper(),))
             conn.commit()

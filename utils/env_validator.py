@@ -300,16 +300,8 @@ class EnvironmentValidator:
     
     def _validate_paths(self):
         """Validate file and directory paths"""
-        # Validate database path
-        db_path = self.validated_vars.get("DATABASE_FILE", "data/crypto_portfolio.db")
-        db_dir = os.path.dirname(db_path)
-        
-        if db_dir and not os.path.exists(db_dir):
-            try:
-                os.makedirs(db_dir, exist_ok=True)
-                self.validation_warnings.append(f"Created database directory: {db_dir}")
-            except Exception as e:
-                self.validation_errors.append(f"Cannot create database directory '{db_dir}': {str(e)}")
+        # Note: Database connection is validated via DATABASE_URL (PostgreSQL)
+        # No file path validation needed for PostgreSQL connection strings
         
         # Validate log file path
         log_file = self.validated_vars.get("LOG_FILE", "logs/crypto_agent.log")

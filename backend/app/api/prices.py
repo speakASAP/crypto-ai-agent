@@ -12,6 +12,7 @@ from ..services.currency_service import currency_service
 from ..services.price_service import PriceService
 from ..services.multi_exchange_price_service import multi_exchange_price_service
 from ..schemas.common import TrackedSymbol, CryptoSymbol
+from pydantic import BaseModel
 from .ws import manager
 try:
     from utils.logger import get_logger
@@ -31,19 +32,79 @@ price_service = PriceService()
 async def get_tracked_symbols(active_only: bool = False, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
     if active_only:
-        # Use correct boolean literal for each DB
-        sql_text = "SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = ? AND active = TRUE ORDER BY symbol" if is_pg else "SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = ? AND active = 1 ORDER BY symbol"
-        sql = _normalize_placeholders(sql_text, is_pg)
+        sql = _normalize_placeholders("SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = %s AND active = TRUE ORDER BY symbol")
         cursor.execute(sql, (current_user["id"],))
     else:
-        sql = _normalize_placeholders("SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = ? ORDER BY symbol", is_pg)
+        sql = _normalize_placeholders("SELECT symbol, name, active, last_updated FROM tracked_symbols WHERE user_id = %s ORDER BY symbol")
         cursor.execute(sql, (current_user["id"],))
     rows = cursor.fetchall()
     conn.close()
-    symbols = [TrackedSymbol(symbol=row[0], name=row[1], active=bool(row[2]), last_updated=row[3]) for row in rows]
+    # Map database fields (symbol, name, active, last_updated) to frontend format (symbol, name, is_active, created_at)
+    symbols = []
+    for row in rows:
+        # Convert datetime to ISO string if needed
+        created_at = row[3]
+        if hasattr(created_at, 'isoformat'):
+            created_at = created_at.isoformat()
+        elif isinstance(created_at, str):
+            pass  # Already a string
+        else:
+            created_at = str(created_at)
+        
+        symbols.append(TrackedSymbol(
+            symbol=row[0],
+            name=row[1] if row[1] else row[0],
+            is_active=bool(row[2]),
+            created_at=created_at
+        ))
     return symbols
+
+
+class TrackedSymbolCreate(BaseModel):
+    symbol: str
+    name: str | None = None
+    active: bool = True
+    is_active: bool | None = None  # Support frontend format
+    
+    def __init__(self, **data):
+        # Map is_active to active for compatibility
+        if 'is_active' in data and 'active' not in data:
+            data['active'] = data.pop('is_active', True)
+        super().__init__(**data)
+
+
+@router.post("/api/symbols/tracked", response_model=TrackedSymbol)
+async def add_tracked_symbol(payload: TrackedSymbolCreate, current_user: dict = Depends(get_current_active_user)):
+    """Add or activate a tracked symbol for the current user."""
+    try:
+        symbol = payload.symbol.strip().upper()
+        name = (payload.name or symbol).strip()
+        active = payload.active
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        sql = (
+            "INSERT INTO tracked_symbols (user_id, symbol, name, active, last_updated) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (user_id, symbol) DO UPDATE SET name = EXCLUDED.name, active = EXCLUDED.active, last_updated = EXCLUDED.last_updated"
+        )
+        params = (current_user["id"], symbol, name, bool(active), now)
+        cursor.execute(sql, params)
+        conn.commit()
+        conn.close()
+
+        # Return in frontend format (is_active instead of active, created_at instead of last_updated)
+        return TrackedSymbol(symbol=symbol, name=name, is_active=active, created_at=now)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding tracked symbol {payload.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to add tracked symbol: {str(e)}")
 
 
 @router.get("/api/symbols/prices")
@@ -116,7 +177,7 @@ async def refresh_crypto_prices(current_user: dict = Depends(get_current_active_
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT symbol FROM portfolio_items")
         portfolio_symbols = [row[0] for row in cursor.fetchall()]
-        cursor.execute("SELECT symbol FROM tracked_symbols WHERE active = 1")
+        cursor.execute("SELECT symbol FROM tracked_symbols WHERE active = TRUE")
         tracked_symbols = [row[0] for row in cursor.fetchall()]
         all_symbols = list(set(portfolio_symbols + tracked_symbols))
         conn.close()
@@ -154,15 +215,13 @@ async def get_symbol_last_updated():
 async def get_crypto_symbols(limit: int = 500, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
     sql = _normalize_placeholders(
         """
         SELECT symbol, name, market_cap_rank, last_updated 
         FROM crypto_symbols 
         ORDER BY market_cap_rank ASC, symbol ASC 
-        LIMIT ?
-        """,
-        is_pg,
+        LIMIT %s
+        """
     )
     cursor.execute(sql, (limit,))
     rows = cursor.fetchall()
@@ -177,17 +236,15 @@ async def search_crypto_symbols(q: str, limit: int = 50, current_user: dict = De
         return []
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
     search_term = f"%{q.upper()}%"
     sql = _normalize_placeholders(
         """
         SELECT symbol, name, market_cap_rank, last_updated 
         FROM crypto_symbols 
-        WHERE symbol LIKE ? OR name LIKE ?
+        WHERE symbol LIKE %s OR name LIKE %s
         ORDER BY market_cap_rank ASC, symbol ASC 
-        LIMIT ?
-        """,
-        is_pg,
+        LIMIT %s
+        """
     )
     cursor.execute(sql, (search_term, search_term, limit))
     rows = cursor.fetchall()
@@ -306,7 +363,6 @@ async def _refresh_crypto_symbols_helper():
             # Process and insert into database
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
             
             # Clear table before refresh
             cursor.execute("DELETE FROM crypto_symbols")
@@ -373,23 +429,14 @@ async def _refresh_crypto_symbols_helper():
                     
                     current_time_str = str(current_time)
                     
-                    if is_pg:
-                        # Upsert to handle duplicate symbols across pages
-                        sql = (
-                            "INSERT INTO crypto_symbols (symbol, name, market_cap_rank, last_updated, created_at) "
-                            "VALUES (%s, %s, %s, %s, %s) "
-                            "ON CONFLICT (symbol) DO UPDATE SET "
-                            "name = EXCLUDED.name, market_cap_rank = EXCLUDED.market_cap_rank, last_updated = EXCLUDED.last_updated, created_at = EXCLUDED.created_at"
-                        )
-                        cursor.execute(sql, (symbol, name, market_cap_rank, current_time_str, current_time_str))
-                    else:
-                        sql = (
-                            """
-                            INSERT OR REPLACE INTO crypto_symbols (symbol, name, market_cap_rank, last_updated, created_at)
-                            VALUES (?, ?, ?, ?, ?)
-                            """
-                        )
-                        cursor.execute(sql, (symbol, name, market_cap_rank, current_time_str, current_time_str))
+                    # Upsert to handle duplicate symbols across pages
+                    sql = (
+                        "INSERT INTO crypto_symbols (symbol, name, market_cap_rank, last_updated, created_at) "
+                        "VALUES (%s, %s, %s, %s, %s) "
+                        "ON CONFLICT (symbol) DO UPDATE SET "
+                        "name = EXCLUDED.name, market_cap_rank = EXCLUDED.market_cap_rank, last_updated = EXCLUDED.last_updated, created_at = EXCLUDED.created_at"
+                    )
+                    cursor.execute(sql, (symbol, name, market_cap_rank, current_time_str, current_time_str))
                     
                     inserted_count += 1
                     inserted_symbols.append(symbol)
@@ -397,12 +444,10 @@ async def _refresh_crypto_symbols_helper():
                 except Exception as e:
                     error_count += 1
                     logger.error(f"Error inserting coin {symbol}: {e}", exc_info=True)
-                    # In Postgres, ensure we clear error state and continue
-                    if is_pg:
-                        try:
-                            conn.rollback()
-                        except:
-                            pass
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
                     continue
             
             # Commit transaction
@@ -418,7 +463,7 @@ async def _refresh_crypto_symbols_helper():
                 logger.error(f"Sample of inserted symbols: {inserted_symbols[:20]}")
             
             # Verify BTC is actually in database
-            verify_sql = _normalize_placeholders("SELECT symbol FROM crypto_symbols WHERE symbol = ?", is_pg)
+            verify_sql = _normalize_placeholders("SELECT symbol FROM crypto_symbols WHERE symbol = %s")
             cursor.execute(verify_sql, ("BTC",))
             btc_in_db = cursor.fetchone() is not None
             
@@ -430,7 +475,7 @@ async def _refresh_crypto_symbols_helper():
                 logger.info("✅ BTC verified in database")
             
             # Check total count
-            count_sql = _normalize_placeholders("SELECT COUNT(*) FROM crypto_symbols", is_pg)
+            count_sql = _normalize_placeholders("SELECT COUNT(*) FROM crypto_symbols")
             cursor.execute(count_sql)
             db_count = cursor.fetchone()[0]
             

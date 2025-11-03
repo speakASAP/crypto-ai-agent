@@ -28,25 +28,22 @@ def verify_customer_data():
         cur = conn.cursor()
         print("✅ Database connection established")
         
-        # Check if using PostgreSQL
-        use_postgres = settings.environment.lower() == "production" or bool(settings.database_url)
-        db_type = "PostgreSQL" if use_postgres else "SQLite"
-        print(f"   Database type: {db_type}")
+        if not settings.database_url:
+            print("❌ ERROR: DATABASE_URL is required for PostgreSQL connection")
+            return False
+        
+        print(f"   Database type: PostgreSQL")
         
         # Check if users table exists
         print("\n📊 Checking users table...")
-        if use_postgres:
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'users'
-                )
-            """)
-            table_exists = cur.fetchone()[0]
-        else:
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-            table_exists = cur.fetchone() is not None
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'users'
+            )
+        """)
+        table_exists = cur.fetchone()[0]
         
         if not table_exists:
             print("❌ ERROR: Users table does not exist!")
@@ -74,20 +71,12 @@ def verify_customer_data():
         print("📋 ALL CUSTOMER ACCOUNTS:")
         print("=" * 70)
         
-        if use_postgres:
-            cur.execute("""
-                SELECT id, email, username, full_name, preferred_currency, 
-                       is_active, created_at
-                FROM users
-                ORDER BY id
-            """)
-        else:
-            cur.execute("""
-                SELECT id, email, username, full_name, preferred_currency, 
-                       is_active, created_at
-                FROM users
-                ORDER BY id
-            """)
+        cur.execute("""
+            SELECT id, email, username, full_name, preferred_currency, 
+                   is_active, created_at
+            FROM users
+            ORDER BY id
+        """)
         
         users = cur.fetchall()
         
@@ -107,12 +96,8 @@ def verify_customer_data():
         print("🔍 SEARCHING FOR YOUR ACCOUNT (ssfskype@gmail.com):")
         print("=" * 70)
         
-        if use_postgres:
-            cur.execute("SELECT id, email, username, full_name, is_active FROM users WHERE email = %s", 
-                       ("ssfskype@gmail.com",))
-        else:
-            cur.execute("SELECT id, email, username, full_name, is_active FROM users WHERE email = ?", 
-                       ("ssfskype@gmail.com",))
+        cur.execute("SELECT id, email, username, full_name, is_active FROM users WHERE email = %s", 
+                   ("ssfskype@gmail.com",))
         
         your_account = cur.fetchone()
         
@@ -126,18 +111,12 @@ def verify_customer_data():
             print(f"   Status: {'✅ Active' if is_active else '⚠️  Inactive'}")
             
             # Check portfolio items for this user
-            if use_postgres:
-                cur.execute("SELECT COUNT(*) FROM portfolio_items WHERE user_id = %s", (user_id,))
-            else:
-                cur.execute("SELECT COUNT(*) FROM portfolio_items WHERE user_id = ?", (user_id,))
+            cur.execute("SELECT COUNT(*) FROM portfolio_items WHERE user_id = %s", (user_id,))
             portfolio_count = cur.fetchone()[0]
             print(f"   Portfolio Items: {portfolio_count}")
             
             # Check alerts for this user
-            if use_postgres:
-                cur.execute("SELECT COUNT(*) FROM alerts WHERE user_id = %s", (user_id,))
-            else:
-                cur.execute("SELECT COUNT(*) FROM alerts WHERE user_id = ?", (user_id,))
+            cur.execute("SELECT COUNT(*) FROM alerts WHERE user_id = %s", (user_id,))
             alerts_count = cur.fetchone()[0]
             print(f"   Alerts: {alerts_count}")
         else:
@@ -158,10 +137,7 @@ def verify_customer_data():
         
         for table_name, user_col in tables_to_check:
             try:
-                if use_postgres:
-                    cur.execute(f"SELECT COUNT(*) FROM {table_name}")
-                else:
-                    cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+                cur.execute(f"SELECT COUNT(*) FROM {table_name}")
                 count = cur.fetchone()[0]
                 print(f"   {table_name}: {count} records")
             except Exception as e:

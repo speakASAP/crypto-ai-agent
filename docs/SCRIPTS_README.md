@@ -10,7 +10,7 @@ Starts the entire application stack:
 
 - **Backend (FastAPI)** on port 8100
 - **Frontend (Next.js)** on port 3100
-- **Database (SQLite)** initialization
+- **Database (PostgreSQL)** connection verification
 - **Dependencies** installation
 
 **Usage:**

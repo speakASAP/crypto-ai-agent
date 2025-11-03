@@ -8,9 +8,8 @@ class Settings(BaseSettings):
     # Environment
     environment: str = os.getenv("ENVIRONMENT", "development")
     # Database Configuration
-    # Database: use PostgreSQL in production, SQLite in development
+    # Database: PostgreSQL only (required)
     database_url: str | None = None
-    database_file: str = "data/crypto_portfolio.db"
     
     # API Configuration
     secret_key: str = "your-secret-key-here"

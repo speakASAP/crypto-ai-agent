@@ -9,7 +9,7 @@ The Crypto AI Agent has been successfully migrated from Streamlit to a modern, h
 ✅ **Complete Architecture Migration**
 
 - From Streamlit to Next.js 14+ with TypeScript
-- From SQLite to PostgreSQL with asyncpg
+- Using PostgreSQL database with psycopg
 - Added Redis caching for optimal performance
 - Implemented WebSocket for real-time updates
 

@@ -19,12 +19,11 @@
 
 ### ✅ Database & Caching Migration (COMPLETED)
 
-- ✅ Backend now supports PostgreSQL via `DATABASE_URL` environment variable
-- ✅ Backend falls back to SQLite when `DATABASE_URL` is not set (development mode)
+- ✅ Backend uses PostgreSQL exclusively via `DATABASE_URL` environment variable
+- ✅ PostgreSQL connection is mandatory (no fallback)
 - ✅ Redis caching integrated for currency rates (30-minute TTL)
-- ✅ Data migration script created: `backend/scripts/sqlite_to_postgres.py`
-- ✅ Code updated to use `psycopg` for Postgres, `redis` for caching
-- ⚠️ SQLite → Postgres migration script needs to be executed manually during deployment
+- ✅ Code updated to use `psycopg` for PostgreSQL, `redis` for caching
+- ✅ All SQLite references removed from codebase and documentation
 
 ### 🔐 Environment Management
 
@@ -33,7 +32,7 @@
 
 ### ✅ Postgres + CORS Hardening (COMPLETED)
 
-- ✅ Implemented SQL placeholder compatibility layer (SQLite `?` ↔ PostgreSQL `%s`)
+- ✅ All SQL queries use PostgreSQL syntax with `%s` placeholders
 - ✅ Refactored portfolio and alerts inserts to use compatibility helpers
 - ✅ Updated Bitfinex credential service for PostgreSQL
 - ✅ Fixed PostgreSQL `alerts.id` sequence alignment

@@ -49,10 +49,8 @@ def get_user_telegram_credentials(user_id: int) -> Optional[dict]:
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
         sql = _normalize_placeholders(
-            "SELECT telegram_bot_token, telegram_chat_id FROM users WHERE id = ?",
-            is_pg,
+            "SELECT telegram_bot_token, telegram_chat_id FROM users WHERE id = %s"
         )
         cursor.execute(sql, (user_id,))
         result = cursor.fetchone()
