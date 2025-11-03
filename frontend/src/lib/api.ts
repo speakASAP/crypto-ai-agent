@@ -15,7 +15,11 @@ import {
   CryptoSymbolCreate,
   CryptoSymbolUpdate,
   SymbolPrice,
-  ApiError
+  ApiError,
+  PredictionResponse,
+  NewsAnalysis,
+  ChartData,
+  PerformanceStats
 } from '@/types'
 import {
   User,
@@ -520,6 +524,54 @@ class ApiClient {
 
   async getCSVTemplates(): Promise<{ templates: any[] }> {
     const response = await this.client.get('/api/import/csv/templates')
+    return response.data
+  }
+
+  // AI Advisor endpoints
+  async getAIPredictions(symbol: string): Promise<PredictionResponse> {
+    const response = await this.client.get(`/api/ai-advisor/predictions/${symbol}`)
+    return response.data
+  }
+
+  async getPortfolioPredictions(): Promise<Record<string, PredictionResponse>> {
+    const response = await this.client.get('/api/ai-advisor/predictions/portfolio')
+    return response.data
+  }
+
+  async generatePredictions(symbol: string): Promise<PredictionResponse> {
+    const response = await this.client.post(`/api/ai-advisor/generate/${symbol}`)
+    return response.data
+  }
+
+  async getAIPerformance(symbol?: string, modelName?: string): Promise<PerformanceStats> {
+    let url = '/api/ai-advisor/performance'
+    if (symbol) {
+      url += `/${symbol}`
+    } else if (modelName) {
+      url += `?model_name=${encodeURIComponent(modelName)}`
+    }
+    const response = await this.client.get(url)
+    return response.data
+  }
+
+  async getAIPerformanceByModel(): Promise<PerformanceStats> {
+    const response = await this.client.get('/api/ai-advisor/performance/by-model')
+    return response.data
+  }
+
+  async getAINews(symbol: string, days: number = 7): Promise<NewsAnalysis[]> {
+    const response = await this.client.get(`/api/ai-advisor/news/${symbol}?days=${days}`)
+    return response.data
+  }
+
+  // Charts endpoints
+  async getPriceHistory(symbol: string, days: number = 365): Promise<ChartData> {
+    const response = await this.client.get(`/api/charts/history/${symbol}?days=${days}`)
+    return response.data
+  }
+
+  async getMiniChart(symbol: string, days: number = 7): Promise<ChartData> {
+    const response = await this.client.get(`/api/charts/mini/${symbol}?days=${days}`)
     return response.data
   }
 
