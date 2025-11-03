@@ -8,9 +8,7 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health_check():
-    db_type = "postgres" if bool(getattr(settings, "database_url", None)) or settings.environment.lower() == "production" else "sqlite"
-    
-    # Test database connectivity and verify it has data
+    # Test PostgreSQL database connectivity and verify it has data
     db_connected = False
     db_has_data = False
     db_error = None
@@ -21,36 +19,24 @@ async def health_check():
         cursor = conn.cursor()
         
         # Test connection with simple query
-        if db_type == "postgres":
-            cursor.execute("SELECT 1")
-        else:
-            cursor.execute("SELECT 1")
+        cursor.execute("SELECT 1")
         cursor.fetchone()
         db_connected = True
         
         # Verify database has data (users table exists and has records)
-        if db_type == "postgres":
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'users'
-                )
-            """)
-            users_table_exists = cursor.fetchone()[0]
-            
-            if users_table_exists:
-                cursor.execute("SELECT COUNT(*) FROM users")
-                user_count = cursor.fetchone()[0]
-                db_has_data = user_count > 0
-        else:
-            # SQLite - check if users table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-            table_exists = cursor.fetchone() is not None
-            if table_exists:
-                cursor.execute("SELECT COUNT(*) FROM users")
-                user_count = cursor.fetchone()[0]
-                db_has_data = user_count > 0
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'users'
+            )
+        """)
+        users_table_exists = cursor.fetchone()[0]
+        
+        if users_table_exists:
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+            db_has_data = user_count > 0
         
         cursor.close()
         conn.close()
@@ -64,7 +50,7 @@ async def health_check():
     
     response = {
         "status": status,
-        "database": db_type,
+        "database": "postgres",
         "database_connected": db_connected,
         "database_has_data": db_has_data,
         "user_count": user_count,

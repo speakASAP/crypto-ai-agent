@@ -249,14 +249,13 @@ CREATE TABLE alert_history (
 
 #### Dependencies
 
-- streamlit (already available)
-- pandas (already available)
-- aiosqlite (already available)
+- FastAPI (already available)
+- psycopg (already available)
 - telegram (already available)
 
 #### Database
 
-- SQLite with new tables (price_alerts, alert_history)
+- PostgreSQL with new tables (price_alerts, alert_history)
 - No breaking changes to existing schema
 - Backward compatibility maintained
 

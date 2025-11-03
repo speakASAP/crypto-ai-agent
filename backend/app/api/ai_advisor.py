@@ -56,17 +56,15 @@ async def get_portfolio_predictions(
     current_user: dict = Depends(get_current_active_user),
 ):
     """Get predictions for all symbols in user's portfolio"""
-    from ..utils.db import get_db_connection, is_postgres_connection, normalize_placeholders
+    from ..utils.db import get_db_connection, normalize_placeholders
 
     try:
         # Get user's portfolio symbols directly from database
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
 
         sql = normalize_placeholders(
-            "SELECT DISTINCT symbol FROM portfolio_items WHERE user_id = ?",
-            is_pg,
+            "SELECT DISTINCT symbol FROM portfolio_items WHERE user_id = %s"
         )
         cursor.execute(sql, (current_user["id"],))
         rows = cursor.fetchall()

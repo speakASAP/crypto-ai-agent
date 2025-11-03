@@ -90,25 +90,12 @@ def generate_reset_token() -> str:
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
-import sqlite3
 import psycopg
-from backend.app.core.config import settings, DB_FILE
+from backend.app.core.config import settings
 from backend.app.utils.auth import decode_token
+from backend.app.utils.db import get_db_connection
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-def get_db_connection():
-    """Get database connection - supports both PostgreSQL and SQLite"""
-    if settings.database_url:
-        # PostgreSQL mode
-        pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
-        conn = psycopg.connect(pg_url)
-        return conn
-    else:
-        # SQLite mode (development/fallback)
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        return conn
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     """Dependency to get current authenticated user from JWT token"""
@@ -131,22 +118,17 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    if settings.database_url:
-        # PostgreSQL query
-        cursor.execute(
-            "SELECT id, email, username, full_name, is_active, created_at FROM users WHERE id = %s", 
-            (user_id,)
-        )
-        row = cursor.fetchone()
-        user = dict(row) if row else None
+    # PostgreSQL query
+    cursor.execute(
+        "SELECT id, email, username, full_name, is_active, created_at FROM users WHERE id = %s", 
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    if row:
+        columns = [desc[0] for desc in cursor.description]
+        user = {columns[i]: row[i] for i in range(len(columns))}
     else:
-        # SQLite query
-        cursor.execute(
-            "SELECT id, email, username, full_name, is_active, created_at FROM users WHERE id = ?", 
-            (user_id,)
-        )
-        user = cursor.fetchone()
-        user = dict(user) if user else None
+        user = None
     
     conn.close()
 
@@ -165,7 +147,7 @@ async def get_current_active_user(current_user: dict = Depends(get_current_user)
 
 **File**: `backend/app/main.py`
 
-The system now supports both PostgreSQL (production) and SQLite (development/fallback) modes:
+The system uses PostgreSQL exclusively:
 
 ```python
 def init_postgres_database():
@@ -228,28 +210,16 @@ def init_postgres_database():
     conn.close()
     logger.info("PostgreSQL schema initialized")
 
-def init_database():
-    """Initialize SQLite database with user management tables (development/fallback)"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
-    # SQLite-specific CREATE TABLE statements with INTEGER PRIMARY KEY AUTOINCREMENT
-    # ... (previous SQLite schema)
-    
-    conn.commit()
-    conn.close()
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    if settings.database_url:
-        logger.info("🚀 Starting Crypto AI Agent API v2.0 (PostgreSQL Mode)")
-        init_postgres_database()
-        logger.info("✅ Database initialized")
-    else:
-        logger.info("🚀 Starting Crypto AI Agent API v2.0 (SQLite Mode)")
-        init_database()
-        logger.info("✅ Database initialized")
+    if not settings.database_url:
+        logger.error("❌ DATABASE_URL environment variable is required. PostgreSQL database connection is mandatory.")
+        raise ConnectionError("DATABASE_URL environment variable is required.")
+    
+    logger.info("🚀 Starting Crypto AI Agent API v2.0 (PostgreSQL Mode)")
+    init_postgres_database()
+    logger.info("✅ Database initialized")
 ```
 
 ### Redis Caching
@@ -292,66 +262,32 @@ class CurrencyService:
                 self._redis.set("currency:USD", json.dumps(payload), ex=1800)  # 30 min TTL
 ```
 
-### Data Migration Script
+### Database Initialization
 
-**File**: `backend/scripts/sqlite_to_postgres.py`
+**File**: `backend/app/main.py`
+
+The application uses PostgreSQL exclusively. Database initialization is handled by `init_postgres_database()` which:
+
+- Creates all required tables if they don't exist
+- Uses PostgreSQL-specific syntax (`SERIAL PRIMARY KEY`, `TIMESTAMP`, etc.)
+- Checks for existing data before initializing
+- Ensures proper sequence alignment for auto-incrementing IDs
 
 ```python
-import os
-import sqlite3
-import psycopg
-
-def copy_table(sqlite_conn, pg_conn, table, columns, boolean_cols=None, required_cols=None):
-    """Copy data from SQLite to PostgreSQL with type conversion"""
-    s_cur = sqlite_conn.cursor()
-    p_cur = pg_conn.cursor()
-    s_cur.execute(f"SELECT {', '.join(columns)} FROM {table}")
-    rows = s_cur.fetchall()
-    
-    if not rows:
-        return 0
-    
-    copied = 0
-    for row in rows:
-        # Convert boolean columns from int to bool, handle empty strings
-        converted_row = []
-        should_skip = False
-        for i, val in enumerate(row):
-            col_name = columns[i]
-            if col_name in required_cols and (val is None or val == ""):
-                should_skip = True
-                break
-            if col_name in boolean_cols and isinstance(val, int):
-                converted_row.append(bool(val))
-            elif val == "":
-                converted_row.append(None)
-            else:
-                converted_row.append(val)
-        
-        if should_skip:
-            continue
-        
-        try:
-            p_cur.execute(insert_sql, tuple(converted_row))
-            copied += 1
-        except Exception as e:
-            print(f"Error inserting row into {table}: {e}")
-    
-    pg_conn.commit()
-    return copied
-
-def main():
-    """Migrate data from SQLite to PostgreSQL"""
-    sqlite_conn = sqlite3.connect(SQLITE_DB)
-    pg_url = POSTGRES_URL.replace("+psycopg", "") if "+psycopg" in POSTGRES_URL else POSTGRES_URL
-    pg_conn = psycopg.connect(pg_url)
-    
-    copied = 0
-    copied += copy_table(sqlite_conn, pg_conn, "users", [...], boolean_cols=["is_active", "is_verified"])
-    copied += copy_table(sqlite_conn, pg_conn, "portfolio_items", [...])
-    # ... other tables ...
-    
-    print(f"Copied rows: {copied}")
+def init_postgres_database():
+    """Initialize PostgreSQL database schema"""
+    pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
+    with psycopg.connect(pg_url) as conn:
+        with conn.cursor() as cur:
+            # Create tables with PostgreSQL syntax
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    # ... other columns ...
+                )
+            ''')
+            # ... other tables ...
 ```
 
 ## Frontend Implementation
@@ -953,23 +889,17 @@ volumes:
   redisdata:
 ```
 
-### Data Migration
+### Database Schema
 
-The system includes a migration script to transfer data from SQLite to PostgreSQL:
+The system uses PostgreSQL exclusively. All database operations use PostgreSQL-specific features:
 
-```bash
-# Run migration
-DATABASE_URL="postgresql://crypto:crypto_pass@127.0.0.1:5432/crypto_ai_agent" \
-python3 backend/scripts/sqlite_to_postgres.py
-```
+- `SERIAL PRIMARY KEY` for auto-incrementing IDs
+- `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` for date fields
+- `ON CONFLICT DO UPDATE` for upsert operations
+- `%s` placeholders for parameterized queries
+- `RETURNING id` for insert operations that need the generated ID
 
-Key features of the migration:
-
-- Handles boolean type conversion (SQLite int → PostgreSQL bool)
-- Converts empty strings to NULL for nullable columns
-- Skips rows with missing required fields
-- Continues despite individual row errors
-- Uses PostgreSQL's `ON CONFLICT DO NOTHING` for idempotency
+The database schema is automatically initialized on startup if tables don't exist:
 
 ### Security Checklist
 
@@ -1031,17 +961,18 @@ healthcheck:
 
 ## Postgres Compatibility and CORS Updates (2025-10-29)
 
-### SQL Placeholder Compatibility
+### SQL Query Implementation
 
-- Implemented engine-aware SQL helpers in `backend/app/main.py`:
-  - Normalizes SQLite `?` placeholders to PostgreSQL `%s` when running in production/PostgreSQL.
-  - Provides unified insert-id retrieval using `RETURNING id` on PostgreSQL and `cursor.lastrowid` on SQLite.
+- All SQL queries use PostgreSQL syntax:
+  - `%s` placeholders for parameterized queries (PostgreSQL standard)
+  - `RETURNING id` for insert operations to retrieve generated IDs
+  - `ON CONFLICT DO UPDATE` for upsert operations
 - Refactored inserts for:
   - `POST /api/portfolio/` (portfolio item creation)
   - `POST /api/alerts/` (alert creation)
-- Updated `backend/app/services/bitfinex_credential_service.py` to support PostgreSQL by:
-  - Converting placeholders dynamically
-  - Replacing `INSERT OR REPLACE` with update-then-insert logic
+- Updated `backend/app/services/bitfinex_credential_service.py` to use PostgreSQL:
+  - `ON CONFLICT (user_id, exchange) DO UPDATE` for upsert operations
+  - Standard PostgreSQL placeholder syntax
 
 ### Alerts Table Sequence Fix (PostgreSQL)
 

@@ -87,7 +87,7 @@ In Docker deployments, the backend writes logs to `/app/logs` which is bind-moun
 Each log entry follows this format:
 
 ```text
-2024-01-15 10:30:45,123 - crypto_ai_agent.agent - INFO - INFO in database_initialization - Database initialized successfully - db_path=data/crypto_portfolio.db
+2024-01-15 10:30:45,123 - crypto_ai_agent.agent - INFO - INFO in database_initialization - Database initialized successfully - database_url=postgresql://...
 ```
 
 Components:

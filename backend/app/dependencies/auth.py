@@ -7,14 +7,9 @@ from ..utils.db import connect_with_retry
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 def get_db_connection():
-    """Get database connection with retry logic: use Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
+    """Get PostgreSQL database connection with retry logic."""
     # Use retry logic for runtime connections (max 3 retries, faster backoff)
-    conn = connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
-    # Set row_factory for SQLite (PostgreSQL doesn't need it)
-    if not (settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))):
-        import sqlite3
-        conn.row_factory = sqlite3.Row
-    return conn
+    return connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     """Dependency to get current authenticated user from JWT token"""
@@ -39,25 +34,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        use_postgres = settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))
-        if use_postgres:
-            cur.execute(
-                "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = %s",
-                (user_id,)
-            )
-            row = cur.fetchone()
-            if row:
-                columns = [desc[0] for desc in cur.description]
-                user = {columns[i]: row[i] for i in range(len(columns))}
-            else:
-                user = None
+        cur.execute(
+            "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = %s",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        if row:
+            columns = [desc[0] for desc in cur.description]
+            user = {columns[i]: row[i] for i in range(len(columns))}
         else:
-            cur.execute(
-                "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = ?",
-                (user_id,)
-            )
-            row = cur.fetchone()
-            user = dict(row) if row else None
+            user = None
     finally:
         conn.close()
 

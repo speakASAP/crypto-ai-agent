@@ -10,7 +10,7 @@ from ..services.csv_import_service import CSVImportService
 from ..services.currency_service import currency_service
 from ..schemas.csv_import import CSVUploadResponse
 from ..utils.logger import get_logger
-from ..utils.db import normalize_placeholders as _normalize_placeholders, is_postgres_connection
+from ..utils.db import normalize_placeholders as _normalize_placeholders
 
 
 router = APIRouter(prefix="/api/import/csv", tags=["csv-import"])
@@ -61,7 +61,6 @@ async def upload_csv_file(file: UploadFile = File(...), current_user: dict = Dep
         # Analyze what will happen to existing portfolio items
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         
         items_to_add = []
         items_to_update = []
@@ -72,14 +71,9 @@ async def upload_csv_file(file: UploadFile = File(...), current_user: dict = Dep
             net_change = item.get('net_change', item.get('quantity', 0))
             
             # Check if portfolio item exists (case-insensitive)
-            if is_pg:
-                check_existing_sql = (
-                    "SELECT id, amount FROM portfolio_items WHERE user_id = %s AND UPPER(symbol) = UPPER(%s)"
-                )
-            else:
-                check_existing_sql = (
-                    "SELECT id, amount FROM portfolio_items WHERE user_id = ? AND UPPER(symbol) = UPPER(?)"
-                )
+            check_existing_sql = (
+                "SELECT id, amount FROM portfolio_items WHERE user_id = %s AND UPPER(symbol) = UPPER(%s)"
+            )
             cursor.execute(check_existing_sql, (current_user["id"], symbol))
             existing_item = cursor.fetchone()
             
@@ -186,7 +180,6 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
         logger.info("💾 Saving to database...")
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         imported_count = 0
         updated_count = 0
         deleted_count = 0
@@ -203,16 +196,10 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                 # Use UPPER() for case-insensitive comparison since CSV symbols are normalized to uppercase
                 # Also trim whitespace from symbol for matching
                 symbol_normalized = symbol.strip().upper() if symbol else symbol
-                if is_pg:
-                    check_existing_sql = (
-                        "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase "
-                        "FROM portfolio_items WHERE user_id = %s AND UPPER(TRIM(symbol)) = UPPER(TRIM(%s))"
-                    )
-                else:
-                    check_existing_sql = (
-                        "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase "
-                        "FROM portfolio_items WHERE user_id = ? AND UPPER(TRIM(symbol)) = UPPER(TRIM(?))"
-                    )
+                check_existing_sql = (
+                    "SELECT id, amount, price_buy, commission, base_currency, price_buy_usd, commission_usd, exchange_rate_at_purchase "
+                    "FROM portfolio_items WHERE user_id = %s AND UPPER(TRIM(symbol)) = UPPER(TRIM(%s))"
+                )
                 cursor.execute(check_existing_sql, (current_user["id"], symbol_normalized))
                 existing_item = cursor.fetchone()
                 if existing_item:
@@ -249,8 +236,7 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                     if new_amount_decimal <= epsilon:
                         # Fully sold or over-sold: DELETE portfolio item
                         delete_sql = _normalize_placeholders(
-                            "DELETE FROM portfolio_items WHERE id = ? AND user_id = ?",
-                            is_pg
+                            "DELETE FROM portfolio_items WHERE id = %s AND user_id = %s"
                         )
                         logger.info(f"🗑️ Executing DELETE for {symbol}: id={existing_id}, user_id={current_user['id']}")
                         cursor.execute(delete_sql, (existing_id, current_user["id"]))
@@ -379,11 +365,10 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                         # Update portfolio item
                         update_sql = _normalize_placeholders(
                             "UPDATE portfolio_items SET "
-                            "amount = ?, price_buy = ?, commission = ?, "
-                            "price_buy_usd = ?, commission_usd = ?, exchange_rate_at_purchase = ?, "
-                            "total_investment_text = ?, updated_at = ?, source = ? "
-                            "WHERE id = ? AND user_id = ?",
-                            is_pg
+                            "amount = %s, price_buy = %s, commission = %s, "
+                            "price_buy_usd = %s, commission_usd = %s, exchange_rate_at_purchase = %s, "
+                            "total_investment_text = %s, updated_at = %s, source = %s "
+                            "WHERE id = %s AND user_id = %s"
                         )
                         cursor.execute(update_sql, (
                             new_amount, merged_price, merged_commission,
@@ -429,8 +414,7 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                             "INSERT INTO portfolio_items "
                             "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
                             "total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            is_pg
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                         )
                         cursor.execute(insert_sql, (
                             current_user["id"], symbol, item['quantity'], item['price'],
@@ -452,30 +436,21 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
             'headers': list(rows[0].keys()) if rows else [],
         }
 
-        if is_pg:
-            # PostgreSQL: use ON CONFLICT DO UPDATE
-            mapping_sql = (
-                "INSERT INTO csv_import_mappings "
-                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
-                "VALUES (%s, %s, %s, NOW(), NOW(), NOW()) "
-                "ON CONFLICT (user_id, exchange) DO UPDATE SET "
-                "column_mapping = EXCLUDED.column_mapping, updated_at = NOW(), last_used = NOW()"
-            )
-        else:
-            # SQLite: use INSERT OR REPLACE
-            mapping_sql = (
-                "INSERT OR REPLACE INTO csv_import_mappings "
-                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
-                "VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
-            )
+        # PostgreSQL: use ON CONFLICT DO UPDATE
+        mapping_sql = (
+            "INSERT INTO csv_import_mappings "
+            "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
+            "VALUES (%s, %s, %s, NOW(), NOW(), NOW()) "
+            "ON CONFLICT (user_id, exchange) DO UPDATE SET "
+            "column_mapping = EXCLUDED.column_mapping, updated_at = NOW(), last_used = NOW()"
+        )
         cursor.execute(mapping_sql, (current_user["id"], exchange.lower(), json.dumps(column_mapping_data)))
 
         total_processed = imported_count + updated_count + deleted_count
         history_sql = _normalize_placeholders(
             "INSERT INTO import_history "
             "(user_id, source, import_date, items_imported, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            is_pg
+            "VALUES (%s, %s, %s, %s, %s, %s)"
         )
         cursor.execute(history_sql, (current_user["id"], exchange.capitalize(), now, total_processed, 'success' if total_processed > 0 else 'partial', now))
 
@@ -535,10 +510,8 @@ async def get_csv_mapping(exchange: str, current_user: dict = Depends(get_curren
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         sql = _normalize_placeholders(
-            "SELECT column_mapping FROM csv_import_mappings WHERE user_id = ? AND exchange = ?",
-            is_pg
+            "SELECT column_mapping FROM csv_import_mappings WHERE user_id = %s AND exchange = %s"
         )
         cursor.execute(sql, (current_user["id"], exchange.lower()))
         result = cursor.fetchone()
@@ -559,23 +532,14 @@ async def save_csv_mapping(exchange: str, mapping_data: Dict[str, Any], current_
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
-        if is_pg:
-            # PostgreSQL: use ON CONFLICT DO UPDATE
-            sql = (
-                "INSERT INTO csv_import_mappings "
-                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
-                "VALUES (%s, %s, %s, NOW(), NOW(), NOW()) "
-                "ON CONFLICT (user_id, exchange) DO UPDATE SET "
-                "column_mapping = EXCLUDED.column_mapping, updated_at = NOW(), last_used = NOW()"
-            )
-        else:
-            # SQLite: use INSERT OR REPLACE
-            sql = (
-                "INSERT OR REPLACE INTO csv_import_mappings "
-                "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
-                "VALUES (?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
-            )
+        # PostgreSQL: use ON CONFLICT DO UPDATE
+        sql = (
+            "INSERT INTO csv_import_mappings "
+            "(user_id, exchange, column_mapping, created_at, updated_at, last_used) "
+            "VALUES (%s, %s, %s, NOW(), NOW(), NOW()) "
+            "ON CONFLICT (user_id, exchange) DO UPDATE SET "
+            "column_mapping = EXCLUDED.column_mapping, updated_at = NOW(), last_used = NOW()"
+        )
         cursor.execute(sql, (current_user["id"], exchange.lower(), json.dumps(mapping_data)))
         conn.commit()
         conn.close()

@@ -1,8 +1,8 @@
-# 🚀 Crypto AI Agent v2.0 - Next.js + FastAPI + SQLite
+# 🚀 Crypto AI Agent v2.0 - Next.js + FastAPI + PostgreSQL
 
 ## Project Overview
 
-This is the next-generation version of the Crypto AI Agent, successfully migrated from Streamlit to a modern Next.js + FastAPI + SQLite architecture for optimal performance and simplicity.
+This is the next-generation version of the Crypto AI Agent, successfully migrated from Streamlit to a modern Next.js + FastAPI + PostgreSQL architecture for optimal performance and scalability.
 
 ## Architecture
 
@@ -17,17 +17,17 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 ### Backend: FastAPI
 
 - **Framework**: FastAPI with Python 3.12+
-- **Database**: SQLite (file-based, no server required)
+- **Database**: PostgreSQL (production-grade, scalable)
 - **WebSocket**: FastAPI WebSocket support
 - **Real-time**: Live price updates and alerts
-- **Deployment**: Local development or simple server
+- **Deployment**: Local development or production server
 
-### Database: SQLite (Development) / PostgreSQL (Production)
+### Database: PostgreSQL
 
-- **Development**: SQLite (file-based, no server required)
-  - File Storage: `data/crypto_portfolio.db`
-  - Backup: Simple file copy
-  - Zero Configuration: No database server needed
+- **Development**: PostgreSQL (local or remote connection)
+  - Connection: Configured via `DATABASE_URL` environment variable
+  - Example: `postgresql://user:password@localhost:5432/crypto_ai_agent`
+  - Setup: Use Docker Compose or local PostgreSQL installation
 - **Production**: PostgreSQL (shared database server)
   - Database Server: `db-server-postgres:5432`
   - Database Name: `crypto_ai_agent`

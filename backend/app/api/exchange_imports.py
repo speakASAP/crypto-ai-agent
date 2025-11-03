@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..dependencies.auth import get_current_active_user, get_db_connection
 from ..services.currency_service import currency_service
 from ..utils.logger import get_logger
-from ..utils.db import normalize_placeholders as _normalize_placeholders, is_postgres_connection
+from ..utils.db import normalize_placeholders as _normalize_placeholders
 
 
 router = APIRouter(prefix="/api/import", tags=["exchange-imports"])
@@ -43,15 +43,13 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
             raise HTTPException(status_code=400, detail=result['message'])
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         imported_count = 0
         now = datetime.now().isoformat() + "Z"
 
         for item in result['portfolio_items']:
             try:
                 check_duplicate_sql = _normalize_placeholders(
-                    "SELECT id FROM portfolio_items WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001",
-                    is_pg
+                    "SELECT id FROM portfolio_items WHERE user_id = %s AND symbol = %s AND ABS(amount - %s) < 0.001"
                 )
                 cursor.execute(check_duplicate_sql, (current_user["id"], item['symbol'], item['amount']))
                 if cursor.fetchone():
@@ -75,8 +73,7 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
                     "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
                     "total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent, "
                     "price_buy_usd, commission_usd, exchange_rate_at_purchase) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    is_pg
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 )
                 cursor.execute(insert_sql, (
                     current_user["id"], item['symbol'], item['amount'], price_buy,
@@ -93,8 +90,7 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
         history_sql = _normalize_placeholders(
             "INSERT INTO import_history "
             "(user_id, source, import_date, items_imported, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            is_pg
+            "VALUES (%s, %s, %s, %s, %s, %s)"
         )
         cursor.execute(history_sql, (current_user["id"], 'binance', now, imported_count, 'success' if imported_count > 0 else 'partial', now))
         conn.commit()
@@ -144,15 +140,13 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
             raise HTTPException(status_code=400, detail=result['message'])
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         imported_count = 0
         now = datetime.now().isoformat() + "Z"
 
         for item in result['portfolio_items']:
             try:
                 check_duplicate_sql = _normalize_placeholders(
-                    "SELECT id FROM portfolio_items WHERE user_id = ? AND symbol = ? AND ABS(amount - ?) < 0.001",
-                    is_pg
+                    "SELECT id FROM portfolio_items WHERE user_id = %s AND symbol = %s AND ABS(amount - %s) < 0.001"
                 )
                 cursor.execute(check_duplicate_sql, (current_user["id"], item['symbol'], item['amount']))
                 if cursor.fetchone():
@@ -176,8 +170,7 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
                     "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
                     "total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent, "
                     "price_buy_usd, commission_usd, exchange_rate_at_purchase) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    is_pg
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 )
                 cursor.execute(insert_sql, (
                     current_user["id"], item['symbol'], item['amount'], price_buy,
@@ -194,8 +187,7 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
         history_sql = _normalize_placeholders(
             "INSERT INTO import_history "
             "(user_id, source, import_date, items_imported, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            is_pg
+            "VALUES (%s, %s, %s, %s, %s, %s)"
         )
         cursor.execute(history_sql, (current_user["id"], 'Bitfinex', now, imported_count, 'success' if imported_count > 0 else 'partial', now))
         conn.commit()
@@ -219,11 +211,9 @@ async def get_import_history(current_user: dict = Depends(get_current_active_use
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        is_pg = is_postgres_connection(conn)
         history_sql = _normalize_placeholders(
             "SELECT source, import_date, items_imported, status, error_message, created_at "
-            "FROM import_history WHERE user_id = ? ORDER BY created_at DESC",
-            is_pg
+            "FROM import_history WHERE user_id = %s ORDER BY created_at DESC"
         )
         cursor.execute(history_sql, (current_user["id"],))
         rows = cursor.fetchall()

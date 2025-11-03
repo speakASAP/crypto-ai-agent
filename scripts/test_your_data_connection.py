@@ -29,15 +29,17 @@ def test_your_data_access():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        use_postgres = settings.environment.lower() == "production" or bool(settings.database_url)
+        if not settings.database_url:
+            print("❌ ERROR: DATABASE_URL is required for PostgreSQL connection")
+            return False
+        
         print(f"✅ Connected (using same method as application)")
-        print(f"   Database type: {'PostgreSQL' if use_postgres else 'SQLite'}")
+        print(f"   Database type: PostgreSQL")
         
         # Get your user account
         print(f"\n🔍 Retrieving your account: {YOUR_EMAIL}")
         sql = normalize_placeholders(
-            "SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE email = ?",
-            use_postgres
+            "SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE email = %s"
         )
         cursor.execute(sql, (YOUR_EMAIL,))
         user = cursor.fetchone()
@@ -58,8 +60,7 @@ def test_your_data_access():
         # Get your portfolio items
         print(f"\n💼 Retrieving your portfolio items...")
         sql = normalize_placeholders(
-            "SELECT id, symbol, amount, price_buy, base_currency FROM portfolio_items WHERE user_id = ?",
-            use_postgres
+            "SELECT id, symbol, amount, price_buy, base_currency FROM portfolio_items WHERE user_id = %s"
         )
         cursor.execute(sql, (user_id,))
         portfolio_items = cursor.fetchall()
@@ -72,8 +73,7 @@ def test_your_data_access():
         # Get your alerts
         print(f"\n🚨 Retrieving your alerts...")
         sql = normalize_placeholders(
-            "SELECT id, symbol, threshold_price, alert_type FROM alerts WHERE user_id = ?",
-            use_postgres
+            "SELECT id, symbol, threshold_price, alert_type FROM alerts WHERE user_id = %s"
         )
         cursor.execute(sql, (user_id,))
         alerts = cursor.fetchall()
@@ -85,10 +85,6 @@ def test_your_data_access():
         
         # Test a write operation (just select, not modifying)
         print(f"\n✍️  Testing database write capability (read-only check)...")
-        sql = normalize_placeholders(
-            "SELECT COUNT(*) FROM users WHERE user_id = ?",
-            use_postgres
-        )
         # This is actually a read, but tests the connection works for queries
         cursor.execute("SELECT COUNT(*) FROM users")
         total_users = cursor.fetchone()[0]

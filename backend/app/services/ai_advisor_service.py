@@ -5,7 +5,6 @@ from ..core.config import settings
 from ..utils.logger import get_logger
 from ..utils.db import (
     get_db_connection,
-    is_postgres_connection,
     normalize_placeholders,
     execute_insert_and_get_id,
 )
@@ -26,26 +25,26 @@ class AIAdvisorService:
         self, user_id: int, symbol: str, force_regenerate: bool = False
     ) -> Dict[str, Any]:
         """
-        Generate or retrieve AI predictions for a symbol
+        Generate or retrieve AI predictions for a symbol (global for all users)
 
         Args:
-            user_id: User ID
+            user_id: User ID (not used for storage, predictions are global)
             symbol: Cryptocurrency symbol
             force_regenerate: If True, regenerate even if recent predictions exist
 
         Returns:
             Dictionary with predictions for 24h, week, month, year
         """
-        # Check if we have recent predictions
+        # Check if we have recent global predictions (shared across all users)
         if not force_regenerate:
-            existing = self._get_latest_predictions(user_id, symbol)
+            existing = self._get_latest_predictions(symbol)
             if existing:
                 # Check if predictions are still fresh (within interval)
                 created_at = datetime.fromisoformat(existing[0]["created_at"].replace("Z", "+00:00"))
                 age = datetime.now(timezone.utc) - created_at
                 if age < timedelta(hours=settings.ai_prediction_interval_hours):
                     logger.debug(
-                        f"Using existing predictions for {symbol} (age: {age})"
+                        f"Using existing global predictions for {symbol} (age: {age})"
                     )
                     return self._format_predictions_response(existing)
 
@@ -84,12 +83,18 @@ class AIAdvisorService:
 
             # Store predictions in database
             now = datetime.now(timezone.utc).isoformat() + "Z"
+            
+            # Clean up old predictions for this symbol to avoid duplicates
+            self._cleanup_old_predictions(symbol)
+            
             stored_predictions = []
 
+            # Store predictions globally (user_id will be set to global user or first available user)
+            global_user_id = self._get_global_user_id()
             for pred_type, pred_data in predictions_dict.items():
                 if pred_type in ["24h", "week", "month", "year"]:
                     prediction_id = self._store_prediction(
-                        user_id=user_id,
+                        user_id=global_user_id,
                         symbol=symbol,
                         prediction_type=pred_type,
                         predicted_price=pred_data.get("predicted_price", current_price),
@@ -134,27 +139,26 @@ class AIAdvisorService:
         }
 
     def _get_latest_predictions(
-        self, user_id: int, symbol: str
+        self, symbol: str
     ) -> Optional[List[Dict[str, Any]]]:
-        """Get the latest predictions for a symbol"""
+        """Get the latest global predictions for a symbol (shared across all users)"""
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
+            # Get global predictions (any user_id, but we'll prioritize by recency)
             sql = normalize_placeholders(
                 """
                 SELECT id, prediction_type, predicted_price, confidence_percent,
                        prediction_reasoning, model_name, created_at, is_verified,
                        actual_price_at_target, accuracy_percent
                 FROM ai_predictions
-                WHERE user_id = ? AND symbol = ? AND is_verified = 0
+                WHERE symbol = %s AND is_verified = FALSE
                 ORDER BY created_at DESC
                 LIMIT 4
-            """,
-                is_pg,
+            """
             )
-            cursor.execute(sql, (user_id, symbol.upper()))
+            cursor.execute(sql, (symbol.upper(),))
             rows = cursor.fetchall()
             conn.close()
 
@@ -184,6 +188,44 @@ class AIAdvisorService:
 
         return None
 
+    def _get_global_user_id(self) -> int:
+        """Get a user ID to use for global predictions (reuses first available user)"""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get the first user ID (or use 1 as fallback)
+            sql = normalize_placeholders("SELECT id FROM users ORDER BY id LIMIT 1")
+            cursor.execute(sql)
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return row[0]
+            return 1  # Fallback
+        except Exception as e:
+            logger.warning(f"Error getting global user ID: {e}, using 1 as fallback")
+            return 1
+
+    def _cleanup_old_predictions(self, symbol: str) -> None:
+        """Delete old unverified predictions for a symbol before storing new ones"""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            sql = normalize_placeholders(
+                "DELETE FROM ai_predictions WHERE symbol = %s AND is_verified = FALSE"
+            )
+            cursor.execute(sql, (symbol.upper(),))
+            deleted_count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            
+            if deleted_count > 0:
+                logger.debug(f"Cleaned up {deleted_count} old predictions for {symbol}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up old predictions for {symbol}: {e}")
+
     def _store_prediction(
         self,
         user_id: int,
@@ -199,16 +241,14 @@ class AIAdvisorService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
             sql = normalize_placeholders(
                 """
                 INSERT INTO ai_predictions
                 (user_id, symbol, prediction_type, predicted_price, confidence_percent,
                  prediction_reasoning, model_name, created_at, is_verified)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-            """,
-                is_pg,
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
             )
 
             prediction_id = execute_insert_and_get_id(
@@ -223,8 +263,8 @@ class AIAdvisorService:
                     reasoning,
                     model_name,
                     created_at,
+                    False,
                 ),
-                is_pg,
             )
 
             conn.commit()
@@ -261,16 +301,14 @@ class AIAdvisorService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
             # Find unverified predictions that should have been realized
             sql = normalize_placeholders(
                 """
                 SELECT id, prediction_type, predicted_price, created_at
                 FROM ai_predictions
-                WHERE symbol = ? AND is_verified = 0
-            """,
-                is_pg,
+                WHERE symbol = %s AND is_verified = FALSE
+            """
             )
             cursor.execute(sql, (symbol.upper(),))
             rows = cursor.fetchall()
@@ -310,17 +348,15 @@ class AIAdvisorService:
 
                     conn = get_db_connection()
                     cursor = conn.cursor()
-                    is_pg = is_postgres_connection(conn)
 
                     update_sql = normalize_placeholders(
                         """
                         UPDATE ai_predictions
-                        SET is_verified = 1,
-                            actual_price_at_target = ?,
-                            accuracy_percent = ?
-                        WHERE id = ?
-                    """,
-                        is_pg,
+                        SET is_verified = TRUE,
+                            actual_price_at_target = %s,
+                            accuracy_percent = %s
+                        WHERE id = %s
+                    """
                     )
                     cursor.execute(update_sql, (current_price, accuracy_percent, pred_id))
                     conn.commit()
@@ -354,17 +390,16 @@ class AIAdvisorService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = is_postgres_connection(conn)
 
-            conditions = ["user_id = ?", "is_verified = 1"]
+            conditions = ["user_id = %s", "is_verified = TRUE"]
             params = [user_id]
 
             if symbol:
-                conditions.append("symbol = ?")
+                conditions.append("symbol = %s")
                 params.append(symbol.upper())
 
             if model_name:
-                conditions.append("model_name = ?")
+                conditions.append("model_name = %s")
                 params.append(model_name)
 
             sql = normalize_placeholders(
@@ -377,8 +412,7 @@ class AIAdvisorService:
                 FROM ai_predictions
                 WHERE {' AND '.join(conditions)}
                 GROUP BY model_name, symbol
-            """,
-                is_pg,
+            """
             )
 
             cursor.execute(sql, tuple(params))

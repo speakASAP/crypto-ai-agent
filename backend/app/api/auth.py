@@ -50,9 +50,8 @@ from ..utils.db import (
 async def register(user_data: UserCreate):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
 
-    sql_check = _normalize_placeholders("SELECT id FROM users WHERE email = ? OR username = ?", is_pg)
+    sql_check = _normalize_placeholders("SELECT id FROM users WHERE email = %s OR username = %s")
     cursor.execute(sql_check, (user_data.email, user_data.username))
     if cursor.fetchone():
         conn.close()
@@ -68,14 +67,13 @@ async def register(user_data: UserCreate):
     now = datetime.now().isoformat() + "Z"
     insert_sql = '''
         INSERT INTO users (email, username, hashed_password, full_name, is_active, is_verified, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     '''
-    sql_insert = _normalize_placeholders(insert_sql, is_pg)
+    sql_insert = _normalize_placeholders(insert_sql)
     user_id = _execute_insert_and_get_id(
         cursor,
         sql_insert,
         (user_data.email, user_data.username, hashed_password, user_data.full_name, True, False, now, now),
-        is_pg,
     )
     conn.commit()
     conn.close()
@@ -114,10 +112,8 @@ async def register(user_data: UserCreate):
 async def login(user_data: UserLogin):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
     sql = _normalize_placeholders(
-        "SELECT id, email, username, hashed_password, full_name, preferred_currency, is_active, created_at FROM users WHERE email = ?",
-        is_pg,
+        "SELECT id, email, username, hashed_password, full_name, preferred_currency, is_active, created_at FROM users WHERE email = %s"
     )
     cursor.execute(sql, (user_data.email,))
     user = cursor.fetchone()
@@ -193,10 +189,8 @@ async def refresh_token(refresh_token: Optional[str] = None, current_user: dict 
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
     sql = _normalize_placeholders(
-        "SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE id = ?",
-        is_pg,
+        "SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE id = %s"
     )
     cursor.execute(sql, (user_id,))
     user = cursor.fetchone()
@@ -226,10 +220,8 @@ async def refresh_token(refresh_token: Optional[str] = None, current_user: dict 
 async def get_me(current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
     sql = _normalize_placeholders(
-        "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = ?",
-        is_pg,
+        "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = %s"
     )
     cursor.execute(sql, (current_user["id"],))
     user = cursor.fetchone()
@@ -254,42 +246,41 @@ async def get_me(current_user: dict = Depends(get_current_active_user)):
 async def update_profile(update_data: UserProfileUpdate, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
 
     try:
         update_fields = []
         params = []
         if update_data.email is not None:
-            update_fields.append("email = ?")
+            update_fields.append("email = %s")
             params.append(update_data.email)
         if update_data.username is not None:
-            update_fields.append("username = ?")
+            update_fields.append("username = %s")
             params.append(update_data.username)
         if update_data.full_name is not None:
-            update_fields.append("full_name = ?")
+            update_fields.append("full_name = %s")
             params.append(update_data.full_name)
         if update_data.preferred_currency is not None:
-            update_fields.append("preferred_currency = ?")
+            update_fields.append("preferred_currency = %s")
             params.append(update_data.preferred_currency)
         if update_data.telegram_bot_token is not None:
-            update_fields.append("telegram_bot_token = ?")
+            update_fields.append("telegram_bot_token = %s")
             params.append(update_data.telegram_bot_token)
         if update_data.telegram_chat_id is not None:
-            update_fields.append("telegram_chat_id = ?")
+            update_fields.append("telegram_chat_id = %s")
             params.append(update_data.telegram_chat_id)
         if update_data.default_alert_percentage_above is not None:
-            update_fields.append("default_alert_percentage_above = ?")
+            update_fields.append("default_alert_percentage_above = %s")
             params.append(update_data.default_alert_percentage_above)
         if update_data.default_alert_percentage_below is not None:
-            update_fields.append("default_alert_percentage_below = ?")
+            update_fields.append("default_alert_percentage_below = %s")
             params.append(update_data.default_alert_percentage_below)
 
         if update_fields:
-            update_fields.append("updated_at = ?")
-            updated_ts = datetime.now() if is_pg else (datetime.now().isoformat() + "Z")
+            update_fields.append("updated_at = %s")
+            updated_ts = datetime.now()
             params.append(updated_ts)
             params.append(current_user["id"])
-            sql = _normalize_placeholders(f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?", is_pg)
+            sql = _normalize_placeholders(f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s")
             cursor.execute(sql, params)
             conn.commit()
 
@@ -299,8 +290,7 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
             )
 
         sql = _normalize_placeholders(
-            "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = ?",
-            is_pg,
+            "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = %s"
         )
         cursor.execute(sql, (current_user["id"],))
         user = cursor.fetchone()
@@ -327,8 +317,7 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
 async def change_password(password_change: PasswordChange, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql = _normalize_placeholders("SELECT hashed_password FROM users WHERE id = ?", is_pg)
+    sql = _normalize_placeholders("SELECT hashed_password FROM users WHERE id = %s")
     cursor.execute(sql, (current_user["id"],))
     user = cursor.fetchone()
     if not user or not verify_password(password_change.current_password, user[0]):
@@ -336,7 +325,7 @@ async def change_password(password_change: PasswordChange, current_user: dict = 
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     new_hashed_password = get_password_hash(password_change.new_password)
-    sql = _normalize_placeholders("UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?", is_pg)
+    sql = _normalize_placeholders("UPDATE users SET hashed_password = %s, updated_at = %s WHERE id = %s")
     cursor.execute(sql, (new_hashed_password, datetime.now().isoformat() + "Z", current_user["id"]))
     conn.commit()
     conn.close()
@@ -363,8 +352,7 @@ async def test_telegram_connection(current_user: dict = Depends(get_current_acti
 async def request_password_reset(request: PasswordResetRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql = _normalize_placeholders("SELECT id FROM users WHERE email = ?", is_pg)
+    sql = _normalize_placeholders("SELECT id FROM users WHERE email = %s")
     cursor.execute(sql, (request.email,))
     user = cursor.fetchone()
     if user:
@@ -373,9 +361,9 @@ async def request_password_reset(request: PasswordResetRequest):
         now = datetime.now().isoformat() + "Z"
         insert_sql = '''
             INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
         '''
-        sql = _normalize_placeholders(insert_sql, is_pg)
+        sql = _normalize_placeholders(insert_sql)
         cursor.execute(sql, (user[0], reset_token, expires_at, False, now))
         conn.commit()
         logger.info(f"Password reset token for {request.email}: {reset_token}")
@@ -388,12 +376,11 @@ async def request_password_reset(request: PasswordResetRequest):
 async def confirm_password_reset(confirm: PasswordResetConfirm):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
     select_sql = '''
         SELECT user_id, expires_at, used FROM password_reset_tokens 
-        WHERE token = ? AND used = 0
+        WHERE token = %s AND used = FALSE
     '''
-    sql = _normalize_placeholders(select_sql, is_pg)
+    sql = _normalize_placeholders(select_sql)
     cursor.execute(sql, (confirm.token,))
     token_data = cursor.fetchone()
     if not token_data:
@@ -405,9 +392,9 @@ async def confirm_password_reset(confirm: PasswordResetConfirm):
         raise HTTPException(status_code=400, detail="Reset token has expired")
 
     new_hashed_password = get_password_hash(confirm.new_password)
-    sql1 = _normalize_placeholders("UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?", is_pg)
+    sql1 = _normalize_placeholders("UPDATE users SET hashed_password = %s, updated_at = %s WHERE id = %s")
     cursor.execute(sql1, (new_hashed_password, datetime.now().isoformat() + "Z", user_id))
-    sql2 = _normalize_placeholders("UPDATE password_reset_tokens SET used = 1 WHERE token = ?", is_pg)
+    sql2 = _normalize_placeholders("UPDATE password_reset_tokens SET used = TRUE WHERE token = %s")
     cursor.execute(sql2, (confirm.token,))
     conn.commit()
     conn.close()
@@ -420,17 +407,16 @@ async def delete_account(confirmation: AccountDeletionConfirm, current_user: dic
     cursor = conn.cursor()
     user_id = current_user["id"]
     try:
-        is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
         for stmt in [
-            "DELETE FROM alert_history WHERE user_id = ?",
-            "DELETE FROM alerts WHERE user_id = ?",
-            "DELETE FROM tracked_symbols WHERE user_id = ?",
-            "DELETE FROM portfolio_items WHERE user_id = ?",
-            "DELETE FROM password_reset_tokens WHERE user_id = ?",
-            "DELETE FROM user_sessions WHERE user_id = ?",
-            "DELETE FROM users WHERE id = ?",
+            "DELETE FROM alert_history WHERE user_id = %s",
+            "DELETE FROM alerts WHERE user_id = %s",
+            "DELETE FROM tracked_symbols WHERE user_id = %s",
+            "DELETE FROM portfolio_items WHERE user_id = %s",
+            "DELETE FROM password_reset_tokens WHERE user_id = %s",
+            "DELETE FROM user_sessions WHERE user_id = %s",
+            "DELETE FROM users WHERE id = %s",
         ]:
-            cursor.execute(_normalize_placeholders(stmt, is_pg), (user_id,))
+            cursor.execute(_normalize_placeholders(stmt), (user_id,))
         conn.commit()
         conn.close()
         logger.info(f"User account {user_id} ({current_user['email']}) has been permanently deleted")
