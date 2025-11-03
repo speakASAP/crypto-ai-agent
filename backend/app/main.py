@@ -788,9 +788,15 @@ def init_database():
             pnl_percent_usd REAL,
             -- Exchange rate at time of purchase
             exchange_rate_at_purchase REAL,
+            comments TEXT,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
+    # Add comments column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE portfolio_items ADD COLUMN comments TEXT')
+    except Exception:
+        pass  # Column already exists
 
     # Create alerts table with user_id
     cursor.execute('''
@@ -1316,9 +1322,15 @@ def init_postgres_database():
             current_value_usd REAL,
             pnl_usd REAL,
             pnl_percent_usd REAL,
-            exchange_rate_at_purchase REAL
+            exchange_rate_at_purchase REAL,
+            comments TEXT
         )
     ''')
+        # Add comments column if it doesn't exist (for existing databases)
+        try:
+            cur.execute('ALTER TABLE portfolio_items ADD COLUMN comments TEXT')
+        except Exception:
+            pass  # Column already exists
         
         # Create alerts table
         cur.execute('''
