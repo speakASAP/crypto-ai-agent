@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from typing import Dict, Any
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 
@@ -234,15 +235,18 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                     existing_exchange_rate = existing_item[7]
 
                     # Calculate new amount after applying CSV net change
-                    # Use a small epsilon to handle floating point precision issues
-                    new_amount = existing_amount + net_change
-                    epsilon = 1e-10  # Very small threshold for floating point comparison only
+                    # Use Decimal for precision (at least 8 decimal places)
+                    existing_amount_decimal = Decimal(str(existing_amount))
+                    net_change_decimal = Decimal(str(net_change))
+                    new_amount_decimal = existing_amount_decimal + net_change_decimal
+                    new_amount = float(new_amount_decimal)
+                    epsilon = Decimal('1e-10')  # Very small threshold for floating point comparison only
 
                     logger.info(f"🔍 Processing {symbol}: existing={existing_amount}, net_change={net_change}, new_amount={new_amount}")
 
                     # Only delete if amount is 0 or effectively 0 (due to floating point precision)
                     # Keep small amounts - only delete when truly zero
-                    if new_amount <= epsilon:
+                    if new_amount_decimal <= epsilon:
                         # Fully sold or over-sold: DELETE portfolio item
                         delete_sql = _normalize_placeholders(
                             "DELETE FROM portfolio_items WHERE id = ? AND user_id = ?",
@@ -276,53 +280,71 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                             # If net_change is negative (more sold than bought), we keep existing price
                             
                             if net_change > 0:
-                                # Net increase: calculate weighted average
+                                # Net increase: calculate weighted average using Decimal for precision
                                 # Convert existing price to same currency as CSV item if needed
+                                existing_price_decimal = Decimal(str(existing_price))
+                                csv_price_decimal = Decimal(str(csv_price))
+                                csv_buy_qty_decimal = Decimal(str(csv_buy_qty))
+                                existing_amount_decimal_calc = Decimal(str(existing_amount))
+                                
                                 existing_price_in_csv_currency = existing_price
                                 if existing_currency != currency:
                                     # Convert existing price to CSV currency
                                     if currency != 'USD' and existing_currency != 'USD':
                                         # Both non-USD: convert existing to USD first, then to CSV currency
                                         existing_exchange_rate_used = existing_exchange_rate if existing_exchange_rate else 1.0
-                                        existing_price_usd_calc = existing_price / existing_exchange_rate_used
+                                        existing_price_usd_calc = float(existing_price_decimal / Decimal(str(existing_exchange_rate_used)))
                                         csv_exchange_rate = currency_service.rates.get(currency, 1.0)
-                                        existing_price_in_csv_currency = existing_price_usd_calc * csv_exchange_rate
+                                        existing_price_in_csv_currency = float(existing_price_usd_calc * Decimal(str(csv_exchange_rate)))
                                     elif existing_currency == 'USD' and currency != 'USD':
                                         csv_exchange_rate = currency_service.rates.get(currency, 1.0)
-                                        existing_price_in_csv_currency = existing_price * csv_exchange_rate
+                                        existing_price_in_csv_currency = float(existing_price_decimal * Decimal(str(csv_exchange_rate)))
 
                                 # Weighted average: (existing * existing_price + new_buys * csv_price) / (existing + new_buys)
-                                existing_value = existing_amount * existing_price_in_csv_currency
-                                csv_buy_value = csv_buy_qty * csv_price
-                                total_value = existing_value + csv_buy_value
-                                total_quantity_for_price = existing_amount + csv_buy_qty
-                                merged_price = total_value / total_quantity_for_price if total_quantity_for_price > 0 else existing_price
+                                # Use Decimal for all calculations
+                                existing_price_csv_decimal = Decimal(str(existing_price_in_csv_currency))
+                                existing_value_decimal = existing_amount_decimal_calc * existing_price_csv_decimal
+                                csv_buy_value_decimal = csv_buy_qty_decimal * csv_price_decimal
+                                total_value_decimal = existing_value_decimal + csv_buy_value_decimal
+                                total_quantity_for_price_decimal = existing_amount_decimal_calc + csv_buy_qty_decimal
+                                merged_price = float(total_value_decimal / total_quantity_for_price_decimal) if total_quantity_for_price_decimal > 0 else existing_price
 
                                 # Calculate USD prices
                                 if currency != 'USD':
                                     csv_exchange_rate = currency_service.rates.get(currency, 1.0)
-                                    csv_price_usd = csv_price / csv_exchange_rate
+                                    csv_exchange_rate_decimal = Decimal(str(csv_exchange_rate))
+                                    csv_price_usd = float(csv_price_decimal / csv_exchange_rate_decimal)
                                 else:
                                     csv_exchange_rate = None
-                                    csv_price_usd = csv_price
+                                    csv_price_usd = float(csv_price_decimal)
 
                                 # Merge commission (only from buys, not sells)
-                                merged_commission = existing_commission + item.get('fees', 0)
+                                existing_commission_decimal = Decimal(str(existing_commission))
+                                item_fees_decimal = Decimal(str(item.get('fees', 0)))
+                                merged_commission = float(existing_commission_decimal + item_fees_decimal)
                                 
                                 if existing_price_usd:
-                                    existing_value_usd = existing_amount * existing_price_usd
+                                    existing_price_usd_decimal = Decimal(str(existing_price_usd))
+                                    existing_value_usd_decimal = existing_amount_decimal_calc * existing_price_usd_decimal
+                                    existing_value_usd = float(existing_value_usd_decimal)
                                 else:
-                                    existing_value_usd = existing_amount * csv_price_usd  # Fallback
+                                    csv_price_usd_decimal = Decimal(str(csv_price_usd))
+                                    existing_value_usd_decimal = existing_amount_decimal_calc * csv_price_usd_decimal
+                                    existing_value_usd = float(existing_value_usd_decimal)  # Fallback
 
-                                csv_buy_value_usd = csv_buy_qty * csv_price_usd
-                                total_value_usd = existing_value_usd + csv_buy_value_usd
-                                merged_price_usd = total_value_usd / total_quantity_for_price if total_quantity_for_price > 0 else (existing_price_usd or csv_price_usd)
+                                csv_price_usd_decimal = Decimal(str(csv_price_usd))
+                                csv_buy_value_usd_decimal = csv_buy_qty_decimal * csv_price_usd_decimal
+                                total_value_usd_decimal = Decimal(str(existing_value_usd)) + csv_buy_value_usd_decimal
+                                merged_price_usd = float(total_value_usd_decimal / total_quantity_for_price_decimal) if total_quantity_for_price_decimal > 0 else (existing_price_usd or csv_price_usd)
                                 
                                 if currency != 'USD':
-                                    merged_commission_usd = existing_commission_usd + (item.get('fees', 0) / csv_exchange_rate)
+                                    csv_exchange_rate_decimal = Decimal(str(csv_exchange_rate))
+                                    existing_commission_usd_decimal = Decimal(str(existing_commission_usd))
+                                    merged_commission_usd = float(existing_commission_usd_decimal + (item_fees_decimal / csv_exchange_rate_decimal))
                                     merged_exchange_rate = csv_exchange_rate
                                 else:
-                                    merged_commission_usd = existing_commission_usd + item.get('fees', 0)
+                                    existing_commission_usd_decimal = Decimal(str(existing_commission_usd))
+                                    merged_commission_usd = float(existing_commission_usd_decimal + item_fees_decimal)
                                     merged_exchange_rate = None
                             else:
                                 # Net decrease (partial sell): keep existing price
@@ -335,13 +357,20 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                                 else:
                                     merged_exchange_rate = existing_exchange_rate
 
-                        # Calculate total investment for display
+                        # Calculate total investment for display (using Decimal for precision)
+                        new_amount_decimal_display = Decimal(str(new_amount))
+                        merged_price_decimal = Decimal(str(merged_price))
+                        merged_price_usd_decimal = Decimal(str(merged_price_usd))
+                        merged_commission_decimal = Decimal(str(merged_commission))
+                        merged_commission_usd_decimal = Decimal(str(merged_commission_usd))
+                        
                         if currency != 'USD':
                             exchange_rate_for_display = currency_service.rates.get(currency, 1.0)
-                            total_investment_usd = (new_amount * merged_price_usd) + merged_commission_usd
-                            total_investment = total_investment_usd * exchange_rate_for_display
+                            exchange_rate_decimal = Decimal(str(exchange_rate_for_display))
+                            total_investment_usd_decimal = (new_amount_decimal_display * merged_price_usd_decimal) + merged_commission_usd_decimal
+                            total_investment = float(total_investment_usd_decimal * exchange_rate_decimal)
                         else:
-                            total_investment = (new_amount * merged_price) + merged_commission
+                            total_investment = float((new_amount_decimal_display * merged_price_decimal) + merged_commission_decimal)
 
                         currency_symbols = {'USD': '$', 'EUR': '€', 'CZK': 'Kč', 'GBP': '£', 'JPY': '¥'}
                         currency_symbol = currency_symbols.get(currency, currency + ' ')
@@ -369,21 +398,28 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                     logger.info(f"📋 {symbol} not found in portfolio (net_change={net_change})")
                     if net_change > 0:
                         # Insert new item (net change is positive = buy)
+                        # Use Decimal for all calculations to preserve precision
+                        item_price_decimal = Decimal(str(item['price']))
+                        item_quantity_decimal = Decimal(str(item['quantity']))
+                        item_fees_decimal = Decimal(str(item.get('fees', 0)))
+                        item_value_decimal = Decimal(str(item.get('value', 0)))
+                        
                         if currency != 'USD':
                             exchange_rate = currency_service.rates.get(currency, 1.0)
-                            price_usd = item['price'] / exchange_rate
-                            fees_usd = item['fees'] / exchange_rate if item['fees'] > 0 else 0.0
-                            value_usd = item.get('value', 0) / exchange_rate if item.get('value', 0) > 0 else 0.0
+                            exchange_rate_decimal = Decimal(str(exchange_rate))
+                            price_usd = float(item_price_decimal / exchange_rate_decimal)
+                            fees_usd = float(item_fees_decimal / exchange_rate_decimal) if item['fees'] > 0 else 0.0
+                            value_usd = float(item_value_decimal / exchange_rate_decimal) if item.get('value', 0) > 0 else 0.0
                         else:
                             exchange_rate = None
-                            price_usd = item['price']
-                            fees_usd = item['fees']
-                            value_usd = item.get('value', 0)
+                            price_usd = float(item_price_decimal)
+                            fees_usd = float(item_fees_decimal)
+                            value_usd = float(item_value_decimal)
 
                         if item.get('value', 0) > 0:
-                            total_investment = item['value'] + item['fees']
+                            total_investment = float(item_value_decimal + item_fees_decimal)
                         else:
-                            total_investment = item['quantity'] * item['price'] + item['fees']
+                            total_investment = float(item_quantity_decimal * item_price_decimal + item_fees_decimal)
 
                         currency_symbols = {'USD': '$', 'EUR': '€', 'CZK': 'Kč', 'GBP': '£', 'JPY': '¥'}
                         currency_symbol = currency_symbols.get(currency, currency + ' ')

@@ -161,4 +161,3 @@ echo "   3. Backend DATABASE_URL uses 'postgres' hostname"
 echo "   4. Backend ENVIRONMENT=production"
 echo "   5. Database has customer data (not empty)"
 echo ""
-
