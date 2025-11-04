@@ -190,46 +190,57 @@ class BinanceImportService:
             base_url = "https://api.binance.com"
             endpoint = "/sapi/v1/fiat/orders"
             
-            # Build query parameters
-            timestamp = self._get_timestamp()
-            params = {
-                'transactionType': '0',  # 0 = buy, 1 = sell
-                'timestamp': str(timestamp)
-            }
+            all_orders = []
             
-            # Create query string
-            query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+            # Get both buy (transactionType=0) and sell (transactionType=1) orders
+            for transaction_type in ['0', '1']:
+                try:
+                    # Build query parameters
+                    timestamp = self._get_timestamp()
+                    params = {
+                        'transactionType': transaction_type,
+                        'timestamp': str(timestamp),
+                        'rows': '500'  # Get up to 500 orders per type
+                    }
+                    
+                    # Create query string
+                    query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+                    
+                    # Generate signature
+                    signature = self._generate_signature(query_string)
+                    
+                    # Add signature to params
+                    params['signature'] = signature
+                    
+                    # Build full URL
+                    url = f"{base_url}{endpoint}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+                    
+                    # Make request
+                    headers = {
+                        'X-MBX-APIKEY': self.api_key
+                    }
+                    
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    
+                    connector = aiohttp.TCPConnector(ssl=ssl_context)
+                    async with aiohttp.ClientSession(connector=connector) as session:
+                        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                            if response.status == 200:
+                                result = await response.json()
+                                orders = result.get('data', [])
+                                logger.info(f"✅ Retrieved {len(orders)} fiat orders (type={transaction_type})")
+                                all_orders.extend(orders)
+                            else:
+                                error_text = await response.text()
+                                logger.debug(f"⚠️ Fiat orders API (type={transaction_type}) returned status {response.status}: {error_text}")
+                except Exception as e:
+                    logger.debug(f"Error getting fiat orders type {transaction_type}: {e}")
+                    continue
             
-            # Generate signature
-            signature = self._generate_signature(query_string)
-            
-            # Add signature to params
-            params['signature'] = signature
-            
-            # Build full URL
-            url = f"{base_url}{endpoint}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
-            
-            # Make request
-            headers = {
-                'X-MBX-APIKEY': self.api_key
-            }
-            
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            
-            connector = aiohttp.TCPConnector(ssl=ssl_context)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        orders = result.get('data', [])
-                        logger.info(f"✅ Retrieved {len(orders)} fiat orders")
-                        return orders
-                    else:
-                        error_text = await response.text()
-                        logger.warning(f"⚠️ Binance fiat orders API returned status {response.status}: {error_text}")
-                        return []
+            logger.info(f"✅ Retrieved {len(all_orders)} total fiat orders")
+            return all_orders
                         
         except Exception as e:
             logger.warning(f"⚠️ Error getting fiat purchase history: {e}")
@@ -249,8 +260,54 @@ class BinanceImportService:
             logger.debug(f"Could not get deposit history: {e}")
             return []
     
+    async def get_deposit_history_full(self) -> List[Dict]:
+        """Get complete deposit history with all assets"""
+        try:
+            client = BinanceClient(self.api_key, self.api_secret)
+            
+            # Get all deposits (no asset filter)
+            deposits = client.get_deposit_history()
+            logger.info(f"✅ Retrieved {len(deposits)} total deposits")
+            return deposits
+        except Exception as e:
+            logger.warning(f"⚠️ Error getting deposit history: {e}")
+            return []
+    
+    async def get_withdrawal_history_full(self) -> List[Dict]:
+        """Get complete withdrawal history with all assets"""
+        try:
+            client = BinanceClient(self.api_key, self.api_secret)
+            
+            # Get all withdrawals
+            withdrawals = client.get_withdrawal_history()
+            logger.info(f"✅ Retrieved {len(withdrawals)} total withdrawals")
+            return withdrawals
+        except Exception as e:
+            logger.warning(f"⚠️ Error getting withdrawal history: {e}")
+            return []
+    
+    async def get_all_orders(self, symbol: str = None, limit: int = 1000) -> List[Dict]:
+        """Get all orders (open and historical) - this can help find buy prices"""
+        try:
+            client = BinanceClient(self.api_key, self.api_secret)
+            
+            # Get all orders (filled, cancelled, etc.)
+            if symbol:
+                orders = client.get_all_orders(symbol=symbol, limit=limit)
+                logger.info(f"✅ Retrieved {len(orders)} orders for {symbol}")
+            else:
+                # Cannot get all orders without symbol
+                orders = []
+                logger.debug("Cannot get all orders without symbol - need symbol parameter")
+            
+            return orders
+        except Exception as e:
+            logger.debug(f"Could not get all orders: {e}")
+            return []
+    
     def _save_import_data_to_csv(self, user_id: int, balances: List[Dict], all_trades: Dict[str, List], 
-                                 portfolio_items: List[Dict], account_info: Dict = None, fiat_orders: List[Dict] = None) -> str:
+                                 portfolio_items: List[Dict], account_info: Dict = None, fiat_orders: List[Dict] = None,
+                                 deposits: List[Dict] = None, withdrawals: List[Dict] = None) -> str:
         """Save full Binance import data to CSV file for analysis"""
         try:
             # Create logs directory if it doesn't exist
@@ -390,38 +447,16 @@ class BinanceImportService:
                 logger.info(f"🔍 Fiat order structure - keys: {list(order.keys())[:15]}")
                 logger.debug(f"🔍 Fiat order full data: {json.dumps(order, indent=2)}")
                 
-                # Binance fiat order API returns different field names - try multiple variations
-                crypto = (
-                    order.get('cryptoType', '') or 
-                    order.get('cryptoCurrency', '') or 
-                    order.get('crypto', '') or
-                    order.get('asset', '') or
-                    order.get('coin', '') or
-                    order.get('obtainAmount', '')  # Sometimes crypto type is in the amount field name
-                )
+                # NOTE: Binance fiat orders API (/sapi/v1/fiat/orders) returns FIAT-TO-FIAT transactions
+                # These are NOT crypto purchases! They're fiat payment transactions.
+                # For crypto purchases via card, we need to check:
+                # 1. Regular trading history (already doing this)
+                # 2. All orders (including filled orders)
+                # 3. Deposit history (to see when crypto arrived)
                 
-                # If still empty, try to extract from obtainAmount field (sometimes it's the crypto name)
-                if not crypto:
-                    # Check if there's an obtainAmount field that might indicate the crypto
-                    obtain_amount_str = str(order.get('obtainAmount', ''))
-                    # Try to find crypto name in other fields
-                    for key, value in order.items():
-                        if 'crypto' in key.lower() or 'coin' in key.lower() or 'asset' in key.lower():
-                            if value and isinstance(value, str) and len(value) <= 10:
-                                crypto = value.upper()
-                                break
-                
-                crypto = crypto.upper() if crypto else ''
-                
-                logger.info(f"🔍 Extracted crypto symbol: '{crypto}' from fiat order")
-                
-                if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD', '']:
-                    if crypto not in fiat_purchases:
-                        fiat_purchases[crypto] = []
-                    fiat_purchases[crypto].append(order)
-                    logger.info(f"✅ Fiat purchase found: {crypto} - order keys: {list(order.keys())[:10]}")
-                else:
-                    logger.warning(f"⚠️ Fiat order skipped - crypto symbol empty or stablecoin: '{crypto}', order: {list(order.keys())[:5]}")
+                # These fiat orders don't contain crypto info, so we'll skip them
+                # but log them for reference
+                logger.debug(f"⚠️ Fiat order is fiat-to-fiat transaction (not crypto purchase): {order.get('orderNo', 'unknown')}")
         except Exception as e:
             logger.warning(f"Could not get fiat purchase history: {e}")
         
@@ -443,6 +478,41 @@ class BinanceImportService:
             buy_trades = []
             
             logger.info(f"🔍 Looking for trades for {asset} in pairs: {trading_pairs}")
+            
+            # ALSO try to get ALL orders (filled orders show buy prices)
+            try:
+                all_orders = await self.get_all_orders(f"{asset}USDT")
+                for order in all_orders:
+                    # Check if it's a filled BUY order
+                    if order.get('status') == 'FILLED' and order.get('side') == 'BUY':
+                        executed_qty = float(order.get('executedQty', 0))
+                        price = float(order.get('price', 0))
+                        if executed_qty > 0 and price > 0:
+                            buy_trades.append({
+                                'symbol': f"{asset}USDT",
+                                'qty': executed_qty,
+                                'price': price,
+                                'time': order.get('updateTime', order.get('time', 0)),
+                                'commission': 0.0,  # Will be calculated from trades
+                            })
+                            logger.info(f"✅ Added filled BUY order: {asset} qty={executed_qty}, price={price}")
+            except Exception as e:
+                logger.debug(f"Could not get all orders for {asset}: {e}")
+            
+            # Get deposit history for this asset to find earliest arrival date
+            deposit_history_for_asset = []
+            try:
+                deposits = await self.get_deposit_history(asset)
+                for deposit in deposits:
+                    if deposit.get('status') == 1:  # 1 = Success
+                        deposit_history_for_asset.append({
+                            'amount': float(deposit.get('amount', 0)),
+                            'time': deposit.get('insertTime', 0),
+                        })
+                if deposit_history_for_asset:
+                    logger.info(f"✅ Found {len(deposit_history_for_asset)} deposits for {asset}")
+            except Exception as e:
+                logger.debug(f"Could not get deposit history for {asset}: {e}")
             
             # Check fiat purchases for this asset (from the pre-fetched list)
             if asset in fiat_purchases:
