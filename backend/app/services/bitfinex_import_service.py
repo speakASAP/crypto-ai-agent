@@ -490,10 +490,12 @@ class BitfinexImportService:
                     earliest_trade = buy_trades[0]
                     if earliest_trade['time'] > 0:
                         # Bitfinex timestamps are in milliseconds
-                        trade_date = datetime.fromtimestamp(earliest_trade['time'] / 1000).isoformat() + "Z"
+                        # Convert to UTC datetime and format for PostgreSQL (ISO format without Z)
+                        trade_dt = datetime.utcfromtimestamp(earliest_trade['time'] / 1000)
+                        trade_date = trade_dt.isoformat()
                     else:
                         # Fallback to current date if timestamp is invalid
-                        trade_date = datetime.now().isoformat() + "Z"
+                        trade_date = datetime.utcnow().isoformat()
                         logger.warning(f"Invalid timestamp for {currency}, using current date")
                     
                     logger.info(f"✅ Calculated portfolio item for {currency}: amount={scaled_amount}, price_buy={avg_buy_price_usd:.2f}, purchase_date={trade_date}")
@@ -514,7 +516,7 @@ class BitfinexImportService:
                         'symbol': currency,
                         'amount': total_amount,
                         'price_buy': 0.0,
-                        'purchase_date': datetime.now().isoformat() + "Z",
+                        'purchase_date': datetime.utcnow().isoformat(),
                         'base_currency': 'USD',
                         'source': 'Bitfinex',
                         'commission': 0.0,
