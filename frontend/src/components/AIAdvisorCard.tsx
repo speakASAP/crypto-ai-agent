@@ -6,7 +6,7 @@ import { PredictionResponse, PredictionData } from '@/types'
 import { apiClient } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { formatCurrency } from '@/lib/currencyUtils'
-import { Sparkles, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react'
+import { Sparkles, TrendingUp, TrendingDown, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
 
 // Helper function to render markdown links in reasoning text as external links
 function renderReasoningWithLinks(text: string) {
@@ -81,6 +81,7 @@ export function AIAdvisorCard({ symbol, currentPrice, className = '' }: AIAdviso
   const [predictions, setPredictions] = useState<PredictionResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isExpanded, setIsExpanded] = useState(false)
 
   useEffect(() => {
     const fetchPredictions = async () => {
@@ -130,119 +131,196 @@ export function AIAdvisorCard({ symbol, currentPrice, className = '' }: AIAdviso
     }
   }
 
-  if (loading) {
-    return (
-      <Card className={className}>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Sparkles className="h-4 w-4" />
-            AI Predictions
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-gray-500">Loading predictions...</div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (error || !predictions) {
-    return (
-      <Card className={className}>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Sparkles className="h-4 w-4" />
-            AI Predictions
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-gray-500 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" />
-            {error || 'No predictions available'}
-          </div>
-          <button
-            onClick={async () => {
-              try {
-                await apiClient.generatePredictions(symbol)
-                // Refetch predictions
-                const data = await apiClient.getAIPredictions(symbol)
-                setPredictions(data)
-              } catch (err) {
-                logger.error('Error generating predictions:', err)
-              }
-            }}
-            className="mt-2 text-xs text-blue-600 hover:text-blue-800"
-          >
-            Generate Predictions
-          </button>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const pred24h = getPredictionDisplay('24h', predictions.predictions['24h'])
-  const predWeek = getPredictionDisplay('week', predictions.predictions.week)
-  const predMonth = getPredictionDisplay('month', predictions.predictions.month)
-  const predYear = getPredictionDisplay('year', predictions.predictions.year)
+  // Get predictions
+  const pred24h = getPredictionDisplay('24h', predictions?.predictions['24h'])
+  const predWeek = getPredictionDisplay('week', predictions?.predictions.week)
+  const predMonth = getPredictionDisplay('month', predictions?.predictions.month)
+  const predYear = getPredictionDisplay('year', predictions?.predictions.year)
 
   const predictionsList = [pred24h, predWeek, predMonth, predYear].filter(Boolean)
 
-  if (predictionsList.length === 0) {
+  // Collapsed view - show only 1-year prediction
+  const renderCollapsedView = () => {
+    // Prioritize 1-year prediction, fallback to longest available
+    const mainPrediction = predYear || predMonth || predWeek || pred24h
+
+    if (!mainPrediction) {
+      if (loading) {
+        return (
+          <div className="flex items-center justify-between p-2 rounded border bg-gray-50">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-gray-400" />
+              <span className="text-xs text-gray-500">Loading AI predictions...</span>
+            </div>
+          </div>
+        )
+      }
+
+      if (error || !predictions) {
+        return (
+          <div className="flex items-center justify-between p-2 rounded border bg-gray-50">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-gray-400" />
+              <span className="text-xs text-gray-500">{error || 'No predictions'}</span>
+            </div>
+            <button
+              onClick={async (e) => {
+                e.stopPropagation()
+                try {
+                  await apiClient.generatePredictions(symbol)
+                  const data = await apiClient.getAIPredictions(symbol)
+                  setPredictions(data)
+                } catch (err) {
+                  logger.error('Error generating predictions:', err)
+                }
+              }}
+              className="text-xs text-blue-600 hover:text-blue-800"
+            >
+              Generate
+            </button>
+          </div>
+        )
+      }
+
+      return null
+    }
+
+    const timeLabel = 
+      mainPrediction.type === '24h' ? '24h' :
+      mainPrediction.type === 'week' ? '1W' :
+      mainPrediction.type === 'month' ? '1M' :
+      '1Y'
+
+    const bgColor = mainPrediction.isPositive 
+      ? 'bg-green-50 border-green-200 hover:bg-green-100' 
+      : 'bg-red-50 border-red-200 hover:bg-red-100'
+    const textColor = mainPrediction.isPositive ? 'text-green-700' : 'text-red-700'
+
+    return (
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className={`w-full flex items-center justify-between p-3 rounded border transition-all duration-200 ${bgColor}`}
+      >
+        <div className="flex items-center gap-3 flex-1">
+          <div className="flex items-center gap-2">
+            <Sparkles className={`h-4 w-4 ${textColor}`} />
+            <span className="text-xs font-medium text-gray-600">AI {timeLabel}:</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {mainPrediction.isPositive ? (
+              <TrendingUp className={`h-4 w-4 ${textColor}`} />
+            ) : (
+              <TrendingDown className={`h-4 w-4 ${textColor}`} />
+            )}
+            <span className={`text-base font-bold ${textColor}`}>
+              {mainPrediction.changePercent >= 0 ? '+' : ''}{mainPrediction.changePercent.toFixed(1)}%
+            </span>
+          </div>
+          <span className="text-xs text-gray-500">
+            ({mainPrediction.confidence.toFixed(0)}% confidence)
+          </span>
+        </div>
+        {isExpanded ? (
+          <ChevronUp className="h-4 w-4 text-gray-400" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-gray-400" />
+        )}
+      </button>
+    )
+  }
+
+  // Expanded view - show all predictions
+  const renderExpandedView = () => {
+    if (!isExpanded || !predictions) return null
+
+    return (
+      <Card className={`mt-2 transition-all duration-200 ease-in-out ${className}`}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              AI Predictions
+            </CardTitle>
+            <button
+              onClick={() => setIsExpanded(false)}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              Collapse
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {predictionsList.map((pred) => {
+            if (!pred) return null
+
+            const timeLabel = 
+              pred.type === '24h' ? '24h' :
+              pred.type === 'week' ? '1 Week' :
+              pred.type === 'month' ? '1 Month' :
+              '1 Year'
+
+            return (
+              <div key={pred.type} className="border-b pb-2 last:border-0">
+                <div className="flex justify-between items-start mb-1">
+                  <span className="text-xs font-medium text-gray-600">{timeLabel}</span>
+                  <div className="flex items-center gap-2">
+                    {pred.isPositive ? (
+                      <TrendingUp className="h-3 w-3 text-green-600" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3 text-red-600" />
+                    )}
+                    <span className={`text-xs font-semibold ${pred.isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                      {pred.changePercent >= 0 ? '+' : ''}{pred.changePercent.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-400">
+                    {pred.confidence.toFixed(0)}% confidence
+                  </span>
+                </div>
+                {pred.reasoning && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    <div className="line-clamp-3 mb-1">
+                      {renderReasoningWithLinks(pred.reasoning)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          <div className="text-xs text-gray-400 pt-2 border-t">
+            Model: {predictions.predictions['24h']?.model_name || 'N/A'}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (loading && !predictions) {
+    return (
+      <div className={className}>
+        {renderCollapsedView()}
+      </div>
+    )
+  }
+
+  if (error && !predictions) {
+    return (
+      <div className={className}>
+        {renderCollapsedView()}
+      </div>
+    )
+  }
+
+  if (predictionsList.length === 0 && !loading && !error) {
     return null
   }
 
   return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Sparkles className="h-4 w-4" />
-          AI Predictions
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {predictionsList.map((pred) => {
-          if (!pred) return null
-
-          const timeLabel = 
-            pred.type === '24h' ? '24h' :
-            pred.type === 'week' ? '1 Week' :
-            pred.type === 'month' ? '1 Month' :
-            '1 Year'
-
-          return (
-            <div key={pred.type} className="border-b pb-2 last:border-0">
-              <div className="flex justify-between items-start mb-1">
-                <span className="text-xs font-medium text-gray-600">{timeLabel}</span>
-                <div className="flex items-center gap-2">
-                  {pred.isPositive ? (
-                    <TrendingUp className="h-3 w-3 text-green-600" />
-                  ) : (
-                    <TrendingDown className="h-3 w-3 text-red-600" />
-                  )}
-                  <span className={`text-xs font-semibold ${pred.isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                    {pred.changePercent >= 0 ? '+' : ''}{pred.changePercent.toFixed(2)}%
-                  </span>
-                </div>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-400">
-                  {pred.confidence.toFixed(0)}% confidence
-                </span>
-              </div>
-              {pred.reasoning && (
-                <div className="text-xs text-gray-500 mt-1">
-                  <div className="line-clamp-3 mb-1">
-                    {renderReasoningWithLinks(pred.reasoning)}
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
-        <div className="text-xs text-gray-400 pt-2 border-t">
-          Model: {predictions.predictions['24h']?.model_name || 'N/A'}
-        </div>
-      </CardContent>
-    </Card>
+    <div className={className}>
+      {renderCollapsedView()}
+      {renderExpandedView()}
+    </div>
   )
 }

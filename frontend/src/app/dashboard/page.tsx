@@ -1359,7 +1359,7 @@ export default function Home() {
                   </div>
                   </div>
                   {/* AI Predictions Row */}
-                  <div className="bg-gray-50 p-4 border-t">
+                  <div className="bg-gray-50 px-4 py-2 border-t">
                     <AIAdvisorCard 
                       symbol={item.symbol} 
                       currentPrice={item.current_price_usd || item.current_price}
