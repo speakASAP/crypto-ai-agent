@@ -1291,7 +1291,7 @@ export default function Home() {
                       )}
                     </div>
                     {/* Mini Chart */}
-                    <div className="w-32 mx-4">
+                    <div className="w-16 mx-4">
                       <PriceChart symbol={item.symbol} days={7} mini={true} />
                     </div>
                     <div className="flex items-center space-x-4">
