@@ -234,8 +234,8 @@ class BitfinexImportService:
         if pair.startswith('t'):
             pair = pair[1:]
         
-        # Common quote currencies (ordered by priority/commonness)
-        quote_currencies = ['USD', 'USDT', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'BNB', 'USDC', 'DAI']
+        # Common quote currencies (ordered by priority/commonness - UST is critical for Bitfinex)
+        quote_currencies = ['USD', 'USDT', 'UST', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'BNB', 'USDC', 'DAI']
         
         for quote in quote_currencies:
             if pair.endswith(quote):
@@ -293,7 +293,7 @@ class BitfinexImportService:
         Returns:
             Price converted to USD
         """
-        if quote_currency in ['USD', 'USDT', 'USDC']:
+        if quote_currency in ['USD', 'USDT', 'UST', 'USDC']:
             return price
         
         # Ensure currency service is initialized
@@ -358,8 +358,8 @@ class BitfinexImportService:
                     all_trades_map[pair].append(trade)
             logger.info(f"✅ Built trades map with {len(all_trades_map)} unique pairs: {list(all_trades_map.keys())[:10]}")
         
-        # Common quote currencies to try (expanded list)
-        common_quote_currencies = ['USD', 'USDT', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'USDC', 'DAI']
+        # Common quote currencies to try (expanded list - UST is critical for Bitfinex)
+        common_quote_currencies = ['USD', 'USDT', 'UST', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'USDC', 'DAI']
         
         for wallet in wallets:
             currency = wallet['currency']
