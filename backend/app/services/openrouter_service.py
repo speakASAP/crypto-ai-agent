@@ -99,6 +99,24 @@ Provide price trend predictions in structured JSON format for given cryptocurren
  - On-chain metrics (if available)
  - News and sentiment analysis (social, mainstream, and project updates)
  - Correlation to BTC/ETH and global market cycles
+
+Use the following trusted crypto news and analysis sources:
+1. CoinDesk — Industry standard for regulatory, institutional, and market news.
+2. The Block — Professional-grade research and news on crypto companies and trends.
+3. CoinTelegraph — Popular mainstream source, wide coverage but verify analysis sections.
+4. Decrypt — Balanced mix of journalism and technical blockchain reporting.
+5. CryptoSlate — Good for project updates, sentiment, and on-chain summaries.
+6. Messari — Premium-grade analytics, fundamental research, and project data.
+7. Glassnode Insights — Focused on on-chain data analytics and Bitcoin network metrics.
+8. Santiment — Sentiment and on-chain data tracking, solid for correlation studies.
+9. Kaiko — Reliable for market structure, liquidity, and institutional data feeds.
+10. IntoTheBlock — AI-driven analytics and predictive metrics.
+11. Other sources with high quality and reliability if above mentioned sources are not enough.
+
+Guidelines:
+1. Use CoinDesk + The Block as baseline verified news.
+2. Use Glassnode + Santiment for data and signal validation.
+3. Avoid influencer-based “news” (e.g. Twitter/X) unless sentiment analysis module is applied.
  
 Additional Rules:
  - Include reasoning in natural language for interpretability.

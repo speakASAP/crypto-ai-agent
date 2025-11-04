@@ -169,15 +169,49 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
     conn.commit()
     conn.close()
 
-    # Immediately fetch prices for the newly added symbol
+    # Immediately fetch prices and generate predictions for the newly added symbol
+    symbol_upper = item.symbol.upper()
     try:
         from ..services.price_tasks import fetch_prices_for_symbols
-        logger.info(f"🔄 Fetching prices for newly added symbol: {item.symbol}")
-        await fetch_prices_for_symbols([item.symbol])
-        logger.info(f"✅ Price update completed for {item.symbol}")
+        logger.info(f"🔄 Fetching prices for newly added symbol: {symbol_upper}")
+        await fetch_prices_for_symbols([symbol_upper])
+        logger.info(f"✅ Price update completed for {symbol_upper}")
     except Exception as e:
-        logger.error(f"⚠️ Failed to fetch prices for {item.symbol}: {e}", exc_info=True)
+        logger.error(f"⚠️ Failed to fetch prices for {symbol_upper}: {e}", exc_info=True)
         # Don't fail the creation if price fetch fails
+    
+    # Generate AI predictions for the newly added symbol (if not already exists)
+    try:
+        from ..services.ai_advisor_service import ai_advisor_service
+        from ..utils.db import get_db_connection, normalize_placeholders
+        
+        # Check if predictions already exist for this symbol
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        check_sql = normalize_placeholders(
+            "SELECT COUNT(*) FROM ai_predictions WHERE symbol = %s AND user_id IS NULL"
+        )
+        cursor.execute(check_sql, (symbol_upper,))
+        existing_count = cursor.fetchone()[0]
+        conn.close()
+        
+        if existing_count == 0:
+            logger.info(f"🤖 Generating AI predictions for newly added symbol: {symbol_upper}")
+            # Generate global predictions (user_id=None) for the new symbol
+            predictions = await ai_advisor_service.generate_predictions(
+                user_id=None,  # None = global predictions (stored with user_id = NULL)
+                symbol=symbol_upper,
+                force_regenerate=True,  # Force generation for new symbol
+            )
+            if predictions:
+                logger.info(f"✅ AI predictions generated for {symbol_upper}")
+            else:
+                logger.warning(f"⚠️ No predictions generated for {symbol_upper} (may be rate-limited or symbol not supported)")
+        else:
+            logger.debug(f"📊 Predictions already exist for {symbol_upper}, skipping generation")
+    except Exception as e:
+        logger.error(f"⚠️ Failed to generate predictions for {symbol_upper}: {e}", exc_info=True)
+        # Don't fail the creation if prediction generation fails
 
     return PortfolioItem(
         id=item_id,

@@ -18,7 +18,7 @@ class HistoricalPriceService:
         self.coingecko_url = "https://api.coingecko.com/api/v3"
         self.cache_duration = timedelta(days=1)
 
-    def _symbol_to_coingecko_id(self, symbol: str) -> Dict[str, str]:
+    def _symbol_to_coingecko_id(self, symbol: str) -> str:
         """Map common symbols to CoinGecko coin IDs"""
         symbol_map = {
             "BTC": "bitcoin",
@@ -299,21 +299,94 @@ class HistoricalPriceService:
         except Exception as e:
             logger.error(f"Error clearing cache for {symbol}: {e}")
 
-    def get_mini_chart_data(
+    async def get_mini_chart_data(
         self, symbol: str, days: int = 7
     ) -> List[Dict[str, any]]:
         """
-        Get mini chart data (last N days) from cached full history
+        Get mini chart data (last N days) directly from CoinGecko API for real-time price movements
 
         Args:
             symbol: Cryptocurrency symbol
             days: Number of days to return (default: 7)
 
         Returns:
-            List of price points for the last N days
+            List of price points for the last N days from CoinGecko API
         """
+        # Fetch fresh data directly from CoinGecko API for real-time chart
+        coin_id = self._symbol_to_coingecko_id(symbol)
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.coingecko_url}/coins/{coin_id}/market_chart"
+                # Use hourly intervals for better granularity on mini charts (7 days)
+                # For longer periods, use daily intervals
+                interval = "hourly" if days <= 7 else "daily"
+                params = {
+                    "vs_currency": "usd",
+                    "days": str(days),
+                    "interval": interval,
+                }
+
+                async with session.get(url, params=params, timeout=30) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        prices = data.get("prices", [])
+
+                        # Format data points
+                        history = [
+                            {
+                                "timestamp": int(price[0] / 1000),  # Convert milliseconds to seconds
+                                "price": float(price[1]),
+                                "date": datetime.fromtimestamp(
+                                    price[0] / 1000, tz=timezone.utc
+                                ).isoformat(),
+                            }
+                            for price in prices
+                        ]
+
+                        logger.debug(
+                            f"Fetched {len(history)} real-time price points from CoinGecko for {symbol} ({days} days)"
+                        )
+                        return history
+                    elif response.status == 404:
+                        logger.warning(
+                            f"CoinGecko coin ID not found for {symbol}, trying alternative"
+                        )
+                        # Try alternative fetch method
+                        return await self._fetch_alternative(symbol, days)
+                    else:
+                        error_text = await response.text()
+                        logger.error(
+                            f"CoinGecko API error {response.status} for {symbol}: {error_text}"
+                        )
+                        # Fallback to cached data if available
+                        return await self._get_mini_chart_fallback(symbol, days)
+        except Exception as e:
+            logger.error(
+                f"Error fetching mini chart data from CoinGecko for {symbol}: {e}", exc_info=True
+            )
+            # Fallback to cached data if available
+            return await self._get_mini_chart_fallback(symbol, days)
+
+    async def _get_mini_chart_fallback(
+        self, symbol: str, days: int
+    ) -> List[Dict[str, any]]:
+        """
+        Fallback method: get mini chart data from cache if CoinGecko API fails
+
+        Args:
+            symbol: Cryptocurrency symbol
+            days: Number of days to return
+
+        Returns:
+            List of price points from cache, or empty list if no cache available
+        """
+        # Try to get from cache as fallback
         full_history = self._get_from_cache(symbol)
         if not full_history:
+            logger.warning(
+                f"No cached data available for {symbol}, returning empty chart data"
+            )
             return []
 
         # Filter to last N days
@@ -326,6 +399,12 @@ class HistoricalPriceService:
             if point.get("timestamp", 0) >= cutoff_timestamp
         ]
 
+        # Sort by timestamp
+        filtered.sort(key=lambda x: x.get("timestamp", 0))
+
+        logger.debug(
+            f"Using cached fallback data for {symbol}: {len(filtered)} points"
+        )
         return filtered
 
 
