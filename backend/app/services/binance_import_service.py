@@ -184,21 +184,52 @@ class BinanceImportService:
             return []
     
     async def get_fiat_purchase_history(self) -> List[Dict]:
-        """Get fiat card purchase history from Binance"""
+        """Get fiat card purchase history from Binance using direct API call"""
         try:
-            # Use official Binance library for proper signature handling
-            client = BinanceClient(self.api_key, self.api_secret)
+            # Binance fiat orders endpoint: /sapi/v1/fiat/orders
+            base_url = "https://api.binance.com"
+            endpoint = "/sapi/v1/fiat/orders"
             
-            # Get fiat orders (card purchases)
-            # This includes the orders you see at https://www.binance.com/en/my/wallet/exchange/buysell-history
-            fiat_orders = client.get_fiat_orders(
-                transactionType=0,  # 0 = buy, 1 = sell
-                beginTime=None,  # Get all history
-                endTime=None
-            )
+            # Build query parameters
+            timestamp = self._get_timestamp()
+            params = {
+                'transactionType': '0',  # 0 = buy, 1 = sell
+                'timestamp': str(timestamp)
+            }
             
-            logger.info(f"✅ Retrieved {len(fiat_orders.get('data', []))} fiat orders")
-            return fiat_orders.get('data', [])
+            # Create query string
+            query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+            
+            # Generate signature
+            signature = self._generate_signature(query_string)
+            
+            # Add signature to params
+            params['signature'] = signature
+            
+            # Build full URL
+            url = f"{base_url}{endpoint}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+            
+            # Make request
+            headers = {
+                'X-MBX-APIKEY': self.api_key
+            }
+            
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        orders = result.get('data', [])
+                        logger.info(f"✅ Retrieved {len(orders)} fiat orders")
+                        return orders
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"⚠️ Binance fiat orders API returned status {response.status}: {error_text}")
+                        return []
                         
         except Exception as e:
             logger.warning(f"⚠️ Error getting fiat purchase history: {e}")
