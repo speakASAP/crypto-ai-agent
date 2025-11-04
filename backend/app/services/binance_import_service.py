@@ -334,10 +334,32 @@ class BinanceImportService:
                 continue
             
             # Get trading history to calculate average buy price
-            trading_pairs = [f"{asset}USDT", f"{asset}BTC", f"{asset}ETH"]
+            # Try multiple trading pairs - Binance uses various quote currencies
+            trading_pairs = [
+                f"{asset}USDT", f"{asset}BUSD", f"{asset}USDC",  # Stablecoins
+                f"{asset}BTC", f"{asset}ETH", f"{asset}BNB",     # Crypto pairs
+                f"{asset}EUR", f"{asset}GBP"                      # Fiat pairs
+            ]
             buy_trades = []
             
             logger.info(f"🔍 Looking for trades for {asset} in pairs: {trading_pairs}")
+            
+            # Also check fiat purchase history for direct fiat purchases
+            fiat_purchases = []
+            try:
+                fiat_orders = await self.get_fiat_purchase_history()
+                for order in fiat_orders:
+                    if order.get('cryptoCurrency') == asset and order.get('status') == 'Completed':
+                        fiat_purchases.append({
+                            'symbol': f"{asset}FIAT",
+                            'qty': float(order.get('obtainAmount', 0)),
+                            'price': float(order.get('totalPrice', 0)) / float(order.get('obtainAmount', 1)) if order.get('obtainAmount', 0) else 0,
+                            'time': order.get('createTime', 0),
+                            'commission': 0.0,
+                        })
+                        logger.info(f"Found fiat purchase for {asset}: {order.get('obtainAmount')} at {order.get('totalPrice')}")
+            except Exception as e:
+                logger.debug(f"Could not get fiat purchase history: {e}")
             
             for pair in trading_pairs:
                 try:
@@ -360,7 +382,10 @@ class BinanceImportService:
                     logger.warning(f"Error processing trades for {pair}: {e}")
                     continue
             
-            logger.info(f"Total buy trades found for {asset}: {len(buy_trades)}")
+            # Add fiat purchases to buy trades
+            buy_trades.extend(fiat_purchases)
+            
+            logger.info(f"Total buy trades found for {asset}: {len(buy_trades)} (including {len(fiat_purchases)} fiat purchases)")
             
             if buy_trades:
                 # Sort trades by time to get earliest
