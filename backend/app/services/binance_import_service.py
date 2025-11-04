@@ -694,16 +694,28 @@ class BinanceImportService:
                 ).upper()
                 
                 # Check if this is a buy transaction (transactionType=0)
+                # NOTE: The transactionType is passed in the API call, not in the response
+                # We need to check the payment data structure differently
+                # For fiat payments, buy transactions typically have specific status or structure
+                # Since we fetched type=0 (buy) and type=1 (sell) separately, we need to track which is which
+                # For now, we'll check all payments and filter by status='Completed' or similar
                 transaction_type = payment.get('transactionType', payment.get('type', ''))
-                is_buy = str(transaction_type) == '0' or payment.get('side', '').upper() == 'BUY'
+                status = payment.get('status', '').upper()
+                is_buy = (
+                    str(transaction_type) == '0' or 
+                    payment.get('side', '').upper() == 'BUY' or
+                    status in ['COMPLETED', 'SUCCESS', 'SUCCESSFUL', '1', '2']
+                )
+                
+                logger.info(f"🔍 Processing fiat payment: crypto='{crypto}', transaction_type='{transaction_type}', status='{status}', is_buy={is_buy}")
                 
                 if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD', ''] and is_buy:
                     if crypto not in fiat_purchases:
                         fiat_purchases[crypto] = []
                     fiat_purchases[crypto].append(payment)
-                    logger.info(f"✅ Fiat buy payment found: {crypto} - {payment}")
+                    logger.info(f"✅ Fiat buy payment found: {crypto} - amount={payment.get('obtainAmount', 'N/A')}, price={payment.get('price', 'N/A')}, date={payment.get('createTime', 'N/A')}")
                 else:
-                    logger.debug(f"Fiat payment skipped - crypto: '{crypto}', is_buy: {is_buy}, type: {transaction_type}")
+                    logger.info(f"⚠️ Fiat payment skipped - crypto: '{crypto}', is_buy: {is_buy}, transaction_type: {transaction_type}, status: {status}")
         except Exception as e:
             logger.warning(f"Could not get fiat payment history: {e}")
         
