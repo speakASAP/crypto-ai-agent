@@ -131,12 +131,12 @@ class OpenRouterService:
                                         f"OpenRouter API rate limit exceeded after {max_retries + 1} attempts. "
                                         "Please try again later or add your own API key to accumulate rate limits."
                                     )
-                        elif response.status != 200:
-                            error_text = await response.text()
-                            logger.error(
-                                f"OpenRouter API error {response.status}: {error_text}"
-                            )
-                            raise Exception(f"OpenRouter API error: {response.status}")
+                            elif response.status != 200:
+                                error_text = await response.text()
+                                logger.error(
+                                    f"OpenRouter API error {response.status}: {error_text}"
+                                )
+                                raise Exception(f"OpenRouter API error: {response.status}")
 
                         data = await response.json()
                         content = data.get("choices", [{}])[0].get("message", {}).get(
