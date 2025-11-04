@@ -3,11 +3,16 @@ import json
 import logging
 import asyncio
 import time
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from ..core.config import settings
 from ..utils.logger import get_logger
 
 logger = get_logger("backend.app.services.openrouter_service")
+
+
+class RateLimitError(Exception):
+    """Custom exception for rate limit errors"""
+    pass
 
 
 class OpenRouterService:
@@ -30,7 +35,8 @@ class OpenRouterService:
         price_trend: Dict[str, Any],
         news_summary: str,
         news_sentiment: float,
-        max_retries: int = 3,
+        news_articles: List[Dict[str, Any]] = None,
+        max_retries: int = 1,  # Reduced to 1 retry to fail faster
     ) -> Dict[str, Any]:
         """
         Generate price predictions using OpenRouter API
@@ -52,7 +58,7 @@ class OpenRouterService:
             raise ValueError("OpenRouter API key not configured")
 
         prompt = self._build_prompt(
-            symbol, current_price, price_trend, news_summary, news_sentiment
+            symbol, current_price, price_trend, news_summary, news_sentiment, news_articles
         )
 
         # Use semaphore to limit concurrent requests
@@ -93,55 +99,61 @@ class OpenRouterService:
                             f"{self.api_url}/chat/completions",
                             headers=headers,
                             json=payload,
-                            timeout=aiohttp.ClientTimeout(total=60),
+                            timeout=aiohttp.ClientTimeout(total=30),  # Reduced timeout to 30s to fail faster
                         ) as response:
                             if response.status == 429:
-                                # Rate limit error - check for Retry-After header
-                                error_text = await response.text()
+                                # Rate limit error - fail fast to avoid timeout
+                                try:
+                                    error_text = await response.text()
+                                except:
+                                    error_text = "Rate limit error"
                                 retry_after = response.headers.get("Retry-After")
                                 
-                                # Calculate wait time: use Retry-After if available, otherwise exponential backoff
-                                if retry_after:
+                                logger.warning(
+                                    f"OpenRouter API rate limit (429) for {symbol}, attempt {attempt + 1}/{max_retries + 1}"
+                                )
+                                
+                                # Only retry once if Retry-After is very short (< 5 seconds)
+                                if attempt < max_retries and retry_after:
                                     try:
                                         wait_time = float(retry_after)
-                                        logger.info(
-                                            f"OpenRouter API rate limit (429) for {symbol}, Retry-After header: {wait_time}s"
-                                        )
+                                        if wait_time < 5:  # Only retry if wait time is short
+                                            logger.info(
+                                                f"Retrying after {wait_time} seconds (short wait)"
+                                            )
+                                            await asyncio.sleep(wait_time)
+                                            continue
                                     except ValueError:
-                                        wait_time = (2 ** attempt) * 5  # Longer backoff: 5, 10, 20 seconds
-                                else:
-                                    # Longer exponential backoff: 5, 10, 20 seconds
-                                    wait_time = (2 ** attempt) * 5
-                                    logger.warning(
-                                        f"OpenRouter API rate limit (429) for {symbol}, attempt {attempt + 1}/{max_retries + 1}: {error_text[:200]}"
-                                    )
-
-                                if attempt < max_retries:
-                                    logger.info(
-                                        f"Retrying after {wait_time} seconds..."
-                                    )
-                                    await asyncio.sleep(wait_time)
-                                    continue  # Retry the request
-                                else:
-                                    # Max retries reached
-                                    logger.error(
-                                        f"OpenRouter API rate limit exceeded after {max_retries + 1} attempts for {symbol}"
-                                    )
-                                    raise Exception(
-                                        f"OpenRouter API rate limit exceeded after {max_retries + 1} attempts. "
-                                        "Please try again later or add your own API key to accumulate rate limits."
-                                    )
+                                        pass
+                                
+                                # Fail fast for rate limits
+                                raise RateLimitError(
+                                    f"OpenRouter API rate limit exceeded. "
+                                    "Please try again later or add your own API key to accumulate rate limits."
+                                )
                             elif response.status != 200:
-                                error_text = await response.text()
+                                try:
+                                    error_text = await response.text()
+                                except:
+                                    error_text = f"HTTP {response.status}"
                                 logger.error(
                                     f"OpenRouter API error {response.status}: {error_text}"
                                 )
                                 raise Exception(f"OpenRouter API error: {response.status}")
 
-                        data = await response.json()
-                        content = data.get("choices", [{}])[0].get("message", {}).get(
-                            "content", "{}"
-                        )
+                            # Read response data INSIDE the context manager
+                            try:
+                                data = await response.json()
+                            except aiohttp.ClientConnectionError as e:
+                                logger.error(f"Connection closed while reading response for {symbol}: {e}")
+                                raise Exception(f"Connection closed: {e}")
+                            except Exception as e:
+                                logger.error(f"Error reading response JSON for {symbol}: {e}")
+                                raise Exception(f"Failed to read response: {e}")
+                            
+                            content = data.get("choices", [{}])[0].get("message", {}).get(
+                                "content", "{}"
+                            )
 
                         # Parse JSON response
                         try:
@@ -157,17 +169,18 @@ class OpenRouterService:
                             # Fallback: try to extract predictions from text
                             return self._parse_fallback_predictions(content, current_price)
 
+                except RateLimitError:
+                    # Re-raise rate limit errors immediately (no retries)
+                    raise
                 except Exception as e:
-                    # If it's not a rate limit retry case, or we've exhausted retries, raise the error
-                    if "rate limit" not in str(e).lower() or attempt >= max_retries:
+                    # For other errors, retry once if we have attempts left
+                    if attempt < max_retries:
+                        logger.warning(f"Error on attempt {attempt + 1}, retrying: {e}")
+                        await asyncio.sleep(2)  # Short delay before retry
+                        continue
+                    else:
                         logger.error(f"Error calling OpenRouter API: {e}", exc_info=True)
                         raise
-                    # Otherwise, continue to retry (this shouldn't normally happen as we handle 429 above)
-                    logger.warning(f"Unexpected error on attempt {attempt + 1}, retrying: {e}")
-                    if attempt < max_retries:
-                        wait_time = (2 ** attempt) * 5  # Longer backoff: 5, 10, 20 seconds
-                        await asyncio.sleep(wait_time)
-                        continue
 
             # This should never be reached, but just in case
             raise Exception(f"Failed to generate predictions after {max_retries + 1} attempts")
@@ -179,6 +192,7 @@ class OpenRouterService:
         price_trend: Dict[str, Any],
         news_summary: str,
         news_sentiment: float,
+        news_articles: List[Dict[str, Any]] = None,
     ) -> str:
         """Build the prediction prompt for the AI model"""
         sentiment_label = (
@@ -193,6 +207,17 @@ class OpenRouterService:
             else "very negative"
         )
 
+        # Build news sources section with URLs
+        news_sources_text = ""
+        if news_articles and len(news_articles) > 0:
+            news_sources_text = "\n\nNews Sources (for reference):\n"
+            for idx, article in enumerate(news_articles[:5], 1):  # Top 5 most relevant
+                title = article.get("title", "Untitled")
+                url = article.get("url", "")
+                source = article.get("source", "Unknown")
+                if url:
+                    news_sources_text += f"[{idx}] {title} - {source}\n   URL: {url}\n"
+
         prompt = f"""Analyze the cryptocurrency {symbol} and provide price predictions.
 
 Current Data:
@@ -203,6 +228,7 @@ Current Data:
 
 Recent News Summary:
 {news_summary if news_summary else "No significant news found."}
+{news_sources_text}
 
 Provide predictions in JSON format with the following structure:
 {{
@@ -235,7 +261,8 @@ Important:
 - Confidence should reflect data quality and market volatility
 - Shorter-term predictions (24h, week) should have higher confidence
 - Consider news sentiment and price trends in your analysis
-- Provide concise reasoning for each prediction"""
+- Provide concise reasoning for each prediction
+- If referencing news, you can mention sources by number [1], [2], etc. from the News Sources list above"""
 
         return prompt
 

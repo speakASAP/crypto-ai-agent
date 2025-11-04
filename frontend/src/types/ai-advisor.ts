@@ -60,4 +60,3 @@ export interface PerformanceStats {
   by_model: Record<string, { count: number; avg_accuracy: number }>
   by_symbol: Record<string, { count: number; avg_accuracy: number }>
 }
-

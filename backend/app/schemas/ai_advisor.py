@@ -1,8 +1,10 @@
 from typing import Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AIPrediction(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     id: int
     symbol: str
     prediction_type: str
@@ -60,4 +62,3 @@ class PerformanceStats(BaseModel):
 class PredictionRequest(BaseModel):
     symbol: str
     force_regenerate: bool = False
-

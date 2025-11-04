@@ -182,12 +182,17 @@ if [ "$ACTION" = "restart" ]; then
         docker compose -p "$COMPOSE_PROJECT_NAME" restart
     fi
 else
+    # Rebuild without cache to ensure latest code changes are included
     if [ -n "$SERVICE" ]; then
-        print_status "Starting service: $SERVICE (docker compose up -d --build)"
-        docker compose -p "$COMPOSE_PROJECT_NAME" up -d --build "$SERVICE"
+        print_status "Rebuilding service: $SERVICE (without cache)"
+        docker compose -p "$COMPOSE_PROJECT_NAME" build --no-cache "$SERVICE"
+        print_status "Starting service: $SERVICE"
+        docker compose -p "$COMPOSE_PROJECT_NAME" up -d "$SERVICE"
     else
-        print_status "Starting all services (docker compose up -d --build)"
-        docker compose -p "$COMPOSE_PROJECT_NAME" up -d --build
+        print_status "Rebuilding all services (without cache)"
+        docker compose -p "$COMPOSE_PROJECT_NAME" build --no-cache
+        print_status "Starting all services"
+        docker compose -p "$COMPOSE_PROJECT_NAME" up -d
     fi
 fi
 
