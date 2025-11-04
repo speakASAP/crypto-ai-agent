@@ -390,6 +390,8 @@ class BinanceImportService:
                             'time': deposit.get('insertTime', 0),
                         })
                         logger.debug(f"Found deposit for {asset}: {deposit.get('amount')} at {deposit.get('insertTime')}")
+                if deposit_history:
+                    logger.info(f"✅ Found {len(deposit_history)} deposits for {asset}")
             except Exception as e:
                 logger.debug(f"Could not get deposit history for {asset}: {e}")
             
@@ -459,18 +461,28 @@ class BinanceImportService:
                         'total_investment_text': f"${scaled_cost + scaled_commission:.2f}"
                     })
             else:
+                # If no trading history, try to get earliest deposit date
+                purchase_date = datetime.utcnow().isoformat()
+                if deposit_history:
+                    deposit_history.sort(key=lambda x: x['time'])
+                    earliest_deposit = deposit_history[0]
+                    if earliest_deposit['time'] > 0:
+                        purchase_date = datetime.utcfromtimestamp(earliest_deposit['time'] / 1000).isoformat()
+                        logger.info(f"Using earliest deposit date for {asset}: {purchase_date}")
+                
                 # If no trading history, create a placeholder entry
                 # This might be from airdrops, staking rewards, or other sources
                 portfolio_items.append({
                     'symbol': asset,
                     'amount': total_amount,
                     'price_buy': 0.0,  # Unknown price
-                    'purchase_date': datetime.utcnow().isoformat(),
+                    'purchase_date': purchase_date,
                     'base_currency': 'USDT',
                     'source': 'Binance',
                     'commission': 0.0,
                     'total_investment_text': "Unknown"
                 })
+                logger.warning(f"⚠️ No buy trades found for {asset}, using placeholder with deposit date: {purchase_date}")
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Binance balances")
         logger.info(f"📊 Collected {sum(len(trades) for trades in all_trades_collected.values())} total trades for analysis")
