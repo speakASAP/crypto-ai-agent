@@ -218,6 +218,14 @@ class BitfinexImportService:
             logger.warning(f"⚠️ Error getting trade history for {symbol}: {e}")
             return []
 
+    def _normalize_pair(self, pair: str) -> str:
+        """Normalize trading pair format for matching (e.g., 'BTCUSD', 'tBTCUSD' -> 'tBTCUSD')"""
+        if not pair:
+            return pair
+        # Remove 't' prefix if present, then add it back for consistency
+        pair_clean = pair[1:] if pair.startswith('t') else pair
+        return f"t{pair_clean}"
+
     def _extract_quote_currency(self, pair: str) -> str:
         """Extract quote currency from trading pair (e.g., 'tBTCUSD' -> 'USD')"""
         # Remove 't' prefix if present
@@ -331,10 +339,13 @@ class BitfinexImportService:
                 logger.info(f"Processing {len(all_trades)} trades from all-trades endpoint")
                 for trade in all_trades:
                     if len(trade) >= 2:
-                        pair = trade[1] if isinstance(trade[1], str) else str(trade[1])
+                        # Normalize pair format for consistent matching
+                        pair_raw = trade[1] if isinstance(trade[1], str) else str(trade[1])
+                        pair = self._normalize_pair(pair_raw)
                         if pair not in all_trades_map:
                             all_trades_map[pair] = []
                         all_trades_map[pair].append(trade)
+                logger.info(f"✅ Built trades map with {len(all_trades_map)} unique pairs: {list(all_trades_map.keys())[:10]}")
         except Exception as e:
             logger.debug(f"Could not use all-trades endpoint, will fetch per-symbol: {e}")
         
@@ -360,54 +371,76 @@ class BitfinexImportService:
             
             # Process trades from all-trades endpoint if available
             for pair in trading_pairs:
+                # Try both exact match and normalized match
+                normalized_pair = self._normalize_pair(pair)
+                trades_to_process = []
+                
                 if pair in all_trades_map:
-                    logger.info(f"Found {len(all_trades_map[pair])} trades for {pair} from all-trades")
-                    for trade in all_trades_map[pair]:
-                        if len(trade) >= 6:
-                            exec_amount = trade[4]
-                            exec_price = trade[5]
+                    trades_to_process = all_trades_map[pair]
+                    logger.info(f"Found {len(trades_to_process)} trades for {pair} (exact match) from all-trades")
+                elif normalized_pair in all_trades_map:
+                    trades_to_process = all_trades_map[normalized_pair]
+                    logger.info(f"Found {len(trades_to_process)} trades for {pair} (normalized: {normalized_pair}) from all-trades")
+                
+                for trade in trades_to_process:
+                    # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker, fee, fee_currency]
+                    if len(trade) >= 6:
+                        try:
+                            exec_amount = float(trade[4]) if trade[4] is not None else 0
+                            exec_price = float(trade[5]) if trade[5] is not None else 0
+                            mts_create = int(trade[2]) if len(trade) > 2 and trade[2] is not None else 0
                             
                             # Positive amount typically means buy
-                            if exec_amount > 0:
-                                quote_currency = self._extract_quote_currency(pair)
-                                price_usd = self._convert_price_to_usd(exec_price, quote_currency, trade[2] if len(trade) > 2 else None)
+                            if exec_amount > 0 and exec_price > 0:
+                                quote_currency = self._extract_quote_currency(normalized_pair)
+                                price_usd = self._convert_price_to_usd(exec_price, quote_currency, mts_create)
                                 
                                 buy_trades.append({
-                                    'pair': pair,
+                                    'pair': normalized_pair,
                                     'amount': abs(exec_amount),
                                     'price': exec_price,
                                     'price_usd': price_usd,
                                     'quote_currency': quote_currency,
-                                    'time': trade[2] if len(trade) > 2 else 0
+                                    'time': mts_create
                                 })
+                                logger.debug(f"Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd}, time={mts_create}")
+                        except (ValueError, TypeError, IndexError) as e:
+                            logger.warning(f"Error parsing trade for {pair}: {e}, trade data: {trade}")
+                            continue
             
             # If no trades found from all-trades endpoint, try fetching per symbol
             if not buy_trades:
+                logger.info(f"No trades found in all-trades map, trying per-symbol fetch for {currency}")
                 for pair in trading_pairs:
                     try:
                         trades = await self.get_trades(pair, 250)
                         logger.info(f"Found {len(trades)} total trades for {pair}")
                         
                         for trade in trades:
-                            # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker]
-                            # We need to determine if this was a buy
+                            # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker, fee, fee_currency]
                             if len(trade) >= 6:
-                                exec_amount = trade[4]
-                                exec_price = trade[5]
-                                
-                                # Positive amount typically means buy
-                                if exec_amount > 0:
-                                    quote_currency = self._extract_quote_currency(pair)
-                                    price_usd = self._convert_price_to_usd(exec_price, quote_currency, trade[2] if len(trade) > 2 else None)
+                                try:
+                                    exec_amount = float(trade[4]) if trade[4] is not None else 0
+                                    exec_price = float(trade[5]) if trade[5] is not None else 0
+                                    mts_create = int(trade[2]) if len(trade) > 2 and trade[2] is not None else 0
                                     
-                                    buy_trades.append({
-                                        'pair': pair,
-                                        'amount': abs(exec_amount),
-                                        'price': exec_price,
-                                        'price_usd': price_usd,
-                                        'quote_currency': quote_currency,
-                                        'time': trade[2] if len(trade) > 2 else 0
-                                    })
+                                    # Positive amount typically means buy
+                                    if exec_amount > 0 and exec_price > 0:
+                                        quote_currency = self._extract_quote_currency(pair)
+                                        price_usd = self._convert_price_to_usd(exec_price, quote_currency, mts_create)
+                                        
+                                        buy_trades.append({
+                                            'pair': pair,
+                                            'amount': abs(exec_amount),
+                                            'price': exec_price,
+                                            'price_usd': price_usd,
+                                            'quote_currency': quote_currency,
+                                            'time': mts_create
+                                        })
+                                        logger.debug(f"Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd}, time={mts_create}")
+                                except (ValueError, TypeError, IndexError) as e:
+                                    logger.warning(f"Error parsing trade for {pair}: {e}, trade data: {trade}")
+                                    continue
                     except Exception as e:
                         logger.warning(f"Error processing trades for {pair}: {e}")
                         continue
@@ -416,7 +449,7 @@ class BitfinexImportService:
             
             if buy_trades:
                 # Sort trades by time to get earliest
-                buy_trades.sort(key=lambda x: x['time'])
+                buy_trades.sort(key=lambda x: x['time'] if x['time'] > 0 else float('inf'))
                 
                 # Calculate weighted average buy price in USD
                 total_qty = sum(trade['amount'] for trade in buy_trades)
@@ -430,7 +463,15 @@ class BitfinexImportService:
                     
                     # Get the EARLIEST trade date for purchase date
                     earliest_trade = buy_trades[0]
-                    trade_date = datetime.fromtimestamp(earliest_trade['time'] / 1000).isoformat() + "Z"
+                    if earliest_trade['time'] > 0:
+                        # Bitfinex timestamps are in milliseconds
+                        trade_date = datetime.fromtimestamp(earliest_trade['time'] / 1000).isoformat() + "Z"
+                    else:
+                        # Fallback to current date if timestamp is invalid
+                        trade_date = datetime.now().isoformat() + "Z"
+                        logger.warning(f"Invalid timestamp for {currency}, using current date")
+                    
+                    logger.info(f"✅ Calculated portfolio item for {currency}: amount={scaled_amount}, price_buy={avg_buy_price_usd:.2f}, purchase_date={trade_date}")
                     
                     portfolio_items.append({
                         'symbol': currency,
@@ -442,8 +483,21 @@ class BitfinexImportService:
                         'commission': 0.0,
                         'total_investment_text': f"${scaled_amount * avg_buy_price_usd:.2f}"
                     })
+                else:
+                    logger.warning(f"⚠️ Total quantity is 0 for {currency}, cannot calculate average price")
+                    portfolio_items.append({
+                        'symbol': currency,
+                        'amount': total_amount,
+                        'price_buy': 0.0,
+                        'purchase_date': datetime.now().isoformat() + "Z",
+                        'base_currency': 'USD',
+                        'source': 'Bitfinex',
+                        'commission': 0.0,
+                        'total_investment_text': "Unknown"
+                    })
             else:
                 # If no trading history, create a placeholder entry
+                logger.warning(f"⚠️ No buy trades found for {currency}, creating placeholder entry with price_buy=0.0")
                 portfolio_items.append({
                     'symbol': currency,
                     'amount': total_amount,
