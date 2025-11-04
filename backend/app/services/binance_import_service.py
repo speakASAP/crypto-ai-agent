@@ -547,6 +547,11 @@ class BinanceImportService:
         portfolio_items = []
         all_trades_collected = {}
         
+        # Calculate time range: last 2 years
+        end_time = int(time.time() * 1000)  # Current time in milliseconds
+        start_time = end_time - (2 * 365 * 24 * 60 * 60 * 1000)  # 2 years ago
+        logger.info(f"📅 Fetching historical data from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')}")
+        
         # Get fiat purchase history (card purchases) - these count as buys
         fiat_purchases = {}
         try:
@@ -587,11 +592,11 @@ class BinanceImportService:
             ]
             buy_trades = []
             
-            logger.info(f"🔍 Looking for trades for {asset} in pairs: {trading_pairs}")
+            logger.info(f"🔍 Looking for trades for {asset} in pairs: {trading_pairs} (last 2 years)")
             
-            # ALSO try to get ALL orders (filled orders show buy prices)
+            # ALSO try to get ALL orders (filled orders show buy prices) - historical data
             try:
-                all_orders = await self.get_all_orders(f"{asset}USDT")
+                all_orders = await self.get_all_orders(f"{asset}USDT", limit=1000, start_time=start_time, end_time=end_time)
                 for order in all_orders:
                     # Check if it's a filled BUY order
                     if order.get('status') == 'FILLED' and order.get('side') == 'BUY':
@@ -609,18 +614,24 @@ class BinanceImportService:
             except Exception as e:
                 logger.debug(f"Could not get all orders for {asset}: {e}")
             
-            # Get deposit history for this asset to find earliest arrival date
+            # Get deposit history for this asset to find earliest arrival date (for buy date when no trades)
             deposit_history_for_asset = []
+            earliest_deposit_time = None
             try:
                 deposits = await self.get_deposit_history(asset)
                 for deposit in deposits:
                     if deposit.get('status') == 1:  # 1 = Success
+                        deposit_time = deposit.get('insertTime', 0)
                         deposit_history_for_asset.append({
                             'amount': float(deposit.get('amount', 0)),
-                            'time': deposit.get('insertTime', 0),
+                            'time': deposit_time,
                         })
+                        # Track earliest deposit
+                        if deposit_time > 0:
+                            if earliest_deposit_time is None or deposit_time < earliest_deposit_time:
+                                earliest_deposit_time = deposit_time
                 if deposit_history_for_asset:
-                    logger.info(f"✅ Found {len(deposit_history_for_asset)} deposits for {asset}")
+                    logger.info(f"✅ Found {len(deposit_history_for_asset)} deposits for {asset}, earliest: {datetime.fromtimestamp(earliest_deposit_time/1000).isoformat() if earliest_deposit_time else 'N/A'}")
             except Exception as e:
                 logger.debug(f"Could not get deposit history for {asset}: {e}")
             
@@ -694,11 +705,12 @@ class BinanceImportService:
                     scaled_cost = (total_cost / total_qty) * total_amount
                     scaled_commission = (total_commission / total_qty) * total_amount
                     
-                    # Get the EARLIEST trade date for purchase date
+                    # Get the EARLIEST trade date for purchase date (Buy Date)
                     earliest_trade = buy_trades[0]
                     # Convert to UTC datetime and format for PostgreSQL (ISO format without Z)
                     trade_dt = datetime.utcfromtimestamp(earliest_trade['time'] / 1000)
                     trade_date = trade_dt.isoformat()
+                    logger.info(f"📅 Buy date for {asset}: {trade_date} (from earliest buy trade)")
                     
                     # Convert to USD (USDT ≈ USD)
                     # Ensure currency service rates are loaded
@@ -717,20 +729,28 @@ class BinanceImportService:
                         'total_investment_text': f"${scaled_cost + scaled_commission:.2f}"
                     })
             else:
-                # If no trading history, create a placeholder entry
-                # This might be from airdrops, staking rewards, or other sources
-                purchase_date = datetime.utcnow().isoformat()
+                # If no trading history, try to use deposit history date as buy date
+                # This might be from airdrops, staking rewards, transfers, or other sources
+                if earliest_deposit_time and earliest_deposit_time > 0:
+                    # Use earliest deposit date as buy date
+                    deposit_dt = datetime.utcfromtimestamp(earliest_deposit_time / 1000)
+                    purchase_date = deposit_dt.isoformat()
+                    logger.info(f"📅 Buy date for {asset}: {purchase_date} (from earliest deposit - no trades found)")
+                else:
+                    # Fallback to current date if no deposits either
+                    purchase_date = datetime.utcnow().isoformat()
+                    logger.warning(f"⚠️ No buy trades or deposits found for {asset}, using current date: {purchase_date}")
+                
                 portfolio_items.append({
                     'symbol': asset,
                     'amount': total_amount,
                     'price_buy': 0.0,  # Unknown price
-                    'purchase_date': purchase_date,
+                    'purchase_date': purchase_date,  # Buy date from deposit or current date
                     'base_currency': 'USDT',
                     'source': 'Binance',
                     'commission': 0.0,
                     'total_investment_text': "Unknown"
                 })
-                logger.warning(f"⚠️ No buy trades found for {asset}, using placeholder with current date: {purchase_date}")
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Binance balances")
         logger.info(f"📊 Collected {sum(len(trades) for trades in all_trades_collected.values())} total trades for analysis")
