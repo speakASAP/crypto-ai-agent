@@ -109,7 +109,7 @@ async def add_tracked_symbol(payload: TrackedSymbolCreate, current_user: dict = 
 
 @router.get("/api/symbols/prices")
 async def get_symbol_prices(symbols: str = None, current_user: dict = Depends(get_current_active_user)):
-    """Get prices for symbols from centralized crypto_prices table"""
+    """Get prices for symbols from centralized crypto_prices table, fetching from external APIs if missing"""
     try:
         if not symbols:
             return []
@@ -120,6 +120,55 @@ async def get_symbol_prices(symbols: str = None, current_user: dict = Depends(ge
         # Read prices from centralized crypto_prices table
         from ..services.price_service import price_service
         prices_from_db = price_service.get_prices_from_db(symbol_list)
+        
+        # Identify symbols that are missing from the database
+        missing_symbols = [s for s in symbol_list if s not in prices_from_db]
+        
+        # Fetch missing prices from external APIs
+        if missing_symbols:
+            logger.info(f"Fetching prices for {len(missing_symbols)} missing symbols: {missing_symbols}")
+            try:
+                # Filter out fiat currencies - they're handled separately
+                fiat_currencies = {'USDT', 'USD', 'EUR', 'GBP', 'JPY', 'CZK', 'USDC', 'BUSD', 'DAI', 'TUSD'}
+                crypto_missing = [s for s in missing_symbols if s not in fiat_currencies]
+                
+                if crypto_missing:
+                    # Fetch prices from external APIs
+                    fetched_prices = await multi_exchange_price_service.get_current_prices(crypto_missing)
+                    
+                    # Store fetched prices in database for future use
+                    if fetched_prices:
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        
+                        for symbol, price_usd in fetched_prices.items():
+                            try:
+                                # UPSERT: Insert or update price in crypto_prices table
+                                upsert_sql = _normalize_placeholders(
+                                    """
+                                    INSERT INTO crypto_prices (symbol, price_usd, updated_at, created_at)
+                                    VALUES (%s, %s, NOW(), COALESCE((SELECT created_at FROM crypto_prices WHERE symbol = %s), NOW()))
+                                    ON CONFLICT (symbol) DO UPDATE SET
+                                        price_usd = EXCLUDED.price_usd,
+                                        updated_at = NOW()
+                                    """
+                                )
+                                cursor.execute(upsert_sql, (symbol, price_usd, symbol))
+                                # Add to prices_from_db so it's included in the result
+                                prices_from_db[symbol] = price_usd
+                                logger.debug(f"Stored fetched price for {symbol}: {price_usd}")
+                            except Exception as e:
+                                logger.error(f"Error storing price for {symbol}: {e}")
+                                continue
+                        
+                        conn.commit()
+                        conn.close()
+                        logger.info(f"Successfully fetched and stored prices for {len(fetched_prices)} symbols")
+                else:
+                    logger.debug(f"All missing symbols are fiat currencies, skipping external API fetch")
+            except Exception as e:
+                logger.error(f"Error fetching missing prices from external APIs: {e}", exc_info=True)
+                # Continue with what we have from database
         
         # Get timestamps for all symbols in one query
         conn = get_db_connection()
@@ -143,14 +192,15 @@ async def get_symbol_prices(symbols: str = None, current_user: dict = Depends(ge
                     timestamp_map[symbol] = str(updated_at)
         
         result = []
+        current_timestamp = datetime.now(timezone.utc).isoformat()
         for symbol in symbol_list:
             if symbol in prices_from_db:
                 price = prices_from_db[symbol]
-                timestamp = timestamp_map.get(symbol, datetime.now(timezone.utc).isoformat())
+                timestamp = timestamp_map.get(symbol, current_timestamp)
                 result.append({"symbol": symbol, "price": price, "timestamp": timestamp})
             else:
-                # Price not found in database - return with null price
-                logger.debug(f"Price not found in database for {symbol}")
+                # Price still not found after fetching - return with null price
+                logger.warning(f"Price not found for {symbol} even after external API fetch")
                 result.append({"symbol": symbol, "price": None, "timestamp": None})
         
         return result

@@ -47,7 +47,7 @@ export default function Home() {
   const router = useRouter()
   const { items, summary, selectedCurrency, loading, fetchPortfolio, fetchSummary, setCurrency, createItem, updateItem, deleteItem, viewMode, sort, filters, setViewMode, setSort, setFilters, loadPreferencesFromUser } = usePortfolioStore()
   const { alerts, fetchAlerts, createAlert, updateAlert, deleteAlert } = useAlertsStore()
-  const { trackedSymbols, fetchTrackedSymbols } = useSymbolsStore()
+  const { trackedSymbols, fetchTrackedSymbols, symbolPrices } = useSymbolsStore()
   const { user, logout, isHydrated, isAuthenticated } = useAuthStore()
   const { isConnected, subscribeToPrices, subscribeToAlerts, setExchangeRates: setWebSocketExchangeRates } = useWebSocket()
   
@@ -156,21 +156,22 @@ export default function Home() {
     return usdPrice * exchangeRates[targetCurrency]
   }
 
-  // Function to fetch current prices for alert symbols
+  // Function to get current prices for alert symbols - reuses portfolio and WebSocket data
   const loadAlertCurrentPrices = async () => {
     if (alerts.length === 0) return
     
     setLoadingAlertPrices(true)
     try {
       const uniqueSymbols = Array.from(new Set(alerts.map(alert => alert.symbol)))
-      const validSymbols = filterValidSymbols(uniqueSymbols)
       const prices: Record<string, number> = {}
+      const symbolsToFetch: string[] = []
       
-      // Handle USDT and other fiat currencies directly
+      // First, try to get prices from existing data sources
       for (const symbol of uniqueSymbols) {
         const symbolUpper = symbol.toUpperCase()
+        
+        // Handle fiat currencies directly
         if (['USDT', 'USD', 'EUR', 'GBP', 'JPY', 'CZK', 'USDC', 'BUSD', 'DAI', 'TUSD'].includes(symbolUpper)) {
-          // For fiat currencies, use exchange rate conversion
           if (symbolUpper === 'USDT' || symbolUpper === 'USD') {
             prices[symbol] = 1.0
           } else {
@@ -178,21 +179,48 @@ export default function Home() {
           }
           continue
         }
+        
+        // Try to get price from portfolio items first (already in selectedCurrency)
+        const portfolioItem = items.find(item => item.symbol.toUpperCase() === symbolUpper)
+        if (portfolioItem && portfolioItem.current_price && portfolioItem.current_price > 0) {
+          prices[symbol] = portfolioItem.current_price
+          continue
+        }
+        
+        // Try to get price from WebSocket symbolPrices (USD prices, need conversion)
+        const symbolPriceData = symbolPrices[symbolUpper]
+        if (symbolPriceData && symbolPriceData.price && symbolPriceData.price > 0) {
+          const convertedPrice = convertToCurrency(symbolPriceData.price, selectedCurrency)
+          prices[symbol] = convertedPrice
+          continue
+        }
+        
+        // If not found in portfolio or WebSocket cache, mark for API fetch
+        symbolsToFetch.push(symbol)
       }
       
-      // Use batch endpoint to fetch all prices in one request
-      if (validSymbols.length > 0) {
-        try {
-          const batchPrices = await apiClient.getSymbolPrices(validSymbols)
-          
-          // Convert batch prices to the format we need
-          for (const priceData of batchPrices) {
-            const usdPrice = priceData.price
-            const convertedPrice = convertToCurrency(usdPrice, selectedCurrency)
-            prices[priceData.symbol] = convertedPrice
+      // Only fetch prices from API for symbols not found in portfolio or WebSocket
+      if (symbolsToFetch.length > 0) {
+        const validSymbolsToFetch = filterValidSymbols(symbolsToFetch)
+        
+        if (validSymbolsToFetch.length > 0) {
+          try {
+            const batchPrices = await apiClient.getSymbolPrices(validSymbolsToFetch)
+            
+            // Convert batch prices to the format we need
+            for (const priceData of batchPrices) {
+              const usdPrice = priceData.price
+              // Only add price if it's not null/undefined
+              if (usdPrice !== null && usdPrice !== undefined && !isNaN(usdPrice)) {
+                const convertedPrice = convertToCurrency(usdPrice, selectedCurrency)
+                prices[priceData.symbol] = convertedPrice
+              } else {
+                logger.warn(`Price not available for ${priceData.symbol}`)
+              }
+            }
+          } catch (error) {
+            logger.error('Failed to fetch batch prices:', error)
           }
-        } catch (error) {
-          logger.error('Failed to fetch batch prices:', error)
         }
       }
       
@@ -294,12 +322,12 @@ export default function Home() {
     return () => clearTimeout(timer)
   }, [filters.symbol])
 
-  // Load alert current prices when alerts or exchange rates change
+  // Load alert current prices when alerts, exchange rates, portfolio items, or WebSocket prices change
   useEffect(() => {
     if (alerts.length > 0 && Object.keys(exchangeRates).length > 0) {
       loadAlertCurrentPrices()
     }
-  }, [alerts, exchangeRates, selectedCurrency])
+  }, [alerts, exchangeRates, selectedCurrency, items, symbolPrices])
 
   // Periodic refresh of timestamps and alerts
   useEffect(() => {

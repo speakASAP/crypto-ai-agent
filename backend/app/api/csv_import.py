@@ -471,6 +471,17 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                 logger.error(f"⚠️ Failed to fetch prices for imported symbols: {e}", exc_info=True)
                 # Don't fail the import if price fetch fails
 
+        # Generate AI predictions for imported symbols (non-blocking)
+        # The helper function will check if predictions already exist and skip those symbols
+        if imported_symbols:
+            try:
+                # Import the helper function from exchange_imports (same directory)
+                from .exchange_imports import generate_predictions_for_symbols
+                await generate_predictions_for_symbols(imported_symbols)
+            except Exception as e:
+                logger.error(f"⚠️ Failed to generate predictions for CSV imported symbols: {e}", exc_info=True)
+                # Don't fail the import if prediction generation fails
+
         total_processed = imported_count + updated_count + deleted_count
         return {
             'success': True,

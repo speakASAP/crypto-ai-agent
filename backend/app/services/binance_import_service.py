@@ -386,20 +386,42 @@ class BinanceImportService:
             fiat_orders = await self.get_fiat_purchase_history()
             logger.info(f"📦 Found {len(fiat_orders)} fiat purchase orders")
             for order in fiat_orders:
+                # Log the order structure first to see what fields exist
+                logger.info(f"🔍 Fiat order structure - keys: {list(order.keys())[:15]}")
+                logger.debug(f"🔍 Fiat order full data: {json.dumps(order, indent=2)}")
+                
                 # Binance fiat order API returns different field names - try multiple variations
                 crypto = (
                     order.get('cryptoType', '') or 
                     order.get('cryptoCurrency', '') or 
                     order.get('crypto', '') or
-                    order.get('asset', '')
-                ).upper()
+                    order.get('asset', '') or
+                    order.get('coin', '') or
+                    order.get('obtainAmount', '')  # Sometimes crypto type is in the amount field name
+                )
                 
-                if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD']:
+                # If still empty, try to extract from obtainAmount field (sometimes it's the crypto name)
+                if not crypto:
+                    # Check if there's an obtainAmount field that might indicate the crypto
+                    obtain_amount_str = str(order.get('obtainAmount', ''))
+                    # Try to find crypto name in other fields
+                    for key, value in order.items():
+                        if 'crypto' in key.lower() or 'coin' in key.lower() or 'asset' in key.lower():
+                            if value and isinstance(value, str) and len(value) <= 10:
+                                crypto = value.upper()
+                                break
+                
+                crypto = crypto.upper() if crypto else ''
+                
+                logger.info(f"🔍 Extracted crypto symbol: '{crypto}' from fiat order")
+                
+                if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD', '']:
                     if crypto not in fiat_purchases:
                         fiat_purchases[crypto] = []
                     fiat_purchases[crypto].append(order)
                     logger.info(f"✅ Fiat purchase found: {crypto} - order keys: {list(order.keys())[:10]}")
-                    logger.debug(f"Fiat purchase details: {order}")
+                else:
+                    logger.warning(f"⚠️ Fiat order skipped - crypto symbol empty or stablecoin: '{crypto}', order: {list(order.keys())[:5]}")
         except Exception as e:
             logger.warning(f"Could not get fiat purchase history: {e}")
         
