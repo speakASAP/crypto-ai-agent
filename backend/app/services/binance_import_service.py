@@ -465,17 +465,9 @@ class BinanceImportService:
                         'total_investment_text': f"${scaled_cost + scaled_commission:.2f}"
                     })
             else:
-                # If no trading history, try to get earliest deposit date
-                purchase_date = datetime.utcnow().isoformat()
-                if deposit_history:
-                    deposit_history.sort(key=lambda x: x['time'])
-                    earliest_deposit = deposit_history[0]
-                    if earliest_deposit['time'] > 0:
-                        purchase_date = datetime.utcfromtimestamp(earliest_deposit['time'] / 1000).isoformat()
-                        logger.info(f"Using earliest deposit date for {asset}: {purchase_date}")
-                
                 # If no trading history, create a placeholder entry
                 # This might be from airdrops, staking rewards, or other sources
+                purchase_date = datetime.utcnow().isoformat()
                 portfolio_items.append({
                     'symbol': asset,
                     'amount': total_amount,
@@ -486,7 +478,7 @@ class BinanceImportService:
                     'commission': 0.0,
                     'total_investment_text': "Unknown"
                 })
-                logger.warning(f"⚠️ No buy trades found for {asset}, using placeholder with deposit date: {purchase_date}")
+                logger.warning(f"⚠️ No buy trades found for {asset}, using placeholder with current date: {purchase_date}")
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Binance balances")
         logger.info(f"📊 Collected {sum(len(trades) for trades in all_trades_collected.values())} total trades for analysis")
