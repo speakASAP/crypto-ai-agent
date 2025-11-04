@@ -1,25 +1,17 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, status, File, UploadFile, Form
+from __future__ import annotations
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Set, Any
-from pydantic import BaseModel, EmailStr, validator
-import logging
-import json
-import os
+from typing import List, Optional, Dict
 import asyncio
-import aiohttp
-import ssl
-import psycopg
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from .services.currency_service import currency_service
 from .services.price_service import PriceService
 from .services.multi_exchange_price_service import multi_exchange_price_service
-from .services.csv_import_service import CSVImportService
-from .dependencies.auth import get_current_active_user, get_db_connection
-from .utils.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, generate_reset_token
+from .dependencies.auth import get_db_connection
 from .core.config import settings
 try:
     from utils.logger import get_logger  # root-level utils when available
@@ -58,11 +50,26 @@ async def fetch_prices_for_symbols(symbols: List[str]):
             logger.warning("No prices fetched, skipping update")
             return
         
-        # Update database with new prices
+        # Update centralized crypto_prices table with UPSERT logic
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        for symbol, price in prices.items():
+        # Store prices in crypto_prices table (centralized storage)
+        for symbol, price_usd in prices.items():
+            # UPSERT: Insert or update price in crypto_prices table
+            upsert_sql = _normalize_placeholders(
+                """
+                INSERT INTO crypto_prices (symbol, price_usd, updated_at, created_at)
+                VALUES (%s, %s, NOW(), COALESCE((SELECT created_at FROM crypto_prices WHERE symbol = %s), NOW()))
+                ON CONFLICT (symbol) DO UPDATE SET
+                    price_usd = EXCLUDED.price_usd,
+                    updated_at = NOW()
+                """
+            )
+            cursor.execute(upsert_sql, (symbol, price_usd, symbol))
+        
+        # Now update portfolio_items from centralized prices
+        for symbol, price_usd in prices.items():
             # Get the base currency for this symbol from the database
             sql = _normalize_placeholders("SELECT DISTINCT base_currency FROM portfolio_items WHERE symbol = ?")
             cursor.execute(sql, (symbol,))
@@ -159,68 +166,92 @@ async def fetch_prices_for_symbols(symbols: List[str]):
             conn.close()
 
 async def background_price_fetcher():
-    """Background task to periodically fetch prices"""
+    """Background task to periodically fetch prices for all unique symbols in database"""
     while True:
         try:
-            # Get all symbols that have subscribers
-            all_symbols = list(manager.price_subscribers.keys())
+            # Query all unique symbols from portfolio_items table
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            sql = _normalize_placeholders(
+                "SELECT DISTINCT symbol FROM portfolio_items WHERE symbol IS NOT NULL"
+            )
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            all_symbols = [row[0] for row in rows if row[0]]
+            
             if all_symbols:
                 await fetch_prices_for_symbols(all_symbols)
-                logger.info(f"Fetched prices for {len(all_symbols)} symbols")
+                logger.info(f"📊 Fetched prices for {len(all_symbols)} unique symbols from database")
             else:
-                logger.debug("No symbols to fetch prices for")
+                logger.debug("No symbols found in database to fetch prices for")
         except Exception as e:
-            logger.error(f"Error in background price fetcher: {e}")
+            logger.error(f"Error in background price fetcher: {e}", exc_info=True)
         
-        # Wait 120 seconds (2 minutes) before next fetch
-        await asyncio.sleep(120)
+        # Wait configured interval (default: 300 seconds = 5 minutes) before next fetch
+        await asyncio.sleep(settings.price_update_interval_seconds)
 
 async def background_ai_advisor_updater():
-    """Background task to periodically generate/update AI predictions - only for BTC (1 crypto per day)"""
+    """Background task to periodically generate/update AI predictions for all unique symbols (once per day)"""
     from .services.ai_advisor_service import ai_advisor_service
     from .utils.db import get_db_connection, normalize_placeholders
-
-    # Only generate predictions for BTC to avoid rate limits
-    TARGET_SYMBOL = "BTC"
 
     while True:
         try:
             # Wait for the interval before starting (daily: 24 hours)
             await asyncio.sleep(settings.ai_prediction_interval_hours * 3600)
 
-            logger.info(f"🔄 Starting AI advisor prediction update cycle for {TARGET_SYMBOL}")
+            logger.info("🔄 Starting AI advisor prediction update cycle for all symbols")
 
-            # Get a user ID to use for generating predictions
+            # Query all unique symbols from portfolio_items table
             conn = get_db_connection()
             cursor = conn.cursor()
-
-            # Get first available user ID
-            sql = normalize_placeholders("SELECT id FROM users ORDER BY id LIMIT 1")
+            sql = normalize_placeholders(
+                "SELECT DISTINCT symbol FROM portfolio_items WHERE symbol IS NOT NULL"
+            )
             cursor.execute(sql)
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
             conn.close()
 
-            if not row:
-                logger.warning("No users found, skipping prediction generation")
+            all_symbols = [row[0] for row in rows if row[0]]
+
+            if not all_symbols:
+                logger.warning("No symbols found in database, skipping prediction generation")
                 continue
 
-            user_id = row[0]
+            logger.info(f"📊 Found {len(all_symbols)} unique symbols to generate predictions for")
 
-            try:
-                # Generate predictions only for BTC
-                await ai_advisor_service.generate_predictions(
-                    user_id=user_id,
-                    symbol=TARGET_SYMBOL,
-                    force_regenerate=False,  # Only generate if needed
-                )
-                logger.info(f"✅ Updated predictions for {TARGET_SYMBOL}")
-            except Exception as e:
-                logger.error(
-                    f"Error generating predictions for {TARGET_SYMBOL}: {e}",
-                    exc_info=True,
-                )
+            # Process symbols sequentially with delays to avoid rate limits
+            processed_count = 0
+            for symbol in all_symbols:
+                try:
+                    # Generate predictions with user_id=None for global predictions
+                    await ai_advisor_service.generate_predictions(
+                        user_id=None,  # None = global predictions (stored with user_id = NULL)
+                        symbol=symbol,
+                        force_regenerate=False,  # Only generate if needed (check age)
+                    )
+                    processed_count += 1
+                    logger.info(f"✅ Updated predictions for {symbol} ({processed_count}/{len(all_symbols)})")
+                    
+                    # Add delay between predictions to avoid rate limits
+                    # Process one symbol per hour to spread throughout the day
+                    if processed_count < len(all_symbols):
+                        delay_seconds = (settings.ai_prediction_interval_hours * 3600) / len(all_symbols)
+                        delay_seconds = min(delay_seconds, 3600)  # Max 1 hour delay
+                        logger.debug(f"⏳ Waiting {delay_seconds:.0f} seconds before next prediction...")
+                        await asyncio.sleep(delay_seconds)
+                        
+                except Exception as e:
+                    logger.error(
+                        f"Error generating predictions for {symbol}: {e}",
+                        exc_info=True,
+                    )
+                    # Continue with next symbol even if one fails
+                    continue
 
-            logger.info(f"✅ AI advisor prediction update cycle completed for {TARGET_SYMBOL}")
+            logger.info(f"✅ AI advisor prediction update cycle completed: {processed_count}/{len(all_symbols)} symbols processed")
 
         except Exception as e:
             logger.error(f"Error in AI advisor updater: {e}", exc_info=True)
@@ -432,7 +463,7 @@ async def trigger_alert(
     trigger_price: float,
     trigger_time: datetime,
     was_missed: bool = False,
-    conn: Optional[psycopg.Connection] = None
+    conn: Optional["psycopg.Connection"] = None  # type: ignore[name-defined]
 ):
     """Trigger an alert and send notifications"""
     should_close = False
@@ -1086,11 +1117,11 @@ def init_postgres_database():
         )
     ''')
         
-        # Create ai_predictions table
+        # Create ai_predictions table (user_id nullable for global predictions)
         cur.execute('''
         CREATE TABLE IF NOT EXISTS ai_predictions (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id INTEGER REFERENCES users(id),
             symbol TEXT NOT NULL,
             prediction_type TEXT NOT NULL,
             predicted_price REAL NOT NULL,
@@ -1102,6 +1133,11 @@ def init_postgres_database():
             is_verified BOOLEAN DEFAULT FALSE,
             accuracy_percent REAL
         )
+    ''')
+        
+        # Create index on ai_predictions for faster lookups
+        cur.execute('''
+        CREATE INDEX IF NOT EXISTS idx_ai_predictions_symbol_created ON ai_predictions(symbol, created_at DESC)
     ''')
         
         # Create news_analysis table
@@ -1128,9 +1164,24 @@ def init_postgres_database():
         )
     ''')
         
+        # Create crypto_prices table for centralized price storage
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS crypto_prices (
+            symbol TEXT PRIMARY KEY,
+            price_usd REAL NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+        
+        # Create index on crypto_prices for faster lookups
+        cur.execute('''
+        CREATE INDEX IF NOT EXISTS idx_crypto_prices_updated_at ON crypto_prices(updated_at)
+    ''')
+        
         conn.commit()
         conn.close()
-        logger.info("✅ PostgreSQL schema initialized successfully with AI advisor tables")
+        logger.info("✅ PostgreSQL schema initialized successfully with AI advisor tables and crypto_prices table")
     except Exception as e:
         logger.error(f"❌ Failed to initialize PostgreSQL database after retries: {str(e)}")
         logger.warning("⚠️ Database initialization failed, but continuing startup. Database might be ready later.")
@@ -1218,7 +1269,7 @@ def ensure_ai_advisor_tables():
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS ai_predictions (
                     id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    user_id INTEGER REFERENCES users(id),
                     symbol TEXT NOT NULL,
                     prediction_type TEXT NOT NULL,
                     predicted_price REAL NOT NULL,
@@ -1231,7 +1282,55 @@ def ensure_ai_advisor_tables():
                     accuracy_percent REAL
                 )
             ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_ai_predictions_symbol_created ON ai_predictions(symbol, created_at DESC)
+            ''')
             tables_created.append("ai_predictions")
+        else:
+            # Check if user_id column allows NULL (migration for existing tables)
+            cursor.execute("""
+                SELECT is_nullable
+                FROM information_schema.columns
+                WHERE table_name = 'ai_predictions' AND column_name = 'user_id'
+            """)
+            result = cursor.fetchone()
+            if result and result[0] == 'NO':
+                logger.info("📋 Migrating ai_predictions.user_id to allow NULL for global predictions...")
+                try:
+                    # Drop foreign key constraint if it exists
+                    cursor.execute("""
+                        SELECT constraint_name
+                        FROM information_schema.table_constraints
+                        WHERE table_name = 'ai_predictions'
+                        AND constraint_type = 'FOREIGN KEY'
+                        AND constraint_name LIKE '%user_id%'
+                    """)
+                    fk_result = cursor.fetchone()
+                    if fk_result:
+                        fk_name = fk_result[0]
+                        cursor.execute(f"ALTER TABLE ai_predictions DROP CONSTRAINT {fk_name}")
+                        logger.debug(f"Dropped foreign key constraint: {fk_name}")
+                    
+                    # Make user_id nullable
+                    cursor.execute("ALTER TABLE ai_predictions ALTER COLUMN user_id DROP NOT NULL")
+                    logger.info("✅ Successfully made ai_predictions.user_id nullable")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not migrate ai_predictions.user_id: {e}")
+            
+            # Ensure index exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM pg_indexes
+                    WHERE tablename = 'ai_predictions'
+                    AND indexname = 'idx_ai_predictions_symbol_created'
+                )
+            """)
+            index_exists = cursor.fetchone()[0]
+            if not index_exists:
+                cursor.execute('''
+                    CREATE INDEX idx_ai_predictions_symbol_created ON ai_predictions(symbol, created_at DESC)
+                ''')
+                logger.info("✅ Created index on ai_predictions")
         
         # Check and create price_history_cache table
         cursor.execute("""
@@ -1253,6 +1352,45 @@ def ensure_ai_advisor_tables():
             ''')
             tables_created.append("price_history_cache")
         
+        # Check and create crypto_prices table
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'crypto_prices'
+            )
+        """)
+        crypto_prices_exists = cursor.fetchone()[0]
+        
+        if not crypto_prices_exists:
+            logger.info("📋 Creating missing crypto_prices table...")
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS crypto_prices (
+                    symbol TEXT PRIMARY KEY,
+                    price_usd REAL NOT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_crypto_prices_updated_at ON crypto_prices(updated_at)
+            ''')
+            tables_created.append("crypto_prices")
+        else:
+            # Ensure index exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM pg_indexes
+                    WHERE tablename = 'crypto_prices'
+                    AND indexname = 'idx_crypto_prices_updated_at'
+                )
+            """)
+            index_exists = cursor.fetchone()[0]
+            if not index_exists:
+                cursor.execute('''
+                    CREATE INDEX idx_crypto_prices_updated_at ON crypto_prices(updated_at)
+                ''')
+                logger.info("✅ Created index on crypto_prices")
+        
         conn.commit()
         conn.close()
         
@@ -1264,6 +1402,68 @@ def ensure_ai_advisor_tables():
     except Exception as e:
         logger.error(f"❌ Error ensuring AI advisor tables: {e}", exc_info=True)
         # Don't raise - allow service to continue even if table creation fails
+
+async def populate_initial_prices():
+    """Populate crypto_prices table with initial prices from existing portfolio_items or external API"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if crypto_prices table is empty
+        cursor.execute("SELECT COUNT(*) FROM crypto_prices")
+        count = cursor.fetchone()[0]
+        
+        if count > 0:
+            logger.debug(f"crypto_prices table already has {count} entries, skipping initial population")
+            conn.close()
+            return
+        
+        # Get all unique symbols from portfolio_items
+        sql = _normalize_placeholders(
+            "SELECT DISTINCT symbol FROM portfolio_items WHERE symbol IS NOT NULL"
+        )
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        symbols = [row[0] for row in rows if row[0]]
+        conn.close()
+        
+        if not symbols:
+            logger.debug("No symbols found in portfolio_items, skipping initial price population")
+            return
+        
+        logger.info(f"📊 Populating crypto_prices table with initial prices for {len(symbols)} symbols")
+        
+        # Fetch prices from external API
+        prices = await multi_exchange_price_service.get_current_prices(symbols)
+        
+        if not prices:
+            logger.warning("No prices fetched for initial population")
+            return
+        
+        # Store prices in crypto_prices table
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for symbol, price_usd in prices.items():
+            upsert_sql = _normalize_placeholders(
+                """
+                INSERT INTO crypto_prices (symbol, price_usd, updated_at, created_at)
+                VALUES (%s, %s, NOW(), NOW())
+                ON CONFLICT (symbol) DO UPDATE SET
+                    price_usd = EXCLUDED.price_usd,
+                    updated_at = NOW()
+                """
+            )
+            cursor.execute(upsert_sql, (symbol, price_usd))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Populated crypto_prices table with {len(prices)} initial prices")
+        
+    except Exception as e:
+        logger.error(f"❌ Error populating initial prices: {e}", exc_info=True)
+        # Don't raise - allow service to continue even if population fails
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1307,6 +1507,10 @@ async def lifespan(app: FastAPI):
     # Ensure comments column exists in portfolio_items table
     ensure_comments_column()
     logger.info("✅ Portfolio items comments column migration check complete")
+    
+    # Populate initial prices in crypto_prices table if empty
+    await populate_initial_prices()
+    logger.info("✅ Initial price population check complete")
     
     # Initialize currency service
     await currency_service.get_exchange_rates()

@@ -287,3 +287,54 @@ class PriceService:
             symbol: get_iso_timestamp(timestamp) 
             for symbol, timestamp in self.last_updated_timestamps.items()
         }
+    
+    def get_price_from_db(self, symbol: str) -> Optional[float]:
+        """Get price for a symbol from crypto_prices table"""
+        try:
+            from ..utils.db import get_db_connection, normalize_placeholders
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            sql = normalize_placeholders(
+                "SELECT price_usd FROM crypto_prices WHERE symbol = %s"
+            )
+            cursor.execute(sql, (symbol.upper(),))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return float(row[0])
+            return None
+        except Exception as e:
+            logger.error(f"Error getting price from database for {symbol}: {e}")
+            return None
+    
+    def get_prices_from_db(self, symbols: List[str]) -> Dict[str, float]:
+        """Get prices for multiple symbols from crypto_prices table"""
+        if not symbols:
+            return {}
+        
+        try:
+            from ..utils.db import get_db_connection, normalize_placeholders
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Create placeholders for IN clause
+            placeholders = ','.join(['%s'] * len(symbols))
+            sql = normalize_placeholders(
+                f"SELECT symbol, price_usd FROM crypto_prices WHERE symbol IN ({placeholders})"
+            )
+            cursor.execute(sql, [s.upper() for s in symbols])
+            rows = cursor.fetchall()
+            conn.close()
+            
+            prices = {}
+            for row in rows:
+                prices[row[0]] = float(row[1])
+            
+            return prices
+        except Exception as e:
+            logger.error(f"Error getting prices from database: {e}")
+            return {}

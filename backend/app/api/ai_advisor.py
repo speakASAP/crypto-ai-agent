@@ -26,37 +26,29 @@ async def get_predictions(
     symbol: str,
     current_user: dict = Depends(get_current_active_user),
 ):
-    """Get current AI predictions for a symbol"""
+    """Get current AI predictions for a symbol (reads from global predictions)"""
     symbol_upper = symbol.upper()
     
     try:
+        # Read global predictions (user_id=None prioritizes global predictions with user_id IS NULL)
         predictions = await ai_advisor_service.generate_predictions(
-            user_id=current_user["id"],
+            user_id=None,  # None = read global predictions
             symbol=symbol_upper,
             force_regenerate=False,
         )
 
-        # For non-BTC symbols, return empty predictions structure instead of 404
-        # This prevents frontend errors when no cached predictions exist
+        # Return empty predictions structure if none available (prevents frontend errors)
         if not predictions:
-            if symbol_upper != "BTC":
-                logger.debug(f"No cached predictions for {symbol_upper} (non-BTC), returning empty structure")
-                return PredictionResponse(symbol=symbol_upper, predictions={})
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No predictions available for {symbol_upper}",
-                )
+            logger.debug(f"No predictions available for {symbol_upper}, returning empty structure")
+            return PredictionResponse(symbol=symbol_upper, predictions={})
 
         return PredictionResponse(symbol=symbol_upper, predictions=predictions)
 
     except RateLimitError as e:
-        # Rate limit error - return 503 (Service Unavailable) with helpful message
-        logger.warning(f"Rate limit error for {symbol}: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail="AI prediction service is temporarily rate-limited. Please try again later or add your own API key."
-        )
+        # Rate limit error should not occur for read-only requests, but handle gracefully
+        logger.warning(f"Unexpected rate limit error for {symbol} (should not occur for read-only requests): {e}")
+        # Return empty predictions instead of error to prevent frontend issues
+        return PredictionResponse(symbol=symbol_upper, predictions={})
     except HTTPException:
         # Re-raise HTTPException as-is
         raise
@@ -91,8 +83,9 @@ async def get_portfolio_predictions(
         results = {}
         for symbol in symbols:
             try:
+                # Read global predictions (user_id=None prioritizes global predictions)
                 predictions = await ai_advisor_service.generate_predictions(
-                    user_id=current_user["id"],
+                    user_id=None,  # None = read global predictions
                     symbol=symbol.upper(),
                     force_regenerate=False,
                 )
@@ -121,19 +114,13 @@ async def generate_predictions(
     symbol: str,
     current_user: dict = Depends(get_current_active_user),
 ):
-    """Manually trigger prediction generation for a symbol (BTC only to avoid rate limits)"""
+    """Manually trigger prediction generation for a symbol (generates global predictions)"""
     symbol_upper = symbol.upper()
     
-    # Only allow manual generation for BTC
-    if symbol_upper != "BTC":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Prediction generation is only available for BTC to avoid rate limits. Use cached predictions for other symbols."
-        )
-    
     try:
+        # Generate global predictions (user_id=None stores with user_id = NULL)
         predictions = await ai_advisor_service.generate_predictions(
-            user_id=current_user["id"],
+            user_id=None,  # None = store as global predictions
             symbol=symbol_upper,
             force_regenerate=True,
         )

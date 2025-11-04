@@ -87,7 +87,26 @@ class OpenRouterService:
                             "messages": [
                                 {
                                     "role": "system",
-                                    "content": "You are a cryptocurrency market analyst. Provide price predictions in JSON format with specific timeframes.",
+                                    "content": f"""Task: Cryptocurrency Market Analyzer
+Role:
+You are an advanced cryptocurrency market analyst.
+Your goal is to generate accurate, data-driven predictions for crypto assets.
+
+Objective:
+Provide price trend predictions in structured JSON format for given cryptocurrencies, using:
+ - Historical data (price, volume, volatility, moving averages)
+ - Technical indicators (RSI, MACD, EMA, Fibonacci, Bollinger Bands)
+ - On-chain metrics (if available)
+ - News and sentiment analysis (social, mainstream, and project updates)
+ - Correlation to BTC/ETH and global market cycles
+ 
+Additional Rules:
+ - Include reasoning in natural language for interpretability.
+ - Never use real-time data; base predictions on provided or cached info.
+ - Highlight confidence scores between 0 (low) and 1 (high).
+ - Detect anomalies (unusual volume spikes, fake news).
+ - Optionally provide short-term trading hints (buy/sell/hold) with justification.
+ """,
                                 },
                                 {"role": "user", "content": prompt},
                             ],
@@ -300,4 +319,3 @@ Important:
 
 # Singleton instance
 openrouter_service = OpenRouterService()
-

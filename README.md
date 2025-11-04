@@ -48,7 +48,8 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 ### 📊 Portfolio Management
 
 - **Multi-Currency Support**: USD, EUR, CZK, GBP, JPY
-- **Real-time Updates**: Live price tracking via WebSocket
+- **Centralized Price Updates**: Prices are updated every 5 minutes for all cryptocurrencies in a single API call
+- **Real-time Updates**: Live price tracking via WebSocket broadcasts
 - **P&L Tracking**: Automatic profit/loss calculations
 - **Portfolio Summary**: Total value and performance metrics
 - **Binance Import**: Automatically import your Binance portfolio
@@ -67,6 +68,7 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 ### 🤖 AI Advisor
 
 - **Price Predictions**: AI-powered price predictions for 24 hours, 1 week, 1 month, and 1 year
+- **Centralized Predictions**: Predictions are generated once per day per cryptocurrency and shared across all users
 - **Confidence Scores**: Each prediction includes a confidence percentage based on data quality
 - **News Analysis**: Automatic analysis of cryptocurrency news with sentiment scoring
 - **Performance Tracking**: Historical accuracy tracking to compare prediction performance
@@ -288,6 +290,18 @@ The system includes the following user-related tables:
 - `user_api_credentials` - Encrypted storage of user API credentials
 - All existing tables now include `user_id` foreign keys
 
+**Centralized Data Tables:**
+
+- `crypto_prices` - Centralized cryptocurrency price storage (updated every 5 minutes)
+  - Stores USD prices for all cryptocurrencies in user portfolios
+  - Single source of truth for price data
+  - Updated via background task, read by all users
+  
+- `ai_predictions` - Global AI predictions (updated once per day per symbol)
+  - `user_id` is nullable for global predictions (shared across all users)
+  - Predictions generated once per day and reused by all users
+  - Reduces AI API calls and rate limit issues
+
 ### 🧪 Testing User Management
 
 1. **Test Registration:**
@@ -429,6 +443,14 @@ crypto-ai-agent/
 - **Real-time Updates**: < 100ms latency (vs 1+ seconds)
 - **Database Queries**: < 50ms average (vs 200+ ms)
 - **Cache Hit Rate**: > 90% (vs 0%)
+
+### Centralized Price and Prediction System
+
+- **Price Updates**: Single API call every 5 minutes for all cryptocurrencies (vs per-user calls)
+- **AI Predictions**: Single generation per day per symbol shared across all users (vs per-user generation)
+- **API Efficiency**: Reduced external API calls by 90%+ for multi-user scenarios
+- **Rate Limit Protection**: No API rate limits even with hundreds of users
+- **Database-First**: All user requests read from centralized database tables (no external API calls)
 
 ### Scalability
 
@@ -769,6 +791,9 @@ Use `.env` (not committed) and refer to `.env.example` for keys. Important:
 - `BINANCE_API_URL`: Binance API endpoint
 - `JWT_SECRET`: JWT signing secret
 - `CORS_ORIGINS`: Allowed CORS origins
+- `PRICE_UPDATE_INTERVAL_SECONDS`: Price update interval in seconds (default: 300 = 5 minutes)
+- `AI_PREDICTION_INTERVAL_HOURS`: AI prediction generation interval in hours (default: 24 = once per day)
+- `AI_PREDICTION_BATCH_SIZE`: Number of symbols to process in batch for AI predictions (default: 1)
 
 ## Telegram Notifications Setup
 

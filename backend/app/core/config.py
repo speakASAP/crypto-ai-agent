@@ -33,8 +33,12 @@ class Settings(BaseSettings):
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4")
     news_api_key: str = os.getenv("NEWS_API_KEY", "")
     ai_prediction_interval_hours: int = int(os.getenv("AI_PREDICTION_INTERVAL_HOURS", "24"))
+    ai_prediction_batch_size: int = int(os.getenv("AI_PREDICTION_BATCH_SIZE", "1"))
     openrouter_api_url: str = "https://openrouter.ai/api/v1"
     news_api_url: str = "https://newsapi.org/v2"
+    
+    # Price Update Configuration
+    price_update_interval_seconds: int = int(os.getenv("PRICE_UPDATE_INTERVAL_SECONDS", "300"))  # 5 minutes
     
     # Redis (optional, for caching/session)
     redis_url: str | None = None
