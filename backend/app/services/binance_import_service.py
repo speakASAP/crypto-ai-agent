@@ -339,6 +339,21 @@ class BinanceImportService:
         portfolio_items = []
         all_trades_collected = {}
         
+        # Get fiat purchase history (card purchases) - these count as buys
+        fiat_purchases = {}
+        try:
+            fiat_orders = await self.get_fiat_purchase_history()
+            logger.info(f"📦 Found {len(fiat_orders)} fiat purchase orders")
+            for order in fiat_orders:
+                crypto = order.get('cryptoType', '').upper()
+                if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD']:
+                    if crypto not in fiat_purchases:
+                        fiat_purchases[crypto] = []
+                    fiat_purchases[crypto].append(order)
+                    logger.debug(f"Fiat purchase found: {crypto} - {order.get('cryptoAmount', 0)} at {order.get('price', 0)}")
+        except Exception as e:
+            logger.warning(f"Could not get fiat purchase history: {e}")
+        
         for balance in balances:
             asset = balance['asset']
             total_amount = balance['total']
