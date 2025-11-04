@@ -109,54 +109,92 @@ async def add_tracked_symbol(payload: TrackedSymbolCreate, current_user: dict = 
 
 @router.get("/api/symbols/prices")
 async def get_symbol_prices(symbols: str = None, current_user: dict = Depends(get_current_active_user)):
+    """Get prices for symbols from centralized crypto_prices table"""
     try:
         if not symbols:
             return []
         symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
         if not symbol_list:
             return []
+        
+        # Read prices from centralized crypto_prices table
+        from ..services.price_service import price_service
+        prices_from_db = price_service.get_prices_from_db(symbol_list)
+        
+        # Get timestamps for all symbols in one query
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        placeholders = ','.join(['%s'] * len(symbol_list))
+        sql = _normalize_placeholders(
+            f"SELECT symbol, updated_at FROM crypto_prices WHERE symbol IN ({placeholders})"
+        )
+        cursor.execute(sql, symbol_list)
+        timestamp_rows = cursor.fetchall()
+        conn.close()
+        
+        # Create timestamp map
+        timestamp_map = {}
+        for row in timestamp_rows:
+            symbol, updated_at = row
+            if updated_at:
+                if isinstance(updated_at, datetime):
+                    timestamp_map[symbol] = updated_at.isoformat()
+                else:
+                    timestamp_map[symbol] = str(updated_at)
+        
         result = []
-        missing: List[str] = []
-        # Return cached first, track missing
         for symbol in symbol_list:
-            if symbol in manager.price_cache:
-                cache_entry = manager.price_cache[symbol]
-                result.append({"symbol": symbol, "price": cache_entry["price"], "timestamp": cache_entry["timestamp"]})
+            if symbol in prices_from_db:
+                price = prices_from_db[symbol]
+                timestamp = timestamp_map.get(symbol, datetime.now(timezone.utc).isoformat())
+                result.append({"symbol": symbol, "price": price, "timestamp": timestamp})
             else:
-                missing.append(symbol)
-        # Fetch missing prices and cache
-        if missing:
-            try:
-                fetched = await multi_exchange_price_service.get_current_prices(missing)
-                for sym in missing:
-                    if sym in fetched:
-                        price = fetched[sym]
-                        ts = datetime.now(timezone.utc).isoformat()
-                        manager.price_cache[sym] = {"price": price, "timestamp": ts}
-                        result.append({"symbol": sym, "price": price, "timestamp": ts})
-            except Exception as fe:
-                logger.error(f"Error fetching prices for {missing}: {fe}")
-        # Keep response aligned to requested order
-        ordered = {r["symbol"]: r for r in result}
-        return [ordered[s] for s in symbol_list if s in ordered]
+                # Price not found in database - return with null price
+                logger.debug(f"Price not found in database for {symbol}")
+                result.append({"symbol": symbol, "price": None, "timestamp": None})
+        
+        return result
     except Exception as e:
-        logger.error(f"Error fetching cached prices: {e}")
+        logger.error(f"Error fetching prices from database: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch prices")
 
 
 @router.get("/api/symbols/{symbol}/price")
 async def get_symbol_price(symbol: str, current_user: dict = Depends(get_current_active_user)):
+    """Get price for a symbol from centralized crypto_prices table"""
     try:
-        prices = await multi_exchange_price_service.get_current_prices([symbol.upper()])
-        if symbol.upper() in prices:
-            return {"symbol": symbol.upper(), "price": prices[symbol.upper()], "timestamp": datetime.now(timezone.utc).isoformat()}
+        symbol_upper = symbol.upper()
+        
+        # Read price from centralized crypto_prices table
+        from ..services.price_service import price_service
+        price = price_service.get_price_from_db(symbol_upper)
+        
+        if price is not None:
+            # Get timestamp from database
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            sql = _normalize_placeholders(
+                "SELECT updated_at FROM crypto_prices WHERE symbol = %s"
+            )
+            cursor.execute(sql, (symbol_upper,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            timestamp = datetime.now(timezone.utc).isoformat()
+            if row and row[0]:
+                if isinstance(row[0], datetime):
+                    timestamp = row[0].isoformat()
+                else:
+                    timestamp = str(row[0])
+            
+            return {"symbol": symbol_upper, "price": price, "timestamp": timestamp}
         else:
-            logger.warning(f"Price not found for symbol {symbol.upper()}")
+            logger.warning(f"Price not found in database for symbol {symbol_upper}")
             raise HTTPException(status_code=404, detail=f"Price not found for symbol {symbol}")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching price for {symbol}: {e}")
+        logger.error(f"Error fetching price for {symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch price")
 
 

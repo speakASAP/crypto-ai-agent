@@ -12,49 +12,63 @@ import { Sparkles, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react'
 function renderReasoningWithLinks(text: string) {
   if (!text) return null
   
-  // Match markdown links: [1](url), [2](url), etc.
-  const linkPattern = /\[(\d+)\]\(([^)]+)\)/g
-  const parts: (string | JSX.Element)[] = []
-  let lastIndex = 0
-  let match
+  // Split by newlines to handle multi-line reasoning with sources section
+  const lines = text.split('\n')
+  const processedLines: (string | JSX.Element)[] = []
   let key = 0
-
-  while ((match = linkPattern.exec(text)) !== null) {
-    // Add text before the link
-    if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index))
+  
+  lines.forEach((line) => {
+    // Match markdown links: [1](url), [2](url), etc.
+    const linkPattern = /\[(\d+)\]\(([^)]+)\)/g
+    const parts: (string | JSX.Element)[] = []
+    let lastIndex = 0
+    let match
+    
+    while ((match = linkPattern.exec(line)) !== null) {
+      // Add text before the link
+      if (match.index > lastIndex) {
+        parts.push(line.substring(lastIndex, match.index))
+      }
+      
+      // Add the external link
+      const linkNum = match[1]
+      const url = match[2]
+      
+      // Ensure URL is absolute
+      const externalUrl = url.startsWith('http://') || url.startsWith('https://') 
+        ? url 
+        : `https://${url}`
+      
+      parts.push(
+        <a
+          key={key++}
+          href={externalUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:text-blue-800 underline font-medium"
+          onClick={(e) => e.stopPropagation()}
+        >
+          [{linkNum}]
+        </a>
+      )
+      lastIndex = match.index + match[0].length
     }
     
-    // Add the external link (use <a> tag for external URLs, not Next.js Link)
-    const linkNum = match[1]
-    const url = match[2]
+    // Add remaining text
+    if (lastIndex < line.length) {
+      parts.push(line.substring(lastIndex))
+    }
     
-    // Ensure URL is absolute (starts with http:// or https://)
-    const externalUrl = url.startsWith('http://') || url.startsWith('https://') 
-      ? url 
-      : `https://${url}`
-    
-    parts.push(
-      <a
-        key={key++}
-        href={externalUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-600 hover:text-blue-800 underline inline font-medium"
-        onClick={(e) => e.stopPropagation()}
-      >
-        [{linkNum}]
-      </a>
-    )
-    lastIndex = match.index + match[0].length
-  }
+    if (parts.length > 0) {
+      processedLines.push(<span key={key++}>{parts}</span>)
+    } else if (line.trim()) {
+      processedLines.push(<span key={key++}>{line}</span>)
+    }
+  })
   
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex))
-  }
-  
-  return parts.length > 0 ? <>{parts}</> : text
+  return processedLines.length > 0 
+    ? <div>{processedLines.map((line, idx) => <div key={idx}>{line}</div>)}</div>
+    : <span>{text}</span>
 }
 
 interface AIAdvisorCardProps {
@@ -96,6 +110,12 @@ export function AIAdvisorCard({ symbol, currentPrice, className = '' }: AIAdviso
     if (!pred || !currentPrice) return null
 
     const predictedPrice = pred.predicted_price
+    
+    // Skip predictions where predicted price equals current price (no meaningful prediction)
+    if (Math.abs(predictedPrice - currentPrice) < 0.0001) {
+      return null
+    }
+    
     const changePercent = ((predictedPrice - currentPrice) / currentPrice) * 100
     const confidence = pred.confidence_percent || 0
     const isPositive = changePercent >= 0
@@ -205,16 +225,15 @@ export function AIAdvisorCard({ symbol, currentPrice, className = '' }: AIAdviso
                 </div>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-500">
-                  {formatCurrency(pred.predictedPrice, 'USD')}
-                </span>
                 <span className="text-xs text-gray-400">
                   {pred.confidence.toFixed(0)}% confidence
                 </span>
               </div>
               {pred.reasoning && (
-                <div className="text-xs text-gray-500 mt-1 line-clamp-3">
-                  {renderReasoningWithLinks(pred.reasoning)}
+                <div className="text-xs text-gray-500 mt-1">
+                  <div className="line-clamp-3 mb-1">
+                    {renderReasoningWithLinks(pred.reasoning)}
+                  </div>
                 </div>
               )}
             </div>
