@@ -6,6 +6,8 @@ import ssl
 import hmac
 import hashlib
 import time
+import csv
+import os
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -202,9 +204,126 @@ class BinanceImportService:
             logger.warning(f"⚠️ Error getting fiat purchase history: {e}")
             return []
     
-    async def calculate_portfolio_from_balances(self, balances: List[Dict]) -> List[Dict]:
-        """Calculate portfolio items from account balances"""
+    def _save_import_data_to_csv(self, user_id: int, balances: List[Dict], all_trades: Dict[str, List], 
+                                 portfolio_items: List[Dict], account_info: Dict = None) -> str:
+        """Save full Binance import data to CSV file for analysis"""
+        try:
+            # Create logs directory if it doesn't exist
+            logs_dir = "/app/logs"
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_filename = f"{logs_dir}/binance_import_{user_id}_{timestamp}.csv"
+            
+            with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header
+                writer.writerow(['=== BINANCE IMPORT DATA ==='])
+                writer.writerow(['Timestamp', timestamp])
+                writer.writerow(['User ID', user_id])
+                writer.writerow([''])
+                
+                # Write account info
+                writer.writerow(['=== ACCOUNT INFO ==='])
+                if account_info:
+                    for key, value in account_info.items():
+                        if isinstance(value, dict):
+                            for sub_key, sub_value in value.items():
+                                writer.writerow([f"{key}.{sub_key}", sub_value])
+                        else:
+                            writer.writerow([key, value])
+                else:
+                    writer.writerow(['No account info'])
+                writer.writerow([''])
+                
+                # Write balances
+                writer.writerow(['=== BALANCES ==='])
+                writer.writerow(['Asset', 'Free', 'Locked', 'Total'])
+                for balance in balances:
+                    writer.writerow([
+                        balance.get('asset', ''),
+                        balance.get('free', 0),
+                        balance.get('locked', 0),
+                        balance.get('total', 0)
+                    ])
+                writer.writerow([''])
+                
+                # Write all trades (raw)
+                writer.writerow(['=== ALL TRADES (RAW) ==='])
+                if all_trades:
+                    writer.writerow(['Symbol', 'Trade Data (JSON)'])
+                    for symbol, trades in all_trades.items():
+                        for trade in trades:
+                            writer.writerow([symbol, json.dumps(trade)])
+                else:
+                    writer.writerow(['No trades found'])
+                writer.writerow([''])
+                
+                # Write parsed trades details
+                writer.writerow(['=== PARSED TRADES DETAILS ==='])
+                writer.writerow(['Symbol', 'ID', 'Order ID', 'Price', 'Qty', 'Quote Qty', 'Commission', 
+                                'Commission Asset', 'Time', 'Is Buyer', 'Is Maker', 'Trade'])
+                for symbol, trades in all_trades.items():
+                    for trade in trades:
+                        writer.writerow([
+                            symbol,
+                            trade.get('id', ''),
+                            trade.get('orderId', ''),
+                            trade.get('price', ''),
+                            trade.get('qty', ''),
+                            trade.get('quoteQty', ''),
+                            trade.get('commission', ''),
+                            trade.get('commissionAsset', ''),
+                            trade.get('time', ''),
+                            trade.get('isBuyer', ''),
+                            trade.get('isMaker', ''),
+                            trade.get('trade', '')
+                        ])
+                writer.writerow([''])
+                
+                # Write portfolio items
+                writer.writerow(['=== PORTFOLIO ITEMS ==='])
+                if portfolio_items:
+                    writer.writerow(['Symbol', 'Amount', 'Price Buy', 'Purchase Date', 'Base Currency', 
+                                    'Source', 'Commission', 'Total Investment Text'])
+                    for item in portfolio_items:
+                        writer.writerow([
+                            item.get('symbol', ''),
+                            item.get('amount', 0),
+                            item.get('price_buy', 0),
+                            item.get('purchase_date', ''),
+                            item.get('base_currency', ''),
+                            item.get('source', ''),
+                            item.get('commission', 0),
+                            item.get('total_investment_text', '')
+                        ])
+                else:
+                    writer.writerow(['No portfolio items'])
+                writer.writerow([''])
+                
+                # Write summary
+                writer.writerow(['=== SUMMARY ==='])
+                writer.writerow(['Total Balances', len(balances)])
+                total_trades = sum(len(trades) for trades in all_trades.values())
+                writer.writerow(['Total Trades', total_trades])
+                writer.writerow(['Total Portfolio Items', len(portfolio_items)])
+                writer.writerow(['Items with Price Buy > 0', sum(1 for item in portfolio_items if item.get('price_buy', 0) > 0)])
+                writer.writerow(['Items with Valid Purchase Date', sum(1 for item in portfolio_items if item.get('purchase_date') and item.get('purchase_date') != datetime.utcnow().isoformat())])
+            
+            logger.info(f"💾 Saved Binance import data to {csv_filename}")
+            return csv_filename
+            
+        except Exception as e:
+            logger.error(f"❌ Error saving import data to CSV: {e}")
+            return ""
+
+    async def calculate_portfolio_from_balances(self, balances: List[Dict]) -> Tuple[List[Dict], Dict[str, List]]:
+        """Calculate portfolio items from account balances
+        Returns: (portfolio_items, all_trades_collected)
+        """
         portfolio_items = []
+        all_trades_collected = {}
         
         for balance in balances:
             asset = balance['asset']
@@ -223,6 +342,8 @@ class BinanceImportService:
             for pair in trading_pairs:
                 try:
                     trades = await self.get_trading_history(pair, 1000)
+                    if trades:
+                        all_trades_collected[pair] = trades
                     logger.info(f"Found {len(trades)} total trades for {pair}")
                     for trade in trades:
                         is_buyer = trade.get('isBuyer', False)
@@ -234,6 +355,7 @@ class BinanceImportService:
                                 'time': trade.get('time', 0),
                                 'commission': float(trade.get('commission', 0)),
                             })
+                            logger.debug(f"Added buy trade: {asset} pair={pair}, qty={trade.get('qty', 0)}, price={trade.get('price', 0)}, time={trade.get('time', 0)}")
                 except Exception as e:
                     logger.warning(f"Error processing trades for {pair}: {e}")
                     continue
@@ -259,7 +381,9 @@ class BinanceImportService:
                     
                     # Get the EARLIEST trade date for purchase date
                     earliest_trade = buy_trades[0]
-                    trade_date = datetime.fromtimestamp(earliest_trade['time'] / 1000).isoformat() + "Z"
+                    # Convert to UTC datetime and format for PostgreSQL (ISO format without Z)
+                    trade_dt = datetime.utcfromtimestamp(earliest_trade['time'] / 1000)
+                    trade_date = trade_dt.isoformat()
                     
                     # Convert to USD (USDT ≈ USD)
                     # Ensure currency service rates are loaded
@@ -284,7 +408,7 @@ class BinanceImportService:
                     'symbol': asset,
                     'amount': total_amount,
                     'price_buy': 0.0,  # Unknown price
-                    'purchase_date': datetime.now().isoformat() + "Z",
+                    'purchase_date': datetime.utcnow().isoformat(),
                     'base_currency': 'USDT',
                     'source': 'Binance',
                     'commission': 0.0,
@@ -292,7 +416,8 @@ class BinanceImportService:
                 })
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Binance balances")
-        return portfolio_items
+        logger.info(f"📊 Collected {sum(len(trades) for trades in all_trades_collected.values())} total trades for analysis")
+        return portfolio_items, all_trades_collected
     
     async def import_portfolio(self, user_id: int) -> Dict:
         """Import complete portfolio from Binance"""
@@ -317,21 +442,45 @@ class BinanceImportService:
                     'items_imported': 0
                 }
             
-            # Calculate portfolio items
-            portfolio_items = await self.calculate_portfolio_from_balances(balances)
+            # Calculate portfolio items (this will also collect all trades)
+            portfolio_items, all_trades_collected = await self.calculate_portfolio_from_balances(balances)
             
             logger.info(f"✅ Binance import completed: {len(portfolio_items)} items ready for import")
+            
+            # Save full import data to CSV for analysis
+            csv_file = self._save_import_data_to_csv(
+                user_id, 
+                balances, 
+                all_trades_collected, 
+                portfolio_items, 
+                connection_test.get('account_info', {})
+            )
+            
+            if csv_file:
+                logger.info(f"📄 Full import data saved to: {csv_file}")
             
             return {
                 'success': True,
                 'message': f"Successfully prepared {len(portfolio_items)} portfolio items for import",
                 'items_imported': len(portfolio_items),
                 'portfolio_items': portfolio_items,
-                'account_info': connection_test
+                'account_info': connection_test,
+                'debug_csv': csv_file if csv_file else None
             }
             
         except Exception as e:
             logger.error(f"❌ Binance portfolio import failed: {e}")
+            # Still try to save what we have
+            try:
+                csv_file = self._save_import_data_to_csv(
+                    user_id,
+                    balances if 'balances' in locals() else [],
+                    all_trades_collected if 'all_trades_collected' in locals() else {},
+                    portfolio_items if 'portfolio_items' in locals() else [],
+                    {}
+                )
+            except:
+                pass
             return {
                 'success': False,
                 'message': f"Import failed: {str(e)}",
