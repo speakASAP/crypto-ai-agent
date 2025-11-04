@@ -223,3 +223,24 @@ class CurrencyService:
 
 # Global currency service instance
 currency_service = CurrencyService()
+
+
+async def background_currency_fetcher():
+    """Background task to periodically fetch currency rates"""
+    import asyncio
+    try:
+        from ..utils.logger import get_logger
+    except Exception:  # pragma: no cover
+        from utils.logger import get_logger
+
+    logger = get_logger("backend.app.services.currency_service")
+
+    while True:
+        try:
+            await currency_service.refresh_rates()
+            logger.info("Currency rates refreshed")
+        except Exception as e:
+            logger.error(f"Error refreshing currency rates: {e}")
+
+        # Wait 30 minutes before next fetch
+        await asyncio.sleep(1800)

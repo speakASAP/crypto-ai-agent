@@ -221,7 +221,7 @@ async def refresh_crypto_prices(current_user: dict = Depends(get_current_active_
         conn.close()
         if not all_symbols:
             return {"message": "No symbols to refresh", "symbols_count": 0, "last_updated": datetime.now().isoformat() + "Z"}
-        from ..main import fetch_prices_for_symbols  # lazy import to avoid cycle
+        from ..services.price_tasks import fetch_prices_for_symbols  # lazy import to avoid cycle
         await fetch_prices_for_symbols(all_symbols)
         return {"message": "Crypto prices refreshed successfully", "symbols_count": len(all_symbols), "symbols": all_symbols, "last_updated": datetime.now().isoformat() + "Z"}
     except Exception as e:

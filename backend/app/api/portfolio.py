@@ -171,7 +171,7 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
 
     # Immediately fetch prices for the newly added symbol
     try:
-        from ..main import fetch_prices_for_symbols
+        from ..services.price_tasks import fetch_prices_for_symbols
         logger.info(f"🔄 Fetching prices for newly added symbol: {item.symbol}")
         await fetch_prices_for_symbols([item.symbol])
         logger.info(f"✅ Price update completed for {item.symbol}")
@@ -305,7 +305,7 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
                 conn.commit()
 
                 try:
-                    from ..main import fetch_prices_for_symbols  # lazy import to avoid cycles
+                    from ..services.price_tasks import fetch_prices_for_symbols  # lazy import to avoid cycles
                     asyncio.create_task(fetch_prices_for_symbols([row[2] if old_data else ""]))
                 except Exception:
                     pass

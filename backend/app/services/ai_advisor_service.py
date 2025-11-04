@@ -682,3 +682,115 @@ class AIAdvisorService:
 # Singleton instance
 ai_advisor_service = AIAdvisorService()
 
+
+async def background_ai_advisor_updater():
+    """Background task to periodically generate/update AI predictions for all unique symbols (once per day)"""
+    import asyncio
+    from ..core.config import settings
+
+    while True:
+        try:
+            # Wait for the interval before starting (daily: 24 hours)
+            await asyncio.sleep(settings.ai_prediction_interval_hours * 3600)
+
+            logger.info("🔄 Starting AI advisor prediction update cycle for all symbols")
+
+            # Query all unique symbols from portfolio_items table
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            sql = normalize_placeholders(
+                "SELECT DISTINCT symbol FROM portfolio_items WHERE symbol IS NOT NULL"
+            )
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            conn.close()
+
+            all_symbols = [row[0] for row in rows if row[0]]
+
+            if not all_symbols:
+                logger.warning("No symbols found in database, skipping prediction generation")
+                continue
+
+            logger.info(f"📊 Found {len(all_symbols)} unique symbols to generate predictions for")
+
+            # Process symbols sequentially with delays to avoid rate limits
+            processed_count = 0
+            for symbol in all_symbols:
+                try:
+                    # Generate predictions with user_id=None for global predictions
+                    await ai_advisor_service.generate_predictions(
+                        user_id=None,  # None = global predictions (stored with user_id = NULL)
+                        symbol=symbol,
+                        force_regenerate=False,  # Only generate if needed (check age)
+                    )
+                    processed_count += 1
+                    logger.info(f"✅ Updated predictions for {symbol} ({processed_count}/{len(all_symbols)})")
+
+                    # Add delay between predictions to avoid rate limits
+                    # Process one symbol per hour to spread throughout the day
+                    if processed_count < len(all_symbols):
+                        delay_seconds = (settings.ai_prediction_interval_hours * 3600) / len(all_symbols)
+                        delay_seconds = min(delay_seconds, 3600)  # Max 1 hour delay
+                        logger.debug(f"⏳ Waiting {delay_seconds:.0f} seconds before next prediction...")
+                        await asyncio.sleep(delay_seconds)
+
+                except Exception as e:
+                    logger.error(
+                        f"Error generating predictions for {symbol}: {e}",
+                        exc_info=True,
+                    )
+                    # Continue with next symbol even if one fails
+                    continue
+
+            logger.info(f"✅ AI advisor prediction update cycle completed: {processed_count}/{len(all_symbols)} symbols processed")
+
+        except Exception as e:
+            logger.error(f"Error in AI advisor updater: {e}", exc_info=True)
+            await asyncio.sleep(3600)  # Wait 1 hour before retrying
+
+
+async def background_prediction_verifier():
+    """Background task to verify past predictions against actual prices"""
+    import asyncio
+
+    while True:
+        try:
+            # Run verification every 6 hours
+            await asyncio.sleep(6 * 3600)
+
+            logger.info("🔄 Starting prediction verification cycle")
+
+            # Get all symbols with unverified predictions
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            sql = normalize_placeholders(
+                "SELECT DISTINCT symbol FROM ai_predictions WHERE is_verified = FALSE"
+            )
+            cursor.execute(sql)
+            symbols = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
+            if not symbols:
+                logger.debug("No unverified predictions found")
+                continue
+
+            logger.info(f"🔄 Verifying predictions for {len(symbols)} symbols")
+
+            # Verify predictions for each symbol
+            for symbol in symbols:
+                try:
+                    await ai_advisor_service.verify_predictions(symbol)
+                    logger.debug(f"✅ Verified predictions for {symbol}")
+                except Exception as e:
+                    logger.error(
+                        f"Error verifying predictions for {symbol}: {e}",
+                        exc_info=True,
+                    )
+                    continue
+
+            logger.info("✅ Prediction verification cycle completed")
+
+        except Exception as e:
+            logger.error(f"Error in prediction verifier: {e}", exc_info=True)
+            await asyncio.sleep(3600)  # Wait 1 hour before retrying

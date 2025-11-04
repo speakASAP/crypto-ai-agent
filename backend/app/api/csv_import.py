@@ -463,7 +463,7 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
         imported_symbols = list(set(item['symbol'] for item in aggregated_items))
         if imported_symbols:
             try:
-                from ..main import fetch_prices_for_symbols
+                from ..services.price_tasks import fetch_prices_for_symbols
                 logger.info(f"🔄 Fetching prices for {len(imported_symbols)} imported symbols: {imported_symbols}")
                 await fetch_prices_for_symbols(imported_symbols)
                 logger.info(f"✅ Price update completed for imported symbols")
