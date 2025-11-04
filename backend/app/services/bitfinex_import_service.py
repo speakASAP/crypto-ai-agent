@@ -384,14 +384,19 @@ class BitfinexImportService:
                 
                 for trade in trades_to_process:
                     # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker, fee, fee_currency]
+                    # exec_amount: positive = buy (you receive base currency), negative = sell (you give base currency)
                     if len(trade) >= 6:
                         try:
                             exec_amount = float(trade[4]) if trade[4] is not None else 0
                             exec_price = float(trade[5]) if trade[5] is not None else 0
                             mts_create = int(trade[2]) if len(trade) > 2 and trade[2] is not None else 0
+                            order_type = trade[6] if len(trade) > 6 else None
                             
-                            # Positive amount typically means buy
-                            if exec_amount > 0 and exec_price > 0:
+                            logger.debug(f"Trade for {currency}/{pair}: exec_amount={exec_amount}, exec_price={exec_price}, mts_create={mts_create}, order_type={order_type}, trade={trade[:7]}")
+                            
+                            # Positive amount means buy (you receive the base currency)
+                            # Check both exec_amount > 0 and valid price
+                            if exec_amount > 0 and exec_price > 0 and mts_create > 0:
                                 quote_currency = self._extract_quote_currency(normalized_pair)
                                 price_usd = self._convert_price_to_usd(exec_price, quote_currency, mts_create)
                                 
@@ -403,7 +408,9 @@ class BitfinexImportService:
                                     'quote_currency': quote_currency,
                                     'time': mts_create
                                 })
-                                logger.debug(f"Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd}, time={mts_create}")
+                                logger.info(f"✅ Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd:.2f}, time={mts_create} ({datetime.fromtimestamp(mts_create/1000).isoformat()})")
+                            elif exec_amount != 0:
+                                logger.debug(f"Skipping trade (not a buy): {currency} exec_amount={exec_amount}, price={exec_price}")
                         except (ValueError, TypeError, IndexError) as e:
                             logger.warning(f"Error parsing trade for {pair}: {e}, trade data: {trade}")
                             continue
@@ -418,14 +425,19 @@ class BitfinexImportService:
                         
                         for trade in trades:
                             # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker, fee, fee_currency]
+                            # exec_amount: positive = buy (you receive base currency), negative = sell (you give base currency)
                             if len(trade) >= 6:
                                 try:
                                     exec_amount = float(trade[4]) if trade[4] is not None else 0
                                     exec_price = float(trade[5]) if trade[5] is not None else 0
                                     mts_create = int(trade[2]) if len(trade) > 2 and trade[2] is not None else 0
+                                    order_type = trade[6] if len(trade) > 6 else None
                                     
-                                    # Positive amount typically means buy
-                                    if exec_amount > 0 and exec_price > 0:
+                                    logger.debug(f"Trade for {currency}/{pair}: exec_amount={exec_amount}, exec_price={exec_price}, mts_create={mts_create}, order_type={order_type}, trade={trade[:7]}")
+                                    
+                                    # Positive amount means buy (you receive the base currency)
+                                    # Check both exec_amount > 0 and valid price and timestamp
+                                    if exec_amount > 0 and exec_price > 0 and mts_create > 0:
                                         quote_currency = self._extract_quote_currency(pair)
                                         price_usd = self._convert_price_to_usd(exec_price, quote_currency, mts_create)
                                         
@@ -437,7 +449,9 @@ class BitfinexImportService:
                                             'quote_currency': quote_currency,
                                             'time': mts_create
                                         })
-                                        logger.debug(f"Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd}, time={mts_create}")
+                                        logger.info(f"✅ Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd:.2f}, time={mts_create} ({datetime.fromtimestamp(mts_create/1000).isoformat()})")
+                                    elif exec_amount != 0:
+                                        logger.debug(f"Skipping trade (not a buy): {currency} exec_amount={exec_amount}, price={exec_price}")
                                 except (ValueError, TypeError, IndexError) as e:
                                     logger.warning(f"Error parsing trade for {pair}: {e}, trade data: {trade}")
                                     continue
