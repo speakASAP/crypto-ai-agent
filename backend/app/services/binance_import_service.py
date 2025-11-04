@@ -210,23 +210,33 @@ class BinanceImportService:
             return []
     
     async def get_fiat_purchase_history(self) -> List[Dict]:
-        """Get fiat card purchase history from Binance using direct API call"""
+        """Get fiat payment history (buy/sell) from Binance using /sapi/v1/fiat/payments endpoint
+        This endpoint provides buy/sell history with prices and dates (minimum 1 year of data)
+        Reference: https://www.binance.com/en/my/wallet/exchange/buysell-history
+        """
         try:
-            # Binance fiat orders endpoint: /sapi/v1/fiat/orders
+            # Binance fiat payments endpoint: /sapi/v1/fiat/payments
+            # This is different from /sapi/v1/fiat/orders - payments includes crypto info
             base_url = "https://api.binance.com"
-            endpoint = "/sapi/v1/fiat/orders"
+            endpoint = "/sapi/v1/fiat/payments"
             
-            all_orders = []
+            all_payments = []
             
-            # Get both buy (transactionType=0) and sell (transactionType=1) orders
+            # Calculate time range: last 1 year (minimum supported)
+            end_time = int(time.time() * 1000)  # Current time in milliseconds
+            start_time = end_time - (1 * 365 * 24 * 60 * 60 * 1000)  # 1 year ago
+            
+            # Get both buy (transactionType=0) and sell (transactionType=1) payments
             for transaction_type in ['0', '1']:
                 try:
-                    # Build query parameters
+                    # Build query parameters with time range
                     timestamp = self._get_timestamp()
                     params = {
                         'transactionType': transaction_type,
+                        'beginTime': str(start_time),
+                        'endTime': str(end_time),
                         'timestamp': str(timestamp),
-                        'rows': '500'  # Get up to 500 orders per type
+                        'rows': '500'  # Get up to 500 payments per type
                     }
                     
                     # Create query string
@@ -255,21 +265,21 @@ class BinanceImportService:
                         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
                             if response.status == 200:
                                 result = await response.json()
-                                orders = result.get('data', [])
-                                logger.info(f"✅ Retrieved {len(orders)} fiat orders (type={transaction_type})")
-                                all_orders.extend(orders)
+                                payments = result.get('data', [])
+                                logger.info(f"✅ Retrieved {len(payments)} fiat payments (type={transaction_type}, buy={'Buy' if transaction_type == '0' else 'Sell'})")
+                                all_payments.extend(payments)
                             else:
                                 error_text = await response.text()
-                                logger.debug(f"⚠️ Fiat orders API (type={transaction_type}) returned status {response.status}: {error_text}")
+                                logger.warning(f"⚠️ Fiat payments API (type={transaction_type}) returned status {response.status}: {error_text}")
                 except Exception as e:
-                    logger.debug(f"Error getting fiat orders type {transaction_type}: {e}")
+                    logger.warning(f"Error getting fiat payments type {transaction_type}: {e}")
                     continue
             
-            logger.info(f"✅ Retrieved {len(all_orders)} total fiat orders")
-            return all_orders
+            logger.info(f"✅ Retrieved {len(all_payments)} total fiat payments (buy/sell history)")
+            return all_payments
                         
         except Exception as e:
-            logger.warning(f"⚠️ Error getting fiat purchase history: {e}")
+            logger.warning(f"⚠️ Error getting fiat payment history: {e}")
             return []
     
     async def get_deposit_history(self, asset: str = None) -> List[Dict]:
