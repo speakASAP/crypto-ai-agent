@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch, AsyncMock, MagicMock
 import psycopg
 
 # Import the functions we want to test
-from backend.app.main import check_missed_alerts_on_startup, trigger_alert
+from backend.app.services.notification_service import check_missed_alerts_on_startup, trigger_alert
 from backend.app.services.price_service import PriceService
 
 
@@ -66,8 +66,8 @@ async def test_missed_alert_detection(mock_db_connection, mock_price_service):
     ]
     
     # Mock the trigger_alert function and database connection
-    with patch('backend.app.main.trigger_alert') as mock_trigger:
-        with patch('backend.app.main.price_service', mock_price_service):
+    with patch('backend.app.services.notification_service.trigger_alert') as mock_trigger:
+        with patch('backend.app.services.notification_service.price_service', mock_price_service):
             with patch('backend.app.dependencies.auth.get_db_connection', return_value=conn):
                 await check_missed_alerts_on_startup()
         
@@ -89,8 +89,8 @@ async def test_no_missed_alerts_when_threshold_not_crossed(mock_db_connection, m
     cursor.fetchall.return_value = []
     
     # Mock the trigger_alert function
-    with patch('backend.app.main.trigger_alert') as mock_trigger:
-        with patch('backend.app.main.price_service', mock_price_service):
+    with patch('backend.app.services.notification_service.trigger_alert') as mock_trigger:
+        with patch('backend.app.services.notification_service.price_service', mock_price_service):
             with patch('backend.app.dependencies.auth.get_db_connection', return_value=conn):
                 await check_missed_alerts_on_startup()
         
@@ -154,8 +154,8 @@ async def test_startup_recovery_with_multiple_alerts(mock_db_connection, mock_pr
     mock_price_service.get_historical_prices_for_range.side_effect = mock_historical_prices
     
     # Mock the trigger_alert function
-    with patch('backend.app.main.trigger_alert') as mock_trigger:
-        with patch('backend.app.main.price_service', mock_price_service):
+    with patch('backend.app.services.notification_service.trigger_alert') as mock_trigger:
+        with patch('backend.app.services.notification_service.price_service', mock_price_service):
             with patch('backend.app.dependencies.auth.get_db_connection', return_value=conn):
                 await check_missed_alerts_on_startup()
         
@@ -182,8 +182,8 @@ async def test_trigger_alert_function(mock_db_connection):
     cursor.rowcount = 1
     
     # Mock the notification functions
-    with patch('backend.app.main.send_user_telegram_notification') as mock_telegram:
-        with patch('backend.app.main.manager') as mock_manager:
+    with patch('backend.app.services.notification_service.send_user_telegram_notification') as mock_telegram:
+        with patch('backend.app.api.ws.manager') as mock_manager:
             with patch('backend.app.dependencies.auth.get_db_connection', return_value=conn):
                 trigger_time = datetime.now(timezone.utc)
                 await trigger_alert(
