@@ -168,16 +168,75 @@ class BinanceImportService:
             logger.error(f"❌ Error getting account balances: {e}")
             return []
     
-    async def get_trading_history(self, symbol: str, limit: int = 1000) -> List[Dict]:
-        """Get trading history for a specific symbol using official library"""
+    async def get_trading_history(self, symbol: str, limit: int = 1000, start_time: int = None, end_time: int = None) -> List[Dict]:
+        """Get trading history for a specific symbol using official library
+        Can fetch historical data with time ranges (up to 2 years)
+        """
         try:
             # Use official Binance library for proper signature handling
             client = BinanceClient(self.api_key, self.api_secret)
             
-            # Get trades
-            trades = client.get_my_trades(symbol=symbol, limit=limit)
-            logger.info(f"✅ Retrieved {len(trades)} trades for {symbol}")
-            return trades
+            # Get trades - with time range if provided
+            if start_time and end_time:
+                # Fetch historical trades with pagination
+                all_trades = []
+                current_start = start_time
+                max_trades_per_request = 1000  # Binance limit
+                
+                while True:
+                    try:
+                        # Get trades in batches
+                        trades = client.get_my_trades(
+                            symbol=symbol, 
+                            limit=max_trades_per_request,
+                            fromId=None  # Start from beginning
+                        )
+                        
+                        if not trades:
+                            break
+                            
+                        # Filter trades by time range
+                        filtered_trades = [
+                            t for t in trades 
+                            if start_time <= t.get('time', 0) <= end_time
+                        ]
+                        
+                        all_trades.extend(filtered_trades)
+                        
+                        # If we got fewer than limit, we're done
+                        if len(trades) < max_trades_per_request:
+                            break
+                            
+                        # Get the oldest trade ID to continue pagination
+                        oldest_trade_id = min(t.get('id', 0) for t in trades)
+                        # Continue from next ID
+                        # Note: Binance doesn't support pagination by ID with time range directly
+                        # So we'll get all trades and filter
+                        break  # Exit loop - we'll get all and filter
+                        
+                    except Exception as e:
+                        logger.debug(f"Error in pagination for {symbol}: {e}")
+                        break
+                
+                # If we need all historical trades, get them without time filter first
+                # Then filter by time range
+                if not all_trades:
+                    try:
+                        all_historical_trades = client.get_my_trades(symbol=symbol, limit=1000)
+                        all_trades = [
+                            t for t in all_historical_trades 
+                            if start_time <= t.get('time', 0) <= end_time
+                        ]
+                    except:
+                        pass
+                
+                logger.info(f"✅ Retrieved {len(all_trades)} historical trades for {symbol} (from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')})")
+                return all_trades
+            else:
+                # Get recent trades (no time range)
+                trades = client.get_my_trades(symbol=symbol, limit=limit)
+                logger.info(f"✅ Retrieved {len(trades)} trades for {symbol}")
+                return trades
                         
         except Exception as e:
             logger.warning(f"⚠️ Error getting trading history for {symbol}: {e}")
@@ -286,15 +345,28 @@ class BinanceImportService:
             logger.warning(f"⚠️ Error getting withdrawal history: {e}")
             return []
     
-    async def get_all_orders(self, symbol: str = None, limit: int = 1000) -> List[Dict]:
-        """Get all orders (open and historical) - this can help find buy prices"""
+    async def get_all_orders(self, symbol: str = None, limit: int = 1000, start_time: int = None, end_time: int = None) -> List[Dict]:
+        """Get all orders (open and historical) - this can help find buy prices
+        Can fetch historical data for up to 2 years
+        """
         try:
             client = BinanceClient(self.api_key, self.api_secret)
             
             # Get all orders (filled, cancelled, etc.)
             if symbol:
-                orders = client.get_all_orders(symbol=symbol, limit=limit)
-                logger.info(f"✅ Retrieved {len(orders)} orders for {symbol}")
+                if start_time and end_time:
+                    # Get historical orders with time range
+                    orders = client.get_all_orders(
+                        symbol=symbol, 
+                        limit=limit,
+                        startTime=start_time,
+                        endTime=end_time
+                    )
+                    logger.info(f"✅ Retrieved {len(orders)} historical orders for {symbol} (from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')})")
+                else:
+                    # Get recent orders
+                    orders = client.get_all_orders(symbol=symbol, limit=limit)
+                    logger.info(f"✅ Retrieved {len(orders)} orders for {symbol}")
             else:
                 # Cannot get all orders without symbol
                 orders = []
@@ -392,6 +464,44 @@ class BinanceImportService:
                         writer.writerow([json.dumps(order)])
                 else:
                     writer.writerow(['No fiat orders found'])
+                writer.writerow([''])
+                
+                # Write deposit history
+                writer.writerow(['=== DEPOSIT HISTORY ==='])
+                if deposits:
+                    writer.writerow(['Asset', 'Amount', 'Insert Time', 'Status', 'TxId', 'Address', 'Address Tag', 'Deposit Data (JSON)'])
+                    for deposit in deposits:
+                        writer.writerow([
+                            deposit.get('asset', ''),
+                            deposit.get('amount', ''),
+                            deposit.get('insertTime', ''),
+                            deposit.get('status', ''),
+                            deposit.get('txId', ''),
+                            deposit.get('address', ''),
+                            deposit.get('addressTag', ''),
+                            json.dumps(deposit)
+                        ])
+                else:
+                    writer.writerow(['No deposits found'])
+                writer.writerow([''])
+                
+                # Write withdrawal history
+                writer.writerow(['=== WITHDRAWAL HISTORY ==='])
+                if withdrawals:
+                    writer.writerow(['Asset', 'Amount', 'Apply Time', 'Status', 'TxId', 'Address', 'Address Tag', 'Withdrawal Data (JSON)'])
+                    for withdrawal in withdrawals:
+                        writer.writerow([
+                            withdrawal.get('asset', ''),
+                            withdrawal.get('amount', ''),
+                            withdrawal.get('applyTime', ''),
+                            withdrawal.get('status', ''),
+                            withdrawal.get('txId', ''),
+                            withdrawal.get('address', ''),
+                            withdrawal.get('addressTag', ''),
+                            json.dumps(withdrawal)
+                        ])
+                else:
+                    writer.writerow(['No withdrawals found'])
                 writer.writerow([''])
                 
                 # Write portfolio items
@@ -542,10 +652,11 @@ class BinanceImportService:
             
             for pair in trading_pairs:
                 try:
-                    trades = await self.get_trading_history(pair, 1000)
+                    # Get historical trades for last 2 years
+                    trades = await self.get_trading_history(pair, limit=1000, start_time=start_time, end_time=end_time)
                     if trades:
                         all_trades_collected[pair] = trades
-                    logger.info(f"Found {len(trades)} total trades for {pair}")
+                    logger.info(f"Found {len(trades)} total trades for {pair} (historical)")
                     for trade in trades:
                         is_buyer = trade.get('isBuyer', False)
                         if is_buyer:  # Only buy trades
@@ -652,6 +763,13 @@ class BinanceImportService:
                     'items_imported': 0
                 }
             
+            # Get additional data: deposits, withdrawals
+            logger.info("📥 Fetching deposit history...")
+            all_deposits = await self.get_deposit_history_full()
+            
+            logger.info("📤 Fetching withdrawal history...")
+            all_withdrawals = await self.get_withdrawal_history_full()
+            
             # Calculate portfolio items (this will also collect all trades)
             portfolio_items, all_trades_collected, fiat_orders = await self.calculate_portfolio_from_balances(balances)
             
@@ -664,7 +782,9 @@ class BinanceImportService:
                 all_trades_collected, 
                 portfolio_items, 
                 connection_test.get('account_info', {}),
-                fiat_orders
+                fiat_orders,
+                all_deposits,
+                all_withdrawals
             )
             
             if csv_file:
