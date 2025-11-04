@@ -178,59 +178,26 @@ class BinanceImportService:
             
             # Get trades - with time range if provided
             if start_time and end_time:
-                # Fetch historical trades with pagination
+                # Binance get_my_trades API doesn't support time range directly
+                # We need to get all trades and filter by time
+                # Note: Binance typically only returns last 3 months of detailed trades
+                # For older trades, we rely on orders history
                 all_trades = []
-                current_start = start_time
-                max_trades_per_request = 1000  # Binance limit
+                try:
+                    # Try to get all available trades (last 1000 trades, which is Binance limit)
+                    all_historical_trades = client.get_my_trades(symbol=symbol, limit=1000)
+                    
+                    # Filter by time range
+                    all_trades = [
+                        t for t in all_historical_trades 
+                        if start_time <= t.get('time', 0) <= end_time
+                    ]
+                    
+                    logger.info(f"✅ Retrieved {len(all_trades)} historical trades for {symbol} (filtered from {len(all_historical_trades)} total trades, time range: {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')})")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error getting historical trades for {symbol}: {e}")
+                    all_trades = []
                 
-                while True:
-                    try:
-                        # Get trades in batches
-                        trades = client.get_my_trades(
-                            symbol=symbol, 
-                            limit=max_trades_per_request,
-                            fromId=None  # Start from beginning
-                        )
-                        
-                        if not trades:
-                            break
-                            
-                        # Filter trades by time range
-                        filtered_trades = [
-                            t for t in trades 
-                            if start_time <= t.get('time', 0) <= end_time
-                        ]
-                        
-                        all_trades.extend(filtered_trades)
-                        
-                        # If we got fewer than limit, we're done
-                        if len(trades) < max_trades_per_request:
-                            break
-                            
-                        # Get the oldest trade ID to continue pagination
-                        oldest_trade_id = min(t.get('id', 0) for t in trades)
-                        # Continue from next ID
-                        # Note: Binance doesn't support pagination by ID with time range directly
-                        # So we'll get all trades and filter
-                        break  # Exit loop - we'll get all and filter
-                        
-                    except Exception as e:
-                        logger.debug(f"Error in pagination for {symbol}: {e}")
-                        break
-                
-                # If we need all historical trades, get them without time filter first
-                # Then filter by time range
-                if not all_trades:
-                    try:
-                        all_historical_trades = client.get_my_trades(symbol=symbol, limit=1000)
-                        all_trades = [
-                            t for t in all_historical_trades 
-                            if start_time <= t.get('time', 0) <= end_time
-                        ]
-                    except:
-                        pass
-                
-                logger.info(f"✅ Retrieved {len(all_trades)} historical trades for {symbol} (from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')})")
                 return all_trades
             else:
                 # Get recent trades (no time range)
@@ -547,10 +514,11 @@ class BinanceImportService:
         portfolio_items = []
         all_trades_collected = {}
         
-        # Calculate time range: last 2 years
+        # Calculate time range: last 5 years (Binance API limit is typically 3 months for detailed trades, but we try anyway)
+        # For historical orders, we can go back further
         end_time = int(time.time() * 1000)  # Current time in milliseconds
-        start_time = end_time - (2 * 365 * 24 * 60 * 60 * 1000)  # 2 years ago
-        logger.info(f"📅 Fetching historical data from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')}")
+        start_time = end_time - (5 * 365 * 24 * 60 * 60 * 1000)  # 5 years ago
+        logger.info(f"📅 Fetching historical data from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')} (5 years)")
         
         # Get fiat purchase history (card purchases) - these count as buys
         fiat_purchases = {}
