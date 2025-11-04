@@ -61,29 +61,16 @@ async def get_mini_chart(
             symbol.upper(), days=days
         )
 
-        # If still no data, try final fallback: synthesize from current price
+        # Don't synthesize data on rate limits - return empty instead
+        # This prevents creating flat lines that get cached
         if not mini_data:
-            try:
-                prices = await multi_exchange_price_service.get_current_prices([symbol.upper()])
-                current = prices.get(symbol.upper())
-                if current is not None:
-                    from datetime import datetime, timezone, timedelta
-                    now = datetime.now(timezone.utc)
-                    synthesized = []
-                    for i in range(max(7, days), 0, -1):
-                        dt = now - timedelta(days=i)
-                        synthesized.append({
-                            "timestamp": int(dt.timestamp()),
-                            "price": float(current),
-                            "date": dt.isoformat(),
-                        })
-                    mini_data = synthesized
-                    logger.debug(f"Using synthesized mini chart data for {symbol}")
-            except Exception as e:
-                logger.warning(f"Error synthesizing mini chart data for {symbol}: {e}")
-
-        if not mini_data:
-            raise HTTPException(status_code=404, detail=f"No mini chart data available for {symbol}")
+            # Check if we have any cached data (even if it's old)
+            # Only return 404 if truly no data exists
+            logger.debug(f"No mini chart data available for {symbol} (may be rate limited)")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No mini chart data available for {symbol}. Please try again later."
+            )
 
         data_points = [
             ChartDataPoint(

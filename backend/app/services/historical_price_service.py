@@ -1,6 +1,8 @@
 import aiohttp
 import json
 import logging
+import asyncio
+import time
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta, timezone
 from ..core.config import settings
@@ -16,7 +18,13 @@ class HistoricalPriceService:
 
     def __init__(self):
         self.coingecko_url = "https://api.coingecko.com/api/v3"
-        self.cache_duration = timedelta(days=1)
+        self.cache_duration = timedelta(hours=1)  # Cache for 1 hour (charts refresh hourly)
+        # Rate limiting: CoinGecko free tier allows ~10-50 calls/minute
+        # Use semaphore to limit concurrent requests and delay between requests
+        self._request_semaphore = asyncio.Semaphore(2)  # Max 2 concurrent requests
+        self._min_request_delay = 1.5  # Minimum 1.5 seconds between requests
+        self._last_request_time = 0.0
+        self._rate_limit_retry_delay = 60  # Wait 60 seconds on rate limit
 
     def _symbol_to_coingecko_id(self, symbol: str) -> str:
         """Map common symbols to CoinGecko coin IDs"""
@@ -72,60 +80,90 @@ class HistoricalPriceService:
             logger.debug(f"Returning cached price history for {symbol}")
             return cached_data
 
-        # Fetch from CoinGecko
+        # Fetch from CoinGecko with rate limiting
         coin_id = self._symbol_to_coingecko_id(symbol)
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.coingecko_url}/coins/{coin_id}/market_chart"
-                params = {
-                    "vs_currency": "usd",
-                    "days": str(days),
-                    "interval": "daily" if days > 90 else "hourly",
-                }
+        async with self._request_semaphore:
+            # Ensure minimum delay between requests
+            current_time = time.time()
+            time_since_last_request = current_time - self._last_request_time
+            if time_since_last_request < self._min_request_delay:
+                wait_time = self._min_request_delay - time_since_last_request
+                await asyncio.sleep(wait_time)
+            
+            self._last_request_time = time.time()
+            
+            try:
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.coingecko_url}/coins/{coin_id}/market_chart"
+                    params = {
+                        "vs_currency": "usd",
+                        "days": str(days),
+                    }
+                    # Only specify interval for days > 90 (daily). For 2-90 days, CoinGecko
+                    # automatically provides hourly data without explicit interval parameter
+                    if days > 90:
+                        params["interval"] = "daily"
 
-                async with session.get(url, params=params, timeout=30) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        prices = data.get("prices", [])
+                    async with session.get(url, params=params, timeout=30) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            prices = data.get("prices", [])
 
-                        # Format data
-                        history = [
-                            {
-                                "timestamp": int(price[0] / 1000),  # Convert to seconds
-                                "price": float(price[1]),
-                                "date": datetime.fromtimestamp(
-                                    price[0] / 1000, tz=timezone.utc
-                                ).isoformat(),
-                            }
-                            for price in prices
-                        ]
+                            # Format data
+                            history = [
+                                {
+                                    "timestamp": int(price[0] / 1000),  # Convert to seconds
+                                    "price": float(price[1]),
+                                    "date": datetime.fromtimestamp(
+                                        price[0] / 1000, tz=timezone.utc
+                                    ).isoformat(),
+                                }
+                                for price in prices
+                            ]
 
-                        # Cache the results
-                        self._save_to_cache(symbol, history)
+                            # Cache the results
+                            self._save_to_cache(symbol, history)
 
-                        logger.info(
-                            f"Fetched {len(history)} price points for {symbol}"
-                        )
-                        return history
-                    elif response.status == 404:
-                        logger.warning(
-                            f"CoinGecko coin ID not found for {symbol}, trying alternative"
-                        )
-                        # Try with symbol directly
-                        return await self._fetch_alternative(symbol, days)
-                    else:
-                        error_text = await response.text()
-                        logger.error(
-                            f"CoinGecko API error {response.status} for {symbol}: {error_text}"
-                        )
-                        # Final fallback: synthesize minimal history from current price
-                        return await self._fallback_from_current_price(symbol, days)
-        except Exception as e:
-            logger.error(
-                f"Error fetching price history for {symbol}: {e}", exc_info=True
-            )
-            # Final fallback: synthesize minimal history from current price
-            return await self._fallback_from_current_price(symbol, days)
+                            logger.info(
+                                f"Fetched {len(history)} price points for {symbol}"
+                            )
+                            return history
+                        elif response.status == 404:
+                            logger.warning(
+                                f"CoinGecko coin ID not found for {symbol}, trying alternative"
+                            )
+                            # Try with symbol directly
+                            return await self._fetch_alternative(symbol, days)
+                        elif response.status == 429:
+                            # Rate limit - try to use cached data if available
+                            error_text = await response.text()
+                            logger.warning(
+                                f"CoinGecko rate limit hit for {symbol}, trying cache fallback"
+                            )
+                            # Try cache fallback (won't return synthesized data)
+                            cached = self._get_from_cache(symbol)
+                            if cached:
+                                return cached
+                            return []
+                        else:
+                            error_text = await response.text()
+                            logger.error(
+                                f"CoinGecko API error {response.status} for {symbol}: {error_text}"
+                            )
+                            # Try cache fallback (won't return synthesized data)
+                            cached = self._get_from_cache(symbol)
+                            if cached:
+                                return cached
+                            return []
+            except Exception as e:
+                logger.error(
+                    f"Error fetching price history for {symbol}: {e}", exc_info=True
+                )
+                # Try cache fallback (won't return synthesized data)
+                cached = self._get_from_cache(symbol)
+                if cached:
+                    return cached
+                return []
 
     async def _fetch_alternative(self, symbol: str, days: int) -> List[Dict[str, any]]:
         """Alternative fetch method using coin list search"""
@@ -146,8 +184,11 @@ class HistoricalPriceService:
                             params = {
                                 "vs_currency": "usd",
                                 "days": str(days),
-                                "interval": "daily" if days > 90 else "hourly",
                             }
+                            # Only specify interval for days > 90 (daily). For 2-90 days, CoinGecko
+                            # automatically provides hourly data without explicit interval parameter
+                            if days > 90:
+                                params["interval"] = "daily"
 
                             async with session.get(
                                 url, params=params, timeout=30
@@ -245,6 +286,17 @@ class HistoricalPriceService:
                 if datetime.now(timezone.utc) - last_updated < self.cache_duration:
                     try:
                         history_data = json.loads(history_data_str)
+                        # Detect if cached data is synthesized/flat (all prices identical)
+                        # This can happen when fallback was used previously
+                        if len(history_data) > 1:
+                            prices = [point.get("price", 0) for point in history_data if isinstance(point, dict)]
+                            if prices and len(set(prices)) == 1:
+                                # All prices are identical - likely synthesized data
+                                logger.warning(
+                                    f"Detected synthesized/flat cached data for {symbol}, invalidating cache"
+                                )
+                                self._clear_cache(symbol)
+                                return None
                         return history_data
                     except json.JSONDecodeError:
                         logger.warning(
@@ -303,70 +355,111 @@ class HistoricalPriceService:
         self, symbol: str, days: int = 7
     ) -> List[Dict[str, any]]:
         """
-        Get mini chart data (last N days) directly from CoinGecko API for real-time price movements
+        Get mini chart data (last N days). Prefers cached data if fresh (< 1 hour old).
+        Otherwise fetches from CoinGecko API and caches the result.
 
         Args:
             symbol: Cryptocurrency symbol
             days: Number of days to return (default: 7)
 
         Returns:
-            List of price points for the last N days from CoinGecko API
+            List of price points for the last N days from cache or CoinGecko API
         """
-        # Fetch fresh data directly from CoinGecko API for real-time chart
+        # Check cache first - if data is < 1 hour old, use it (background task keeps it fresh)
+        cached_data = self._get_from_cache(symbol)
+        if cached_data:
+            # Filter to last N days if needed
+            if days < 365:  # Only filter if we need less than full year
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+                cutoff_timestamp = int(cutoff_date.timestamp())
+                filtered = [
+                    point
+                    for point in cached_data
+                    if point.get("timestamp", 0) >= cutoff_timestamp
+                ]
+                if filtered:
+                    logger.debug(f"Returning cached mini chart data for {symbol} ({len(filtered)} points)")
+                    return filtered
+            else:
+                logger.debug(f"Returning cached chart data for {symbol} ({len(cached_data)} points)")
+                return cached_data
+        
+        # Cache miss or stale - fetch from CoinGecko API
         coin_id = self._symbol_to_coingecko_id(symbol)
         
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.coingecko_url}/coins/{coin_id}/market_chart"
-                # Use hourly intervals for better granularity on mini charts (7 days)
-                # For longer periods, use daily intervals
-                interval = "hourly" if days <= 7 else "daily"
-                params = {
-                    "vs_currency": "usd",
-                    "days": str(days),
-                    "interval": interval,
-                }
+        async with self._request_semaphore:
+            # Ensure minimum delay between requests
+            current_time = time.time()
+            time_since_last_request = current_time - self._last_request_time
+            if time_since_last_request < self._min_request_delay:
+                wait_time = self._min_request_delay - time_since_last_request
+                await asyncio.sleep(wait_time)
+            
+            self._last_request_time = time.time()
+            
+            try:
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.coingecko_url}/coins/{coin_id}/market_chart"
+                    params = {
+                        "vs_currency": "usd",
+                        "days": str(days),
+                    }
+                    # Only specify interval for days > 90 (daily). For 2-90 days, CoinGecko
+                    # automatically provides hourly data without explicit interval parameter
+                    if days > 90:
+                        params["interval"] = "daily"
 
-                async with session.get(url, params=params, timeout=30) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        prices = data.get("prices", [])
+                    async with session.get(url, params=params, timeout=30) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            prices = data.get("prices", [])
 
-                        # Format data points
-                        history = [
-                            {
-                                "timestamp": int(price[0] / 1000),  # Convert milliseconds to seconds
-                                "price": float(price[1]),
-                                "date": datetime.fromtimestamp(
-                                    price[0] / 1000, tz=timezone.utc
-                                ).isoformat(),
-                            }
-                            for price in prices
-                        ]
+                            # Format data points
+                            history = [
+                                {
+                                    "timestamp": int(price[0] / 1000),  # Convert milliseconds to seconds
+                                    "price": float(price[1]),
+                                    "date": datetime.fromtimestamp(
+                                        price[0] / 1000, tz=timezone.utc
+                                    ).isoformat(),
+                                }
+                                for price in prices
+                            ]
 
-                        logger.debug(
-                            f"Fetched {len(history)} real-time price points from CoinGecko for {symbol} ({days} days)"
-                        )
-                        return history
-                    elif response.status == 404:
-                        logger.warning(
-                            f"CoinGecko coin ID not found for {symbol}, trying alternative"
-                        )
-                        # Try alternative fetch method
-                        return await self._fetch_alternative(symbol, days)
-                    else:
-                        error_text = await response.text()
-                        logger.error(
-                            f"CoinGecko API error {response.status} for {symbol}: {error_text}"
-                        )
-                        # Fallback to cached data if available
-                        return await self._get_mini_chart_fallback(symbol, days)
-        except Exception as e:
-            logger.error(
-                f"Error fetching mini chart data from CoinGecko for {symbol}: {e}", exc_info=True
-            )
-            # Fallback to cached data if available
-            return await self._get_mini_chart_fallback(symbol, days)
+                            # Cache the fetched data
+                            self._save_to_cache(symbol, history)
+                            
+                            logger.debug(
+                                f"Fetched {len(history)} real-time price points from CoinGecko for {symbol} ({days} days)"
+                            )
+                            return history
+                        elif response.status == 404:
+                            logger.warning(
+                                f"CoinGecko coin ID not found for {symbol}, trying alternative"
+                            )
+                            # Try alternative fetch method
+                            return await self._fetch_alternative(symbol, days)
+                        elif response.status == 429:
+                            # Rate limit - don't create synthesized data
+                            error_text = await response.text()
+                            logger.warning(
+                                f"CoinGecko rate limit hit for {symbol} mini chart, using cache fallback"
+                            )
+                            # Fallback to cached data if available
+                            return await self._get_mini_chart_fallback(symbol, days)
+                        else:
+                            error_text = await response.text()
+                            logger.error(
+                                f"CoinGecko API error {response.status} for {symbol}: {error_text}"
+                            )
+                            # Fallback to cached data if available
+                            return await self._get_mini_chart_fallback(symbol, days)
+            except Exception as e:
+                logger.error(
+                    f"Error fetching mini chart data from CoinGecko for {symbol}: {e}", exc_info=True
+                )
+                # Fallback to cached data if available
+                return await self._get_mini_chart_fallback(symbol, days)
 
     async def _get_mini_chart_fallback(
         self, symbol: str, days: int

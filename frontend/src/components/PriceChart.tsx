@@ -32,6 +32,12 @@ export function PriceChart({
         setLoading(true)
         setError(null)
         
+        // Stagger requests to avoid rate limiting - add delay based on symbol hash
+        // This spreads out requests when multiple charts load simultaneously
+        const symbolHash = symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
+        const delay = (symbolHash % 10) * 100 // 0-900ms delay based on symbol
+        await new Promise(resolve => setTimeout(resolve, delay))
+        
         const data = mini 
           ? await apiClient.getMiniChart(symbol, days)
           : await apiClient.getPriceHistory(symbol, days === 7 ? 365 : days)
@@ -39,7 +45,12 @@ export function PriceChart({
         setChartData(data.data || [])
       } catch (err: any) {
         logger.error(`Error fetching chart data for ${symbol}:`, err)
-        setError('Failed to load chart')
+        // Check if it's a rate limit or API error
+        if (err?.response?.status === 404 || err?.response?.status === 429) {
+          setError('Rate limited - try again later')
+        } else {
+          setError('Failed to load chart')
+        }
       } finally {
         setLoading(false)
       }

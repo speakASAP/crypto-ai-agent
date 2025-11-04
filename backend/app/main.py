@@ -23,6 +23,7 @@ logger = get_logger("backend.app.main")
 from .services.price_tasks import background_price_fetcher, fetch_prices_for_symbols
 from .services.ai_advisor_service import background_ai_advisor_updater, background_prediction_verifier
 from .services.currency_service import background_currency_fetcher, currency_service
+from .services.chart_tasks import background_chart_data_fetcher
 from .services.notification_service import check_missed_alerts_on_startup
 from .core.database import (
     verify_database_connection_and_schema,
@@ -102,6 +103,10 @@ async def lifespan(app: FastAPI):
     prediction_verifier_task = asyncio.create_task(background_prediction_verifier())
     logger.info("✅ Prediction verification task started")
 
+    # Start background chart data fetcher (hourly updates)
+    chart_task = asyncio.create_task(background_chart_data_fetcher())
+    logger.info("✅ Chart data fetcher task started (hourly updates)")
+
     yield
 
     # Shutdown
@@ -110,6 +115,7 @@ async def lifespan(app: FastAPI):
     try:
         ai_advisor_task.cancel()
         prediction_verifier_task.cancel()
+        chart_task.cancel()
     except NameError:
         pass  # Tasks may not have been created if startup failed
     logger.info("🛑 Shutting down Crypto AI Agent API v2.0")
