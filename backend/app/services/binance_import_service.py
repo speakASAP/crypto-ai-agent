@@ -531,7 +531,11 @@ class BinanceImportService:
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Binance balances")
         logger.info(f"📊 Collected {sum(len(trades) for trades in all_trades_collected.values())} total trades for analysis")
-        return portfolio_items, all_trades_collected
+        # Return fiat orders as well for CSV export
+        fiat_orders_list = []
+        for asset_orders in fiat_purchases.values():
+            fiat_orders_list.extend(asset_orders)
+        return portfolio_items, all_trades_collected, fiat_orders_list
     
     async def import_portfolio(self, user_id: int) -> Dict:
         """Import complete portfolio from Binance"""
