@@ -9,7 +9,9 @@ import time
 import requests
 import warnings
 import urllib3
-from typing import Dict, List, Optional
+import csv
+import os
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from ..services.currency_service import currency_service
 from ..services.multi_exchange_price_service import MultiExchangePriceService
@@ -318,9 +320,12 @@ class BitfinexImportService:
             logger.warning(f"Error converting {price} {quote_currency} to USD: {e}, using price as-is")
             return price
 
-    async def calculate_portfolio_from_wallets(self, wallets: List[Dict]) -> List[Dict]:
-        """Calculate portfolio items from Bitfinex wallets"""
+    async def calculate_portfolio_from_wallets(self, wallets: List[Dict], all_trades_data: List = None) -> Tuple[List[Dict], List]:
+        """Calculate portfolio items from Bitfinex wallets
+        Returns: (portfolio_items, all_trades_collected)
+        """
         portfolio_items = []
+        all_trades_collected = []
         
         # Pre-fetch BTC and ETH prices for better conversion accuracy
         try:
@@ -333,21 +338,25 @@ class BitfinexImportService:
         
         # First, try to get all trades at once (more efficient)
         all_trades_map = {}
-        try:
-            all_trades = await self.get_all_trades()
-            if all_trades:
-                logger.info(f"Processing {len(all_trades)} trades from all-trades endpoint")
-                for trade in all_trades:
-                    if len(trade) >= 2:
-                        # Normalize pair format for consistent matching
-                        pair_raw = trade[1] if isinstance(trade[1], str) else str(trade[1])
-                        pair = self._normalize_pair(pair_raw)
-                        if pair not in all_trades_map:
-                            all_trades_map[pair] = []
-                        all_trades_map[pair].append(trade)
-                logger.info(f"✅ Built trades map with {len(all_trades_map)} unique pairs: {list(all_trades_map.keys())[:10]}")
-        except Exception as e:
-            logger.debug(f"Could not use all-trades endpoint, will fetch per-symbol: {e}")
+        if all_trades_data is None:
+            try:
+                all_trades_data = await self.get_all_trades()
+            except Exception as e:
+                logger.debug(f"Could not use all-trades endpoint, will fetch per-symbol: {e}")
+                all_trades_data = []
+        
+        if all_trades_data:
+            all_trades_collected.extend(all_trades_data)
+            logger.info(f"Processing {len(all_trades_data)} trades from all-trades endpoint")
+            for trade in all_trades_data:
+                if len(trade) >= 2:
+                    # Normalize pair format for consistent matching
+                    pair_raw = trade[1] if isinstance(trade[1], str) else str(trade[1])
+                    pair = self._normalize_pair(pair_raw)
+                    if pair not in all_trades_map:
+                        all_trades_map[pair] = []
+                    all_trades_map[pair].append(trade)
+            logger.info(f"✅ Built trades map with {len(all_trades_map)} unique pairs: {list(all_trades_map.keys())[:10]}")
         
         # Common quote currencies to try (expanded list)
         common_quote_currencies = ['USD', 'USDT', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'USDC', 'DAI']
@@ -421,6 +430,8 @@ class BitfinexImportService:
                 for pair in trading_pairs:
                     try:
                         trades = await self.get_trades(pair, 250)
+                        if trades:
+                            all_trades_collected.extend(trades)
                         logger.info(f"Found {len(trades)} total trades for {pair}")
                         
                         for trade in trades:
@@ -524,10 +535,121 @@ class BitfinexImportService:
                 })
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Bitfinex wallets")
-        return portfolio_items
+        logger.info(f"📊 Collected {len(all_trades_collected)} total trades for analysis")
+        return portfolio_items, all_trades_collected
+
+    def _save_import_data_to_csv(self, user_id: int, wallets: List[Dict], all_trades: List, 
+                                 portfolio_items: List[Dict], account_info: Dict = None) -> str:
+        """Save full Bitfinex import data to CSV file for analysis"""
+        try:
+            # Create logs directory if it doesn't exist
+            logs_dir = "/app/logs"
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_filename = f"{logs_dir}/bitfinex_import_{user_id}_{timestamp}.csv"
+            
+            with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header
+                writer.writerow(['=== BITFINEX IMPORT DATA ==='])
+                writer.writerow(['Timestamp', timestamp])
+                writer.writerow(['User ID', user_id])
+                writer.writerow([''])
+                
+                # Write account info
+                writer.writerow(['=== ACCOUNT INFO ==='])
+                if account_info:
+                    for key, value in account_info.items():
+                        writer.writerow([key, value])
+                else:
+                    writer.writerow(['No account info'])
+                writer.writerow([''])
+                
+                # Write wallets
+                writer.writerow(['=== WALLETS ==='])
+                writer.writerow(['Type', 'Currency', 'Balance', 'Unsettled Interest', 'Balance Available'])
+                for wallet in wallets:
+                    writer.writerow([
+                        wallet.get('type', ''),
+                        wallet.get('currency', ''),
+                        wallet.get('balance', 0),
+                        wallet.get('unsettled_interest', 0),
+                        wallet.get('balance_available', 0)
+                    ])
+                writer.writerow([''])
+                
+                # Write all trades (raw)
+                writer.writerow(['=== ALL TRADES (RAW) ==='])
+                if all_trades:
+                    # Write header based on trade structure
+                    writer.writerow(['Trade Index', 'Trade Data (JSON)'])
+                    for idx, trade in enumerate(all_trades):
+                        writer.writerow([idx, json.dumps(trade)])
+                else:
+                    writer.writerow(['No trades found'])
+                writer.writerow([''])
+                
+                # Write parsed trades details
+                writer.writerow(['=== PARSED TRADES DETAILS ==='])
+                writer.writerow(['ID', 'Pair', 'MTS Create', 'Order ID', 'Exec Amount', 'Exec Price', 
+                                'Order Type', 'Order Price', 'Maker', 'Fee', 'Fee Currency'])
+                for trade in all_trades:
+                    if isinstance(trade, list) and len(trade) >= 6:
+                        writer.writerow([
+                            trade[0] if len(trade) > 0 else '',
+                            trade[1] if len(trade) > 1 else '',
+                            trade[2] if len(trade) > 2 else '',
+                            trade[3] if len(trade) > 3 else '',
+                            trade[4] if len(trade) > 4 else '',
+                            trade[5] if len(trade) > 5 else '',
+                            trade[6] if len(trade) > 6 else '',
+                            trade[7] if len(trade) > 7 else '',
+                            trade[8] if len(trade) > 8 else '',
+                            trade[9] if len(trade) > 9 else '',
+                            trade[10] if len(trade) > 10 else ''
+                        ])
+                writer.writerow([''])
+                
+                # Write portfolio items
+                writer.writerow(['=== PORTFOLIO ITEMS ==='])
+                if portfolio_items:
+                    writer.writerow(['Symbol', 'Amount', 'Price Buy', 'Purchase Date', 'Base Currency', 
+                                    'Source', 'Commission', 'Total Investment Text'])
+                    for item in portfolio_items:
+                        writer.writerow([
+                            item.get('symbol', ''),
+                            item.get('amount', 0),
+                            item.get('price_buy', 0),
+                            item.get('purchase_date', ''),
+                            item.get('base_currency', ''),
+                            item.get('source', ''),
+                            item.get('commission', 0),
+                            item.get('total_investment_text', '')
+                        ])
+                else:
+                    writer.writerow(['No portfolio items'])
+                writer.writerow([''])
+                
+                # Write summary
+                writer.writerow(['=== SUMMARY ==='])
+                writer.writerow(['Total Wallets', len(wallets)])
+                writer.writerow(['Total Trades', len(all_trades)])
+                writer.writerow(['Total Portfolio Items', len(portfolio_items)])
+                writer.writerow(['Items with Price Buy > 0', sum(1 for item in portfolio_items if item.get('price_buy', 0) > 0)])
+                writer.writerow(['Items with Valid Purchase Date', sum(1 for item in portfolio_items if item.get('purchase_date') and item.get('purchase_date') != datetime.now().isoformat() + "Z")])
+            
+            logger.info(f"💾 Saved Bitfinex import data to {csv_filename}")
+            return csv_filename
+            
+        except Exception as e:
+            logger.error(f"❌ Error saving import data to CSV: {e}")
+            return ""
 
     async def import_portfolio(self, user_id: int) -> Dict:
         """Import complete portfolio from Bitfinex"""
+        all_trades_data = []
         try:
             logger.info(f"🚀 Starting Bitfinex portfolio import for user {user_id}")
             
@@ -549,21 +671,45 @@ class BitfinexImportService:
                     'items_imported': 0
                 }
             
-            # Calculate portfolio items
-            portfolio_items = await self.calculate_portfolio_from_wallets(wallets)
+            # Calculate portfolio items (this will also collect all trades)
+            portfolio_items, all_trades_collected = await self.calculate_portfolio_from_wallets(wallets)
             
             logger.info(f"✅ Bitfinex import completed: {len(portfolio_items)} items ready for import")
+            
+            # Save full import data to CSV for analysis
+            csv_file = self._save_import_data_to_csv(
+                user_id, 
+                wallets, 
+                all_trades_collected, 
+                portfolio_items, 
+                connection_test.get('account_info', {})
+            )
+            
+            if csv_file:
+                logger.info(f"📄 Full import data saved to: {csv_file}")
             
             return {
                 'success': True,
                 'message': f"Successfully prepared {len(portfolio_items)} portfolio items for import",
                 'items_imported': len(portfolio_items),
                 'portfolio_items': portfolio_items,
-                'account_info': connection_test.get('account_info', {})
+                'account_info': connection_test.get('account_info', {}),
+                'debug_csv': csv_file if csv_file else None
             }
             
         except Exception as e:
             logger.error(f"❌ Bitfinex portfolio import failed: {e}")
+            # Still try to save what we have
+            try:
+                csv_file = self._save_import_data_to_csv(
+                    user_id,
+                    wallets if 'wallets' in locals() else [],
+                    all_trades_collected if 'all_trades_collected' in locals() else [],
+                    portfolio_items if 'portfolio_items' in locals() else [],
+                    {}
+                )
+            except:
+                pass
             return {
                 'success': False,
                 'message': f"Import failed: {str(e)}",
