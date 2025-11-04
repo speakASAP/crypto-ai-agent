@@ -373,42 +373,31 @@ class BinanceImportService:
             
             logger.info(f"🔍 Looking for trades for {asset} in pairs: {trading_pairs}")
             
-            # Also check fiat purchase history for direct fiat purchases
-            fiat_purchases = []
-            try:
-                fiat_orders = await self.get_fiat_purchase_history()
-                for order in fiat_orders:
-                    if order.get('cryptoCurrency') == asset and order.get('status') == 'Completed':
-                        obtain_amount = float(order.get('obtainAmount', 0))
-                        total_price = float(order.get('totalPrice', 0))
-                        if obtain_amount > 0:
-                            price = total_price / obtain_amount
-                            fiat_purchases.append({
+            # Check fiat purchases for this asset (from the pre-fetched list)
+            if asset in fiat_purchases:
+                logger.info(f"Found {len(fiat_purchases[asset])} fiat purchases for {asset}")
+                for fiat_order in fiat_purchases[asset]:
+                    try:
+                        # Binance fiat order fields may vary - try multiple field names
+                        crypto_amount = float(fiat_order.get('cryptoAmount', fiat_order.get('obtainAmount', 0)))
+                        fiat_amount = float(fiat_order.get('totalPrice', fiat_order.get('fiatAmount', 0)))
+                        order_time = fiat_order.get('createTime', fiat_order.get('createTimestamp', 0))
+                        
+                        if crypto_amount > 0 and fiat_amount > 0:
+                            # Calculate price: total fiat paid / crypto amount
+                            price_per_unit = fiat_amount / crypto_amount
+                            
+                            buy_trades.append({
                                 'symbol': f"{asset}FIAT",
-                                'qty': obtain_amount,
-                                'price': price,
-                                'time': order.get('createTime', 0),
+                                'qty': crypto_amount,
+                                'price': price_per_unit,
+                                'time': order_time if order_time else int(time.time() * 1000),
                                 'commission': 0.0,
                             })
-                            logger.info(f"✅ Found fiat purchase for {asset}: {obtain_amount} at ${total_price:.2f} (price: ${price:.4f})")
-            except Exception as e:
-                logger.debug(f"Could not get fiat purchase history: {e}")
-            
-            # Check deposit history to get earliest deposit date (for coins received via airdrops, staking, etc.)
-            deposit_history = []
-            try:
-                deposits = await self.get_deposit_history(asset)
-                for deposit in deposits:
-                    if deposit.get('status') == 1:  # 1 = Success
-                        deposit_history.append({
-                            'amount': float(deposit.get('amount', 0)),
-                            'time': deposit.get('insertTime', 0),
-                        })
-                        logger.debug(f"Found deposit for {asset}: {deposit.get('amount')} at {deposit.get('insertTime')}")
-                if deposit_history:
-                    logger.info(f"✅ Found {len(deposit_history)} deposits for {asset}")
-            except Exception as e:
-                logger.debug(f"Could not get deposit history for {asset}: {e}")
+                            logger.info(f"✅ Added fiat purchase: {asset} amount={crypto_amount}, total_price=${fiat_amount:.2f}, price_per_unit=${price_per_unit:.4f}, time={order_time}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing fiat purchase for {asset}: {e}, order: {fiat_order}")
+                        continue
             
             for pair in trading_pairs:
                 try:
