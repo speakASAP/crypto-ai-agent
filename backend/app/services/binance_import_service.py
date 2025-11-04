@@ -209,78 +209,201 @@ class BinanceImportService:
             logger.warning(f"⚠️ Error getting trading history for {symbol}: {e}")
             return []
     
-    async def get_fiat_purchase_history(self) -> List[Dict]:
+    async def get_fiat_payments(self, start_time: int = None, end_time: int = None) -> List[Dict]:
         """Get fiat payment history (buy/sell) from Binance using /sapi/v1/fiat/payments endpoint
-        This endpoint provides buy/sell history with prices and dates (minimum 1 year of data)
+        This endpoint provides buy/sell history with prices and dates
         Reference: https://www.binance.com/en/my/wallet/exchange/buysell-history
+        Supports pagination to get ALL available data
         """
         try:
-            # Binance fiat payments endpoint: /sapi/v1/fiat/payments
-            # This is different from /sapi/v1/fiat/orders - payments includes crypto info
             base_url = "https://api.binance.com"
             endpoint = "/sapi/v1/fiat/payments"
             
             all_payments = []
             
-            # Calculate time range: last 1 year (minimum supported)
-            end_time = int(time.time() * 1000)  # Current time in milliseconds
-            start_time = end_time - (1 * 365 * 24 * 60 * 60 * 1000)  # 1 year ago
+            # Default time range: last 2 years (extend if possible)
+            if not end_time:
+                end_time = int(time.time() * 1000)  # Current time in milliseconds
+            if not start_time:
+                start_time = end_time - (2 * 365 * 24 * 60 * 60 * 1000)  # 2 years ago
+            
+            logger.info(f"📅 Fetching fiat payments from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')}")
             
             # Get both buy (transactionType=0) and sell (transactionType=1) payments
             for transaction_type in ['0', '1']:
-                try:
-                    # Build query parameters with time range
-                    timestamp = self._get_timestamp()
-                    params = {
-                        'transactionType': transaction_type,
-                        'beginTime': str(start_time),
-                        'endTime': str(end_time),
-                        'timestamp': str(timestamp),
-                        'rows': '500'  # Get up to 500 payments per type
-                    }
-                    
-                    # Create query string
-                    query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-                    
-                    # Generate signature
-                    signature = self._generate_signature(query_string)
-                    
-                    # Add signature to params
-                    params['signature'] = signature
-                    
-                    # Build full URL
-                    url = f"{base_url}{endpoint}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
-                    
-                    # Make request
-                    headers = {
-                        'X-MBX-APIKEY': self.api_key
-                    }
-                    
-                    ssl_context = ssl.create_default_context()
-                    ssl_context.check_hostname = False
-                    ssl_context.verify_mode = ssl.CERT_NONE
-                    
-                    connector = aiohttp.TCPConnector(ssl=ssl_context)
-                    async with aiohttp.ClientSession(connector=connector) as session:
-                        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                            if response.status == 200:
-                                result = await response.json()
-                                payments = result.get('data', [])
-                                logger.info(f"✅ Retrieved {len(payments)} fiat payments (type={transaction_type}, buy={'Buy' if transaction_type == '0' else 'Sell'})")
-                                all_payments.extend(payments)
-                            else:
-                                error_text = await response.text()
-                                logger.warning(f"⚠️ Fiat payments API (type={transaction_type}) returned status {response.status}: {error_text}")
-                except Exception as e:
-                    logger.warning(f"Error getting fiat payments type {transaction_type}: {e}")
-                    continue
+                page = 1
+                rows_per_page = 500  # Maximum rows per page
+                has_more = True
+                
+                while has_more:
+                    try:
+                        timestamp = self._get_timestamp()
+                        params = {
+                            'transactionType': transaction_type,
+                            'beginTime': str(start_time),
+                            'endTime': str(end_time),
+                            'timestamp': str(timestamp),
+                            'rows': str(rows_per_page),
+                            'page': str(page)
+                        }
+                        
+                        # Create query string
+                        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+                        
+                        # Generate signature
+                        signature = self._generate_signature(query_string)
+                        
+                        # Add signature to params
+                        params['signature'] = signature
+                        
+                        # Build full URL
+                        url = f"{base_url}{endpoint}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+                        
+                        # Make request
+                        headers = {
+                            'X-MBX-APIKEY': self.api_key
+                        }
+                        
+                        ssl_context = ssl.create_default_context()
+                        ssl_context.check_hostname = False
+                        ssl_context.verify_mode = ssl.CERT_NONE
+                        
+                        connector = aiohttp.TCPConnector(ssl=ssl_context)
+                        async with aiohttp.ClientSession(connector=connector) as session:
+                            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                                if response.status == 200:
+                                    result = await response.json()
+                                    payments = result.get('data', [])
+                                    total = result.get('total', len(payments))
+                                    
+                                    if payments:
+                                        all_payments.extend(payments)
+                                        logger.info(f"✅ Retrieved page {page}: {len(payments)} fiat payments (type={transaction_type}, buy={'Buy' if transaction_type == '0' else 'Sell'}, total={total})")
+                                        
+                                        # Check if there are more pages
+                                        if len(payments) < rows_per_page or len(all_payments) >= total:
+                                            has_more = False
+                                        else:
+                                            page += 1
+                                            await asyncio.sleep(0.1)  # Small delay to avoid rate limits
+                                    else:
+                                        has_more = False
+                                else:
+                                    error_text = await response.text()
+                                    logger.warning(f"⚠️ Fiat payments API (type={transaction_type}, page={page}) returned status {response.status}: {error_text}")
+                                    has_more = False
+                    except Exception as e:
+                        logger.warning(f"Error getting fiat payments type {transaction_type}, page {page}: {e}")
+                        has_more = False
+                        continue
             
-            logger.info(f"✅ Retrieved {len(all_payments)} total fiat payments (buy/sell history)")
+            logger.info(f"✅ Retrieved {len(all_payments)} total fiat payments (buy/sell history) with pagination")
             return all_payments
                         
         except Exception as e:
             logger.warning(f"⚠️ Error getting fiat payment history: {e}")
             return []
+    
+    async def get_fiat_orders(self, start_time: int = None, end_time: int = None) -> List[Dict]:
+        """Get fiat orders from Binance using /sapi/v1/fiat/orders endpoint
+        This is different from fiat payments - orders may contain additional transaction data
+        Supports pagination to get ALL available data
+        """
+        try:
+            base_url = "https://api.binance.com"
+            endpoint = "/sapi/v1/fiat/orders"
+            
+            all_orders = []
+            
+            # Default time range: last 2 years
+            if not end_time:
+                end_time = int(time.time() * 1000)
+            if not start_time:
+                start_time = end_time - (2 * 365 * 24 * 60 * 60 * 1000)  # 2 years ago
+            
+            logger.info(f"📅 Fetching fiat orders from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')}")
+            
+            # Get both buy (transactionType=0) and sell (transactionType=1) orders
+            for transaction_type in ['0', '1']:
+                page = 1
+                rows_per_page = 500  # Maximum rows per page
+                has_more = True
+                
+                while has_more:
+                    try:
+                        timestamp = self._get_timestamp()
+                        params = {
+                            'transactionType': transaction_type,
+                            'beginTime': str(start_time),
+                            'endTime': str(end_time),
+                            'timestamp': str(timestamp),
+                            'rows': str(rows_per_page),
+                            'page': str(page)
+                        }
+                        
+                        # Create query string
+                        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+                        
+                        # Generate signature
+                        signature = self._generate_signature(query_string)
+                        
+                        # Add signature to params
+                        params['signature'] = signature
+                        
+                        # Build full URL
+                        url = f"{base_url}{endpoint}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+                        
+                        # Make request
+                        headers = {
+                            'X-MBX-APIKEY': self.api_key
+                        }
+                        
+                        ssl_context = ssl.create_default_context()
+                        ssl_context.check_hostname = False
+                        ssl_context.verify_mode = ssl.CERT_NONE
+                        
+                        connector = aiohttp.TCPConnector(ssl=ssl_context)
+                        async with aiohttp.ClientSession(connector=connector) as session:
+                            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                                if response.status == 200:
+                                    result = await response.json()
+                                    orders = result.get('data', [])
+                                    total = result.get('total', len(orders))
+                                    
+                                    if orders:
+                                        all_orders.extend(orders)
+                                        logger.info(f"✅ Retrieved page {page}: {len(orders)} fiat orders (type={transaction_type}, buy={'Buy' if transaction_type == '0' else 'Sell'}, total={total})")
+                                        
+                                        # Check if there are more pages
+                                        if len(orders) < rows_per_page or len(all_orders) >= total:
+                                            has_more = False
+                                        else:
+                                            page += 1
+                                            await asyncio.sleep(0.1)  # Small delay to avoid rate limits
+                                    else:
+                                        has_more = False
+                                else:
+                                    error_text = await response.text()
+                                    logger.warning(f"⚠️ Fiat orders API (type={transaction_type}, page={page}) returned status {response.status}: {error_text}")
+                                    has_more = False
+                    except Exception as e:
+                        logger.warning(f"Error getting fiat orders type {transaction_type}, page {page}: {e}")
+                        has_more = False
+                        continue
+            
+            logger.info(f"✅ Retrieved {len(all_orders)} total fiat orders with pagination")
+            return all_orders
+                        
+        except Exception as e:
+            logger.warning(f"⚠️ Error getting fiat orders: {e}")
+            return []
+    
+    async def get_fiat_purchase_history(self) -> List[Dict]:
+        """Get both fiat payments and fiat orders - all available data"""
+        payments = await self.get_fiat_payments()
+        orders = await self.get_fiat_orders()
+        logger.info(f"📦 Combined: {len(payments)} fiat payments + {len(orders)} fiat orders = {len(payments) + len(orders)} total records")
+        return payments + orders
     
     async def get_deposit_history(self, asset: str = None) -> List[Dict]:
         """Get deposit history from Binance"""
@@ -356,7 +479,7 @@ class BinanceImportService:
     
     def _save_import_data_to_csv(self, user_id: int, balances: List[Dict], all_trades: Dict[str, List], 
                                  portfolio_items: List[Dict], account_info: Dict = None, fiat_payments: List[Dict] = None,
-                                 deposits: List[Dict] = None, withdrawals: List[Dict] = None) -> str:
+                                 fiat_orders: List[Dict] = None, deposits: List[Dict] = None, withdrawals: List[Dict] = None) -> str:
         """Save full Binance import data to CSV file for analysis"""
         try:
             # Create logs directory if it doesn't exist
@@ -441,6 +564,16 @@ class BinanceImportService:
                         writer.writerow([json.dumps(payment)])
                 else:
                     writer.writerow(['No fiat payments found'])
+                writer.writerow([''])
+                
+                # Write fiat orders (if provided)
+                writer.writerow(['=== FIAT ORDERS ==='])
+                if fiat_orders:
+                    writer.writerow(['Order Data (JSON)'])
+                    for order in fiat_orders:
+                        writer.writerow([json.dumps(order)])
+                else:
+                    writer.writerow(['No fiat orders found'])
                 writer.writerow([''])
                 
                 # Write deposit history
@@ -531,12 +664,21 @@ class BinanceImportService:
         logger.info(f"📅 Fetching historical data from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')} (5 years)")
         
         # Get fiat payment history (buy/sell) - this includes crypto purchases with prices and dates
-        # Using /sapi/v1/fiat/payments endpoint which provides buy/sell history
+        # Get BOTH fiat payments and fiat orders separately
         fiat_purchases = {}
+        fiat_payments_list = []
+        fiat_orders_list = []
         try:
-            fiat_payments = await self.get_fiat_purchase_history()
-            logger.info(f"📦 Found {len(fiat_payments)} fiat payments (buy/sell history)")
-            for payment in fiat_payments:
+            # Get fiat payments (buy/sell history with crypto info)
+            fiat_payments_list = await self.get_fiat_payments(start_time=start_time, end_time=end_time)
+            logger.info(f"📦 Found {len(fiat_payments_list)} fiat payments (buy/sell history)")
+            
+            # Get fiat orders (may contain additional transaction data)
+            fiat_orders_list = await self.get_fiat_orders(start_time=start_time, end_time=end_time)
+            logger.info(f"📦 Found {len(fiat_orders_list)} fiat orders")
+            
+            # Process fiat payments for portfolio calculation
+            for payment in fiat_payments_list:
                 # Log the payment structure first to see what fields exist
                 logger.info(f"🔍 Fiat payment structure - keys: {list(payment.keys())[:15]}")
                 logger.debug(f"🔍 Fiat payment full data: {json.dumps(payment, indent=2)}")
@@ -795,7 +937,7 @@ class BinanceImportService:
             all_withdrawals = await self.get_withdrawal_history_full()
             
             # Calculate portfolio items (this will also collect all trades)
-            portfolio_items, all_trades_collected, fiat_payments = await self.calculate_portfolio_from_balances(balances)
+            portfolio_items, all_trades_collected, (fiat_payments_list, fiat_orders_list) = await self.calculate_portfolio_from_balances(balances)
             
             logger.info(f"✅ Binance import completed: {len(portfolio_items)} items ready for import")
             
@@ -806,7 +948,8 @@ class BinanceImportService:
                 all_trades_collected, 
                 portfolio_items, 
                 connection_test.get('account_info', {}),
-                fiat_payments,
+                fiat_payments_list,
+                fiat_orders_list,
                 all_deposits,
                 all_withdrawals
             )
@@ -833,7 +976,8 @@ class BinanceImportService:
                     all_trades_collected if 'all_trades_collected' in locals() else {},
                     portfolio_items if 'portfolio_items' in locals() else [],
                     {},
-                    fiat_orders if 'fiat_orders' in locals() else []
+                    fiat_payments_list if 'fiat_payments_list' in locals() else [],
+                    fiat_orders_list if 'fiat_orders_list' in locals() else []
                 )
             except:
                 pass
