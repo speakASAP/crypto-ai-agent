@@ -12,6 +12,64 @@ router = APIRouter(prefix="/api/import", tags=["exchange-imports"])
 logger = get_logger("backend.app.api.exchange_imports")
 
 
+async def generate_predictions_for_symbols(symbols: list[str]) -> None:
+    """Generate AI predictions for symbols that don't have them yet (non-blocking)"""
+    if not symbols:
+        return
+
+    try:
+        from ..services.ai_advisor_service import ai_advisor_service
+
+        # Get unique symbols (uppercase)
+        unique_symbols = list(set(s.upper() for s in symbols if s))
+
+        if not unique_symbols:
+            return
+
+        # Check which symbols need predictions
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Build IN clause with placeholders
+        placeholders = ','.join(['%s'] * len(unique_symbols))
+        check_sql = _normalize_placeholders(
+            f"SELECT symbol FROM ai_predictions WHERE symbol IN ({placeholders}) AND user_id IS NULL"
+        )
+        cursor.execute(check_sql, unique_symbols)
+        existing_symbols = {row[0] for row in cursor.fetchall()}
+        conn.close()
+
+        # Generate predictions for symbols that don't have them
+        symbols_to_generate = [s for s in unique_symbols if s not in existing_symbols]
+
+        if not symbols_to_generate:
+            logger.debug(f"All {len(unique_symbols)} imported symbols already have predictions")
+            return
+
+        logger.info(f"🤖 Generating AI predictions for {len(symbols_to_generate)} imported symbols: {symbols_to_generate[:10]}{'...' if len(symbols_to_generate) > 10 else ''}")
+
+        # Generate predictions for each symbol (non-blocking, failures don't stop the import)
+        for symbol in symbols_to_generate:
+            try:
+                predictions = await ai_advisor_service.generate_predictions(
+                    user_id=None,  # None = global predictions (stored with user_id = NULL)
+                    symbol=symbol,
+                    force_regenerate=True,  # Force generation for newly imported symbols
+                )
+                if predictions:
+                    logger.info(f"✅ AI predictions generated for {symbol}")
+                else:
+                    logger.warning(f"⚠️ No predictions generated for {symbol} (may be rate-limited or symbol not supported)")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to generate predictions for {symbol}: {e}", exc_info=True)
+                # Continue with other symbols even if one fails
+                continue
+
+    except Exception as e:
+        logger.error(f"⚠️ Error in prediction generation helper: {e}", exc_info=True)
+        # Don't fail the import if prediction generation fails
+
+
 @router.post("/binance/test-connection")
 async def test_binance_connection(current_user: dict = Depends(get_current_active_user)):
     try:
@@ -96,6 +154,11 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
         conn.commit()
         conn.close()
         logger.info(f"✅ Binance import completed: {imported_count} items imported for user {current_user['id']}")
+
+        # Generate AI predictions for imported symbols (non-blocking)
+        imported_symbols = [item['symbol'] for item in result['portfolio_items']]
+        await generate_predictions_for_symbols(imported_symbols)
+
         return {
             'success': True,
             'message': f'Successfully imported {imported_count} portfolio items from Binance',
@@ -193,6 +256,11 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
         conn.commit()
         conn.close()
         logger.info(f"✅ Bitfinex import completed: {imported_count} items imported for user {current_user['id']}")
+
+        # Generate AI predictions for imported symbols (non-blocking)
+        imported_symbols = [item['symbol'] for item in result['portfolio_items']]
+        await generate_predictions_for_symbols(imported_symbols)
+
         return {
             'success': True,
             'message': f'Successfully imported {imported_count} portfolio items from Bitfinex',
