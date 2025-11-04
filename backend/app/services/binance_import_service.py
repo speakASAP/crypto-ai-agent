@@ -355,7 +355,7 @@ class BinanceImportService:
             return []
     
     def _save_import_data_to_csv(self, user_id: int, balances: List[Dict], all_trades: Dict[str, List], 
-                                 portfolio_items: List[Dict], account_info: Dict = None, fiat_orders: List[Dict] = None,
+                                 portfolio_items: List[Dict], account_info: Dict = None, fiat_payments: List[Dict] = None,
                                  deposits: List[Dict] = None, withdrawals: List[Dict] = None) -> str:
         """Save full Binance import data to CSV file for analysis"""
         try:
@@ -433,14 +433,14 @@ class BinanceImportService:
                         ])
                 writer.writerow([''])
                 
-                # Write fiat orders (if provided)
-                writer.writerow(['=== FIAT ORDERS (RAW) ==='])
-                if fiat_orders:
-                    writer.writerow(['Order Data (JSON)'])
-                    for order in fiat_orders:
-                        writer.writerow([json.dumps(order)])
+                # Write fiat payments (buy/sell history) (if provided)
+                writer.writerow(['=== FIAT PAYMENTS (BUY/SELL HISTORY) ==='])
+                if fiat_payments:
+                    writer.writerow(['Payment Data (JSON)'])
+                    for payment in fiat_payments:
+                        writer.writerow([json.dumps(payment)])
                 else:
-                    writer.writerow(['No fiat orders found'])
+                    writer.writerow(['No fiat payments found'])
                 writer.writerow([''])
                 
                 # Write deposit history
@@ -530,28 +530,40 @@ class BinanceImportService:
         start_time = end_time - (5 * 365 * 24 * 60 * 60 * 1000)  # 5 years ago
         logger.info(f"📅 Fetching historical data from {datetime.fromtimestamp(start_time/1000).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(end_time/1000).strftime('%Y-%m-%d')} (5 years)")
         
-        # Get fiat purchase history (card purchases) - these count as buys
+        # Get fiat payment history (buy/sell) - this includes crypto purchases with prices and dates
+        # Using /sapi/v1/fiat/payments endpoint which provides buy/sell history
         fiat_purchases = {}
         try:
-            fiat_orders = await self.get_fiat_purchase_history()
-            logger.info(f"📦 Found {len(fiat_orders)} fiat purchase orders")
-            for order in fiat_orders:
-                # Log the order structure first to see what fields exist
-                logger.info(f"🔍 Fiat order structure - keys: {list(order.keys())[:15]}")
-                logger.debug(f"🔍 Fiat order full data: {json.dumps(order, indent=2)}")
+            fiat_payments = await self.get_fiat_purchase_history()
+            logger.info(f"📦 Found {len(fiat_payments)} fiat payments (buy/sell history)")
+            for payment in fiat_payments:
+                # Log the payment structure first to see what fields exist
+                logger.info(f"🔍 Fiat payment structure - keys: {list(payment.keys())[:15]}")
+                logger.debug(f"🔍 Fiat payment full data: {json.dumps(payment, indent=2)}")
                 
-                # NOTE: Binance fiat orders API (/sapi/v1/fiat/orders) returns FIAT-TO-FIAT transactions
-                # These are NOT crypto purchases! They're fiat payment transactions.
-                # For crypto purchases via card, we need to check:
-                # 1. Regular trading history (already doing this)
-                # 2. All orders (including filled orders)
-                # 3. Deposit history (to see when crypto arrived)
+                # Extract crypto information from payment
+                # The /sapi/v1/fiat/payments endpoint should include crypto info
+                crypto = (
+                    payment.get('cryptoCurrency', '') or 
+                    payment.get('cryptoType', '') or 
+                    payment.get('asset', '') or
+                    payment.get('crypto', '') or
+                    payment.get('coin', '')
+                ).upper()
                 
-                # These fiat orders don't contain crypto info, so we'll skip them
-                # but log them for reference
-                logger.debug(f"⚠️ Fiat order is fiat-to-fiat transaction (not crypto purchase): {order.get('orderNo', 'unknown')}")
+                # Check if this is a buy transaction (transactionType=0)
+                transaction_type = payment.get('transactionType', payment.get('type', ''))
+                is_buy = str(transaction_type) == '0' or payment.get('side', '').upper() == 'BUY'
+                
+                if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD', ''] and is_buy:
+                    if crypto not in fiat_purchases:
+                        fiat_purchases[crypto] = []
+                    fiat_purchases[crypto].append(payment)
+                    logger.info(f"✅ Fiat buy payment found: {crypto} - {payment}")
+                else:
+                    logger.debug(f"Fiat payment skipped - crypto: '{crypto}', is_buy: {is_buy}, type: {transaction_type}")
         except Exception as e:
-            logger.warning(f"Could not get fiat purchase history: {e}")
+            logger.warning(f"Could not get fiat payment history: {e}")
         
         for balance in balances:
             asset = balance['asset']
@@ -613,15 +625,28 @@ class BinanceImportService:
             except Exception as e:
                 logger.debug(f"Could not get deposit history for {asset}: {e}")
             
-            # Check fiat purchases for this asset (from the pre-fetched list)
+            # Check fiat payments (buy/sell) for this asset (from the pre-fetched list)
             if asset in fiat_purchases:
-                logger.info(f"Found {len(fiat_purchases[asset])} fiat purchases for {asset}")
-                for fiat_order in fiat_purchases[asset]:
+                logger.info(f"Found {len(fiat_purchases[asset])} fiat buy payments for {asset}")
+                for fiat_payment in fiat_purchases[asset]:
                     try:
-                        # Binance fiat order fields may vary - try multiple field names
-                        crypto_amount = float(fiat_order.get('cryptoAmount', fiat_order.get('obtainAmount', 0)))
-                        fiat_amount = float(fiat_order.get('totalPrice', fiat_order.get('fiatAmount', 0)))
-                        order_time = fiat_order.get('createTime', fiat_order.get('createTimestamp', 0))
+                        # Binance fiat payments endpoint fields - try multiple field name variations
+                        crypto_amount = float(
+                            fiat_payment.get('obtainAmount', 
+                            fiat_payment.get('cryptoAmount',
+                            fiat_payment.get('amount', 0)))
+                        )
+                        fiat_amount = float(
+                            fiat_payment.get('totalPrice',
+                            fiat_payment.get('fiatAmount',
+                            fiat_payment.get('sourceAmount', 0)))
+                        )
+                        payment_time = (
+                            fiat_payment.get('createTime',
+                            fiat_payment.get('timestamp',
+                            fiat_payment.get('updateTime',
+                            fiat_payment.get('createTimestamp', 0))))
+                        )
                         
                         if crypto_amount > 0 and fiat_amount > 0:
                             # Calculate price: total fiat paid / crypto amount
@@ -631,12 +656,13 @@ class BinanceImportService:
                                 'symbol': f"{asset}FIAT",
                                 'qty': crypto_amount,
                                 'price': price_per_unit,
-                                'time': order_time if order_time else int(time.time() * 1000),
+                                'time': payment_time if payment_time else int(time.time() * 1000),
                                 'commission': 0.0,
                             })
-                            logger.info(f"✅ Added fiat purchase: {asset} amount={crypto_amount}, total_price=${fiat_amount:.2f}, price_per_unit=${price_per_unit:.4f}, time={order_time}")
+                            payment_date = datetime.fromtimestamp(payment_time/1000).isoformat() if payment_time else "N/A"
+                            logger.info(f"✅ Added fiat buy payment: {asset} amount={crypto_amount}, total_price=${fiat_amount:.2f}, price_per_unit=${price_per_unit:.4f}, date={payment_date}")
                     except (ValueError, TypeError) as e:
-                        logger.warning(f"Error parsing fiat purchase for {asset}: {e}, order: {fiat_order}")
+                        logger.warning(f"Error parsing fiat payment for {asset}: {e}, payment: {fiat_payment}")
                         continue
             
             for pair in trading_pairs:
@@ -769,7 +795,7 @@ class BinanceImportService:
             all_withdrawals = await self.get_withdrawal_history_full()
             
             # Calculate portfolio items (this will also collect all trades)
-            portfolio_items, all_trades_collected, fiat_orders = await self.calculate_portfolio_from_balances(balances)
+            portfolio_items, all_trades_collected, fiat_payments = await self.calculate_portfolio_from_balances(balances)
             
             logger.info(f"✅ Binance import completed: {len(portfolio_items)} items ready for import")
             
@@ -780,7 +806,7 @@ class BinanceImportService:
                 all_trades_collected, 
                 portfolio_items, 
                 connection_test.get('account_info', {}),
-                fiat_orders,
+                fiat_payments,
                 all_deposits,
                 all_withdrawals
             )
