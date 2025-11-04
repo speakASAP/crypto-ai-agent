@@ -54,23 +54,15 @@ async def get_mini_chart(
     days: int = 7,
     current_user: dict = Depends(get_current_active_user),
 ):
-    """Get mini chart data (last N days) for a symbol"""
+    """Get mini chart data (last N days) for a symbol from CoinGecko API"""
     try:
-        # First ensure we have full history cached
-        await historical_price_service.get_price_history(symbol.upper(), days=365)
-
-        # Get mini chart data from cache
-        mini_data = historical_price_service.get_mini_chart_data(
+        # Get mini chart data directly from CoinGecko API (with internal fallbacks)
+        mini_data = await historical_price_service.get_mini_chart_data(
             symbol.upper(), days=days
         )
 
-        # Fallback: if cache is still empty, regenerate targeted history and retry
+        # If still no data, try final fallback: synthesize from current price
         if not mini_data:
-            await historical_price_service.get_price_history(symbol.upper(), days=max(7, days))
-            mini_data = historical_price_service.get_mini_chart_data(symbol.upper(), days=days)
-        
-        if not mini_data:
-            # Final fallback: synthesize mini data from current price
             try:
                 prices = await multi_exchange_price_service.get_current_prices([symbol.upper()])
                 current = prices.get(symbol.upper())
@@ -86,9 +78,10 @@ async def get_mini_chart(
                             "date": dt.isoformat(),
                         })
                     mini_data = synthesized
-            except Exception:
-                pass
-        
+                    logger.debug(f"Using synthesized mini chart data for {symbol}")
+            except Exception as e:
+                logger.warning(f"Error synthesizing mini chart data for {symbol}: {e}")
+
         if not mini_data:
             raise HTTPException(status_code=404, detail=f"No mini chart data available for {symbol}")
 

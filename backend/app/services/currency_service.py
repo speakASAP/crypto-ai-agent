@@ -1,11 +1,9 @@
 import httpx
-import asyncio
-from typing import Dict, Optional
+from typing import Dict
 import logging
 import psycopg
 import json
 import redis
-from datetime import datetime, timezone
 from ..core.config import settings
 from ..utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
 
