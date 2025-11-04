@@ -172,89 +172,55 @@ async def background_price_fetcher():
         except Exception as e:
             logger.error(f"Error in background price fetcher: {e}")
         
-        # Wait 60 seconds before next fetch
-        await asyncio.sleep(60)
+        # Wait 120 seconds (2 minutes) before next fetch
+        await asyncio.sleep(120)
 
 async def background_ai_advisor_updater():
-    """Background task to periodically generate/update AI predictions for portfolio and alert symbols"""
+    """Background task to periodically generate/update AI predictions - only for BTC (1 crypto per day)"""
     from .services.ai_advisor_service import ai_advisor_service
     from .utils.db import get_db_connection, normalize_placeholders
 
+    # Only generate predictions for BTC to avoid rate limits
+    TARGET_SYMBOL = "BTC"
+
     while True:
         try:
-            # Wait for the interval before starting
+            # Wait for the interval before starting (daily: 24 hours)
             await asyncio.sleep(settings.ai_prediction_interval_hours * 3600)
 
-            logger.info("🔄 Starting AI advisor prediction update cycle")
+            logger.info(f"🔄 Starting AI advisor prediction update cycle for {TARGET_SYMBOL}")
 
-            # Get all unique symbols from portfolios and alerts
+            # Get a user ID to use for generating predictions
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # Get symbols from portfolios
-            sql = normalize_placeholders(
-                "SELECT DISTINCT symbol FROM portfolio_items"
-            )
+            # Get first available user ID
+            sql = normalize_placeholders("SELECT id FROM users ORDER BY id LIMIT 1")
             cursor.execute(sql)
-            portfolio_symbols = [row[0] for row in cursor.fetchall()]
-
-            # Get symbols from alerts
-            sql = normalize_placeholders(
-                "SELECT DISTINCT symbol FROM alerts WHERE is_active = %s"
-            )
-            cursor.execute(sql, (True,))
-            alert_symbols = [row[0] for row in cursor.fetchall()]
-
+            row = cursor.fetchone()
             conn.close()
 
-            # Combine and deduplicate
-            all_symbols = list(set(portfolio_symbols + alert_symbols))
-
-            if not all_symbols:
-                logger.debug("No symbols found for AI prediction update")
+            if not row:
+                logger.warning("No users found, skipping prediction generation")
                 continue
 
-            logger.info(f"🔄 Generating predictions for {len(all_symbols)} symbols")
+            user_id = row[0]
 
-            # Generate predictions for each symbol (one user per symbol for now)
-            # In the future, we could optimize to generate per user
-            for idx, symbol in enumerate(all_symbols):
-                try:
-                    # Get first user who has this symbol (for now)
-                    # TODO: Generate predictions per user
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
+            try:
+                # Generate predictions only for BTC
+                await ai_advisor_service.generate_predictions(
+                    user_id=user_id,
+                    symbol=TARGET_SYMBOL,
+                    force_regenerate=False,  # Only generate if needed
+                )
+                logger.info(f"✅ Updated predictions for {TARGET_SYMBOL}")
+            except Exception as e:
+                logger.error(
+                    f"Error generating predictions for {TARGET_SYMBOL}: {e}",
+                    exc_info=True,
+                )
 
-                    sql = normalize_placeholders(
-                        "SELECT DISTINCT user_id FROM portfolio_items WHERE symbol = %s LIMIT 1"
-                    )
-                    cursor.execute(sql, (symbol,))
-                    row = cursor.fetchone()
-                    conn.close()
-
-                    if row:
-                        user_id = row[0]
-                        await ai_advisor_service.generate_predictions(
-                            user_id=user_id,
-                            symbol=symbol,
-                            force_regenerate=False,  # Only generate if needed
-                        )
-                        logger.debug(f"✅ Updated predictions for {symbol}")
-                        
-                        # Add delay between symbols to avoid rate limits (except for last symbol)
-                        if idx < len(all_symbols) - 1:
-                            await asyncio.sleep(3)  # 3 second delay between symbols
-                except Exception as e:
-                    logger.error(
-                        f"Error generating predictions for {symbol}: {e}",
-                        exc_info=True,
-                    )
-                    # Add delay even on error to avoid rapid retries hitting rate limits
-                    if idx < len(all_symbols) - 1:
-                        await asyncio.sleep(3)
-                    continue
-
-            logger.info("✅ AI advisor prediction update cycle completed")
+            logger.info(f"✅ AI advisor prediction update cycle completed for {TARGET_SYMBOL}")
 
         except Exception as e:
             logger.error(f"Error in AI advisor updater: {e}", exc_info=True)

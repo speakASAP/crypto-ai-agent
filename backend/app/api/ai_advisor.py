@@ -11,6 +11,7 @@ from ..schemas.ai_advisor import (
     PredictionRequest,
 )
 from ..services.ai_advisor_service import ai_advisor_service
+from ..services.openrouter_service import RateLimitError
 from ..services.news_service import news_service
 from ..services.historical_price_service import historical_price_service
 from ..utils.logger import get_logger
@@ -26,21 +27,36 @@ async def get_predictions(
     current_user: dict = Depends(get_current_active_user),
 ):
     """Get current AI predictions for a symbol"""
+    symbol_upper = symbol.upper()
+    
     try:
         predictions = await ai_advisor_service.generate_predictions(
             user_id=current_user["id"],
-            symbol=symbol.upper(),
+            symbol=symbol_upper,
             force_regenerate=False,
         )
 
+        # For non-BTC symbols, return empty predictions structure instead of 404
+        # This prevents frontend errors when no cached predictions exist
         if not predictions:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No predictions available for {symbol}",
-            )
+            if symbol_upper != "BTC":
+                logger.debug(f"No cached predictions for {symbol_upper} (non-BTC), returning empty structure")
+                return PredictionResponse(symbol=symbol_upper, predictions={})
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No predictions available for {symbol_upper}",
+                )
 
-        return PredictionResponse(symbol=symbol.upper(), predictions=predictions)
+        return PredictionResponse(symbol=symbol_upper, predictions=predictions)
 
+    except RateLimitError as e:
+        # Rate limit error - return 503 (Service Unavailable) with helpful message
+        logger.warning(f"Rate limit error for {symbol}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="AI prediction service is temporarily rate-limited. Please try again later or add your own API key."
+        )
     except HTTPException:
         # Re-raise HTTPException as-is
         raise
@@ -105,25 +121,40 @@ async def generate_predictions(
     symbol: str,
     current_user: dict = Depends(get_current_active_user),
 ):
-    """Manually trigger prediction generation for a symbol"""
+    """Manually trigger prediction generation for a symbol (BTC only to avoid rate limits)"""
+    symbol_upper = symbol.upper()
+    
+    # Only allow manual generation for BTC
+    if symbol_upper != "BTC":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Prediction generation is only available for BTC to avoid rate limits. Use cached predictions for other symbols."
+        )
+    
     try:
         predictions = await ai_advisor_service.generate_predictions(
             user_id=current_user["id"],
-            symbol=symbol.upper(),
+            symbol=symbol_upper,
             force_regenerate=True,
         )
 
         if not predictions:
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to generate predictions for {symbol}",
+                detail=f"Failed to generate predictions for {symbol_upper}",
             )
 
-        return PredictionResponse(symbol=symbol.upper(), predictions=predictions)
+        return PredictionResponse(symbol=symbol_upper, predictions=predictions)
 
+    except RateLimitError as e:
+        logger.warning(f"Rate limit error for {symbol_upper}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="AI prediction service is temporarily rate-limited. Please try again later or add your own API key."
+        )
     except Exception as e:
         logger.error(
-            f"Error generating predictions for {symbol}: {e}", exc_info=True
+            f"Error generating predictions for {symbol_upper}: {e}", exc_info=True
         )
         raise HTTPException(
             status_code=500, detail=f"Failed to generate predictions: {str(e)}"

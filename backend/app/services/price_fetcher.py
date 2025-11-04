@@ -16,7 +16,7 @@ class PriceFetcherService:
     def __init__(self, price_service: PriceService):
         self.price_service = price_service
         self.is_running = False
-        self.fetch_interval = 60  # seconds
+        self.fetch_interval = 120  # seconds (2 minutes)
         self.tracked_symbols = set()
         
     async def start(self):

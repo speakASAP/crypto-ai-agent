@@ -8,6 +8,55 @@ import { logger } from '@/lib/logger'
 import { formatCurrency } from '@/lib/currencyUtils'
 import { Sparkles, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react'
 
+// Helper function to render markdown links in reasoning text as external links
+function renderReasoningWithLinks(text: string) {
+  if (!text) return null
+  
+  // Match markdown links: [1](url), [2](url), etc.
+  const linkPattern = /\[(\d+)\]\(([^)]+)\)/g
+  const parts: (string | JSX.Element)[] = []
+  let lastIndex = 0
+  let match
+  let key = 0
+
+  while ((match = linkPattern.exec(text)) !== null) {
+    // Add text before the link
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index))
+    }
+    
+    // Add the external link (use <a> tag for external URLs, not Next.js Link)
+    const linkNum = match[1]
+    const url = match[2]
+    
+    // Ensure URL is absolute (starts with http:// or https://)
+    const externalUrl = url.startsWith('http://') || url.startsWith('https://') 
+      ? url 
+      : `https://${url}`
+    
+    parts.push(
+      <a
+        key={key++}
+        href={externalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:text-blue-800 underline inline font-medium"
+        onClick={(e) => e.stopPropagation()}
+      >
+        [{linkNum}]
+      </a>
+    )
+    lastIndex = match.index + match[0].length
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex))
+  }
+  
+  return parts.length > 0 ? <>{parts}</> : text
+}
+
 interface AIAdvisorCardProps {
   symbol: string
   currentPrice?: number
@@ -164,7 +213,9 @@ export function AIAdvisorCard({ symbol, currentPrice, className = '' }: AIAdviso
                 </span>
               </div>
               {pred.reasoning && (
-                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{pred.reasoning}</p>
+                <div className="text-xs text-gray-500 mt-1 line-clamp-3">
+                  {renderReasoningWithLinks(pred.reasoning)}
+                </div>
               )}
             </div>
           )
@@ -176,4 +227,3 @@ export function AIAdvisorCard({ symbol, currentPrice, className = '' }: AIAdviso
     </Card>
   )
 }
-
