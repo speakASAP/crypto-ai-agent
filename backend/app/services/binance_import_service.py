@@ -204,6 +204,20 @@ class BinanceImportService:
             logger.warning(f"⚠️ Error getting fiat purchase history: {e}")
             return []
     
+    async def get_deposit_history(self, asset: str = None) -> List[Dict]:
+        """Get deposit history from Binance"""
+        try:
+            client = BinanceClient(self.api_key, self.api_secret)
+            
+            # Get deposit history
+            deposits = client.get_deposit_history(asset=asset) if asset else client.get_deposit_history()
+            
+            logger.info(f"✅ Retrieved {len(deposits)} deposits" + (f" for {asset}" if asset else ""))
+            return deposits
+        except Exception as e:
+            logger.debug(f"Could not get deposit history: {e}")
+            return []
+    
     def _save_import_data_to_csv(self, user_id: int, balances: List[Dict], all_trades: Dict[str, List], 
                                  portfolio_items: List[Dict], account_info: Dict = None) -> str:
         """Save full Binance import data to CSV file for analysis"""
@@ -350,16 +364,34 @@ class BinanceImportService:
                 fiat_orders = await self.get_fiat_purchase_history()
                 for order in fiat_orders:
                     if order.get('cryptoCurrency') == asset and order.get('status') == 'Completed':
-                        fiat_purchases.append({
-                            'symbol': f"{asset}FIAT",
-                            'qty': float(order.get('obtainAmount', 0)),
-                            'price': float(order.get('totalPrice', 0)) / float(order.get('obtainAmount', 1)) if order.get('obtainAmount', 0) else 0,
-                            'time': order.get('createTime', 0),
-                            'commission': 0.0,
-                        })
-                        logger.info(f"Found fiat purchase for {asset}: {order.get('obtainAmount')} at {order.get('totalPrice')}")
+                        obtain_amount = float(order.get('obtainAmount', 0))
+                        total_price = float(order.get('totalPrice', 0))
+                        if obtain_amount > 0:
+                            price = total_price / obtain_amount
+                            fiat_purchases.append({
+                                'symbol': f"{asset}FIAT",
+                                'qty': obtain_amount,
+                                'price': price,
+                                'time': order.get('createTime', 0),
+                                'commission': 0.0,
+                            })
+                            logger.info(f"✅ Found fiat purchase for {asset}: {obtain_amount} at ${total_price:.2f} (price: ${price:.4f})")
             except Exception as e:
                 logger.debug(f"Could not get fiat purchase history: {e}")
+            
+            # Check deposit history to get earliest deposit date (for coins received via airdrops, staking, etc.)
+            deposit_history = []
+            try:
+                deposits = await self.get_deposit_history(asset)
+                for deposit in deposits:
+                    if deposit.get('status') == 1:  # 1 = Success
+                        deposit_history.append({
+                            'amount': float(deposit.get('amount', 0)),
+                            'time': deposit.get('insertTime', 0),
+                        })
+                        logger.debug(f"Found deposit for {asset}: {deposit.get('amount')} at {deposit.get('insertTime')}")
+            except Exception as e:
+                logger.debug(f"Could not get deposit history for {asset}: {e}")
             
             for pair in trading_pairs:
                 try:
