@@ -250,7 +250,7 @@ class BinanceImportService:
             return []
     
     def _save_import_data_to_csv(self, user_id: int, balances: List[Dict], all_trades: Dict[str, List], 
-                                 portfolio_items: List[Dict], account_info: Dict = None) -> str:
+                                 portfolio_items: List[Dict], account_info: Dict = None, fiat_orders: List[Dict] = None) -> str:
         """Save full Binance import data to CSV file for analysis"""
         try:
             # Create logs directory if it doesn't exist
@@ -327,6 +327,16 @@ class BinanceImportService:
                         ])
                 writer.writerow([''])
                 
+                # Write fiat orders (if provided)
+                writer.writerow(['=== FIAT ORDERS (RAW) ==='])
+                if fiat_orders:
+                    writer.writerow(['Order Data (JSON)'])
+                    for order in fiat_orders:
+                        writer.writerow([json.dumps(order)])
+                else:
+                    writer.writerow(['No fiat orders found'])
+                writer.writerow([''])
+                
                 # Write portfolio items
                 writer.writerow(['=== PORTFOLIO ITEMS ==='])
                 if portfolio_items:
@@ -363,9 +373,9 @@ class BinanceImportService:
             logger.error(f"❌ Error saving import data to CSV: {e}")
             return ""
 
-    async def calculate_portfolio_from_balances(self, balances: List[Dict]) -> Tuple[List[Dict], Dict[str, List]]:
+    async def calculate_portfolio_from_balances(self, balances: List[Dict]) -> Tuple[List[Dict], Dict[str, List], List[Dict]]:
         """Calculate portfolio items from account balances
-        Returns: (portfolio_items, all_trades_collected)
+        Returns: (portfolio_items, all_trades_collected, fiat_orders)
         """
         portfolio_items = []
         all_trades_collected = {}
@@ -376,12 +386,20 @@ class BinanceImportService:
             fiat_orders = await self.get_fiat_purchase_history()
             logger.info(f"📦 Found {len(fiat_orders)} fiat purchase orders")
             for order in fiat_orders:
-                crypto = order.get('cryptoType', '').upper()
+                # Binance fiat order API returns different field names - try multiple variations
+                crypto = (
+                    order.get('cryptoType', '') or 
+                    order.get('cryptoCurrency', '') or 
+                    order.get('crypto', '') or
+                    order.get('asset', '')
+                ).upper()
+                
                 if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD']:
                     if crypto not in fiat_purchases:
                         fiat_purchases[crypto] = []
                     fiat_purchases[crypto].append(order)
-                    logger.debug(f"Fiat purchase found: {crypto} - {order.get('cryptoAmount', 0)} at {order.get('price', 0)}")
+                    logger.info(f"✅ Fiat purchase found: {crypto} - order keys: {list(order.keys())[:10]}")
+                    logger.debug(f"Fiat purchase details: {order}")
         except Exception as e:
             logger.warning(f"Could not get fiat purchase history: {e}")
         
@@ -539,7 +557,7 @@ class BinanceImportService:
                 }
             
             # Calculate portfolio items (this will also collect all trades)
-            portfolio_items, all_trades_collected = await self.calculate_portfolio_from_balances(balances)
+            portfolio_items, all_trades_collected, fiat_orders = await self.calculate_portfolio_from_balances(balances)
             
             logger.info(f"✅ Binance import completed: {len(portfolio_items)} items ready for import")
             
@@ -549,7 +567,8 @@ class BinanceImportService:
                 balances, 
                 all_trades_collected, 
                 portfolio_items, 
-                connection_test.get('account_info', {})
+                connection_test.get('account_info', {}),
+                fiat_orders
             )
             
             if csv_file:
@@ -573,7 +592,8 @@ class BinanceImportService:
                     balances if 'balances' in locals() else [],
                     all_trades_collected if 'all_trades_collected' in locals() else {},
                     portfolio_items if 'portfolio_items' in locals() else [],
-                    {}
+                    {},
+                    fiat_orders if 'fiat_orders' in locals() else []
                 )
             except:
                 pass
