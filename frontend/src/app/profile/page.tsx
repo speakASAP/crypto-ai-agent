@@ -451,11 +451,11 @@ export default function ProfilePage() {
         </div>
 
         <div className="mb-6">
-          <div className="border-b border-gray-200 overflow-x-auto">
-            <nav className="-mb-px flex space-x-4 sm:space-x-8 min-w-max">
+          <div className="border-b border-gray-200">
+            <nav className="-mb-px flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-2">
               <button
                 onClick={() => setActiveTab('profile')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'profile'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -465,7 +465,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('password')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'password'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -475,7 +475,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('telegram')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'telegram'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -485,7 +485,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('binance')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'binance'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -495,7 +495,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('bitfinex')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'bitfinex'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -505,7 +505,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('system')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'system'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'

@@ -1406,73 +1406,75 @@ export default function Home() {
                       </div>
                     </div>
                     {/* Mini Chart and Right Side Info */}
-                    <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 flex-shrink-0">
                       {/* Mini Chart */}
                       <div className="w-16 flex-shrink-0">
                         <PriceChart symbol={item.symbol} days={7} mini={true} />
                       </div>
-                      <div className="flex items-center space-x-2 sm:space-x-4">
-                    <div className="text-right">
-                      <div className="text-sm text-muted-foreground transition-all duration-300 ease-in-out">
-                        {(loading || currencyChanging) ? (
-                          <span className="animate-pulse">Loading...</span>
-                        ) : item.current_price ? formatCurrencyAmount(item.current_price) : 'N/A'}
-                      </div>
-                    </div>
-                    {item.pnl !== undefined && (
-                      <div className="text-right">
-                        {item.current_value && (
-                          <div className={`text-sm font-medium px-2 py-1 rounded transition-all duration-300 ease-in-out ${
-                            item.pnl >= 0
-                              ? 'text-green-600 bg-green-50'
-                              : 'text-red-600 bg-red-50'
-                          }`}>
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-4 flex-1 sm:flex-initial">
+                        <div className="text-right">
+                          <div className="text-sm text-muted-foreground transition-all duration-300 ease-in-out whitespace-nowrap">
                             {(loading || currencyChanging) ? (
                               <span className="animate-pulse">Loading...</span>
-                            ) : (
-                              <>
-                                {formatCurrencyAmount(item.current_value)}
-                              </>
+                            ) : item.current_price ? formatCurrencyAmount(item.current_price) : 'N/A'}
+                          </div>
+                        </div>
+                        {item.pnl !== undefined && (
+                          <div className="text-right">
+                            {item.current_value && (
+                              <div className={`text-sm font-medium px-2 py-1 rounded transition-all duration-300 ease-in-out whitespace-nowrap ${
+                                item.pnl >= 0
+                                  ? 'text-green-600 bg-green-50'
+                                  : 'text-red-600 bg-red-50'
+                              }`}>
+                                {(loading || currencyChanging) ? (
+                                  <span className="animate-pulse">Loading...</span>
+                                ) : (
+                                  <>
+                                    {formatCurrencyAmount(item.current_value)}
+                                  </>
+                                )}
+                              </div>
                             )}
+                            <div className={`text-sm transition-all duration-300 ease-in-out whitespace-nowrap ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {(loading || currencyChanging) ? (
+                                <span className="animate-pulse">Loading...</span>
+                              ) : (
+                                <>
+                                  {formatCurrencyAmount(item.pnl)} ({formatPercentAmount(item.pnl_percent || 0)})
+                                </>
+                              )}
+                            </div>
                           </div>
                         )}
-                        <div className={`text-sm transition-all duration-300 ease-in-out ${item.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {(loading || currencyChanging) ? (
-                            <span className="animate-pulse">Loading...</span>
-                          ) : (
-                            <>
-                              {formatCurrencyAmount(item.pnl)} ({formatPercentAmount(item.pnl_percent || 0)})
-                            </>
-                          )}
-                        </div>
                       </div>
-                    )}
-                        <div className="flex items-center space-x-1 flex-shrink-0">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleAddAlertForCoin(item)}
-                            className="text-blue-600 hover:text-blue-700"
-                            disabled={!item.current_price}
-                          >
-                            Set Alert
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleEditPortfolioItem(item)}
-                          >
-                            Edit
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleDeletePortfolioItem(item.id)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            Delete
-                          </Button>
-                        </div>
+                      {/* Action Buttons - Always on new line on mobile */}
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end sm:justify-start flex-shrink-0">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleAddAlertForCoin(item)}
+                          className="text-blue-600 hover:text-blue-700 flex-shrink-0"
+                          disabled={!item.current_price}
+                        >
+                          Set Alert
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleEditPortfolioItem(item)}
+                          className="flex-shrink-0"
+                        >
+                          Edit
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleDeletePortfolioItem(item.id)}
+                          className="text-red-600 hover:text-red-700 flex-shrink-0"
+                        >
+                          Delete
+                        </Button>
                       </div>
                     </div>
                   </div>
