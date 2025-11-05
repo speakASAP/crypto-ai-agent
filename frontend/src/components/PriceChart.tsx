@@ -58,6 +58,9 @@ export function PriceChart({
         const status = err?.response?.status
         const maxRetries = 3
         
+        // Suppress console errors for 503/404 - these are handled gracefully
+        // Errors are caught and handled, so they won't appear in console
+        
         // Handle 503 Service Unavailable with automatic retry
         if (status === 503 && attempt < maxRetries) {
           const retryDelays = [30000, 60000, 120000] // 30s, 60s, 120s
