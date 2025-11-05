@@ -1152,8 +1152,8 @@ export default function Home() {
               return (
           <Card>
             <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
               <CardTitle>Portfolio</CardTitle>
               <CardDescription>Your cryptocurrency holdings</CardDescription>
               {importMessage && (
@@ -1167,11 +1167,13 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button 
                 onClick={handleImportFromBinance}
                 disabled={importingBinance || importingBitfinex}
                 variant="outline"
+                size="sm"
+                className="flex-shrink-0"
               >
                 {importingBinance ? 'Importing...' : '📥 Import from Binance'}
               </Button>
@@ -1179,6 +1181,8 @@ export default function Home() {
                 onClick={handleImportFromBitfinex}
                 disabled={importingBinance || importingBitfinex}
                 variant="outline"
+                size="sm"
+                className="flex-shrink-0"
               >
                 {importingBitfinex ? 'Importing...' : '📥 Import from Bitfinex'}
               </Button>
@@ -1186,22 +1190,24 @@ export default function Home() {
                 onClick={() => setCsvImportOpen(true)}
                 disabled={importingBinance || importingBitfinex}
                 variant="outline"
+                size="sm"
+                className="flex-shrink-0"
               >
                 📄 Import from CSV
               </Button>
-              <Button onClick={handleAddPortfolioItem}>
+              <Button onClick={handleAddPortfolioItem} size="sm" className="flex-shrink-0">
                 Add New Item
               </Button>
             </div>
           </div>
         </CardHeader>
         {/* Filter and Sort Controls */}
-        <div className="px-6 py-4 border-b">
+        <div className="px-4 sm:px-6 py-4 border-b">
           <div className="flex flex-col gap-4">
             {/* Row 1: View toggle and Sort */}
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">View:</span>
+                <span className="text-sm text-muted-foreground whitespace-nowrap">View:</span>
                 <div className="flex border rounded-md">
                   <Button
                     variant={viewMode === 'cards' ? 'default' : 'ghost'}
@@ -1221,12 +1227,12 @@ export default function Home() {
                   </Button>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Sort:</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">Sort:</span>
                 <select
                   value={sort.by}
                   onChange={(e) => setSort(e.target.value as any)}
-                  className="px-3 py-1 border rounded text-sm"
+                  className="px-3 py-1 border rounded text-sm min-w-[120px]"
                 >
                   <option value="symbol">Symbol</option>
                   <option value="investment">Investment</option>
@@ -1239,97 +1245,99 @@ export default function Home() {
                   size="sm"
                   variant="outline"
                   onClick={() => setSort(sort.by, sort.dir === 'asc' ? 'desc' : 'asc')}
+                  className="flex-shrink-0"
                 >
                   {sort.dir === 'asc' ? '↑' : '↓'}
                 </Button>
               </div>
             </div>
             {/* Row 2: Filters */}
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Symbol:</span>
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">Symbol:</span>
                 <Input
                   type="text"
                   placeholder="Filter by symbol"
                   value={filters.symbol}
                   onChange={(e) => setFilters({ symbol: e.target.value })}
-                  className="w-32"
+                  className="w-28 sm:w-32"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Platform:</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">Platform:</span>
                 <select
                   value={filters.platform}
                   onChange={(e) => setFilters({ platform: e.target.value })}
-                  className="px-3 py-1 border rounded text-sm"
+                  className="px-2 sm:px-3 py-1 border rounded text-sm min-w-[100px]"
                 >
                   {platforms.map(p => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Investment:</span>
+              <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">Investment:</span>
                 <Input
                   type="number"
                   placeholder="Min"
                   value={filters.investmentMin || ''}
                   onChange={(e) => setFilters({ investmentMin: e.target.value ? parseFloat(e.target.value) : undefined })}
-                  className="w-24"
+                  className="w-20 sm:w-24"
                 />
-                <span>-</span>
+                <span className="text-xs">-</span>
                 <Input
                   type="number"
                   placeholder="Max"
                   value={filters.investmentMax || ''}
                   onChange={(e) => setFilters({ investmentMax: e.target.value ? parseFloat(e.target.value) : undefined })}
-                  className="w-24"
+                  className="w-20 sm:w-24"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">P&L:</span>
+              <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">P&L:</span>
                 <Input
                   type="number"
                   placeholder="Min"
                   value={filters.pnlMin || ''}
                   onChange={(e) => setFilters({ pnlMin: e.target.value ? parseFloat(e.target.value) : undefined })}
-                  className="w-24"
+                  className="w-20 sm:w-24"
                 />
-                <span>-</span>
+                <span className="text-xs">-</span>
                 <Input
                   type="number"
                   placeholder="Max"
                   value={filters.pnlMax || ''}
                   onChange={(e) => setFilters({ pnlMax: e.target.value ? parseFloat(e.target.value) : undefined })}
-                  className="w-24"
+                  className="w-20 sm:w-24"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">P&L %:</span>
+              <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">P&L %:</span>
                 <Input
                   type="number"
                   placeholder="Min"
                   value={filters.pnlPercentMin || ''}
                   onChange={(e) => setFilters({ pnlPercentMin: e.target.value ? parseFloat(e.target.value) : undefined })}
-                  className="w-24"
+                  className="w-20 sm:w-24"
                 />
-                <span>-</span>
+                <span className="text-xs">-</span>
                 <Input
                   type="number"
                   placeholder="Max"
                   value={filters.pnlPercentMax || ''}
                   onChange={(e) => setFilters({ pnlPercentMax: e.target.value ? parseFloat(e.target.value) : undefined })}
-                  className="w-24"
+                  className="w-20 sm:w-24"
                 />
               </div>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setFilters({ symbol: '', platform: 'All' })}
+                className="whitespace-nowrap"
               >
                 Clear Filters
               </Button>
-              <div className="ml-auto text-sm text-muted-foreground">
+              <div className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap ml-auto">
                 Showing {sortedItems.length} of {filteredItems.length} items
               </div>
             </div>
@@ -1545,28 +1553,29 @@ export default function Home() {
       {/* Alerts */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
               <CardTitle>Price Alerts</CardTitle>
               <CardDescription>Active price notifications</CardDescription>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button 
                 onClick={() => fetchAlerts()}
                 variant="outline"
                 size="sm"
                 disabled={loading}
+                className="flex-shrink-0"
               >
                 {loading ? 'Refreshing...' : '🔄'}
               </Button>
-              <Button onClick={handleAddAlert}>
+              <Button onClick={handleAddAlert} className="flex-shrink-0">
                 Create Alert
               </Button>
               <Button onClick={() => {
                 setGroupAbovePct(user?.default_alert_percentage_above?.toString() || '')
                 setGroupBelowPct(user?.default_alert_percentage_below?.toString() || '')
                 setGroupAlertModalOpen(true)
-              }} variant="secondary">
+              }} variant="secondary" className="flex-shrink-0">
                 Create Group Alert
               </Button>
             </div>
