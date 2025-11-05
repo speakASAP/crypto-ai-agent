@@ -650,9 +650,9 @@ class BinanceImportService:
             logger.error(f"❌ Error saving import data to CSV: {e}")
             return ""
 
-    async def calculate_portfolio_from_balances(self, balances: List[Dict]) -> Tuple[List[Dict], Dict[str, List], List[Dict]]:
+    async def calculate_portfolio_from_balances(self, balances: List[Dict]) -> Tuple[List[Dict], Dict[str, List], List[Dict], List[Dict]]:
         """Calculate portfolio items from account balances
-        Returns: (portfolio_items, all_trades_collected, fiat_orders)
+        Returns: (portfolio_items, all_trades_collected, fiat_payments_list, fiat_orders_list)
         """
         portfolio_items = []
         all_trades_collected = {}
@@ -914,11 +914,11 @@ class BinanceImportService:
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Binance balances")
         logger.info(f"📊 Collected {sum(len(trades) for trades in all_trades_collected.values())} total trades for analysis")
-        # Return fiat orders as well for CSV export
-        fiat_orders_list = []
-        for asset_orders in fiat_purchases.values():
-            fiat_orders_list.extend(asset_orders)
-        return portfolio_items, all_trades_collected, fiat_orders_list
+        # Return fiat payments and orders for CSV export
+        # Note: fiat_payments_list is already defined in the try block above
+        # fiat_orders_list is also already defined
+        # We need to return both separately
+        return portfolio_items, all_trades_collected, fiat_payments_list, fiat_orders_list
     
     async def import_portfolio(self, user_id: int) -> Dict:
         """Import complete portfolio from Binance"""
@@ -951,7 +951,7 @@ class BinanceImportService:
             all_withdrawals = await self.get_withdrawal_history_full()
             
             # Calculate portfolio items (this will also collect all trades)
-            portfolio_items, all_trades_collected, (fiat_payments_list, fiat_orders_list) = await self.calculate_portfolio_from_balances(balances)
+            portfolio_items, all_trades_collected, fiat_payments_list, fiat_orders_list = await self.calculate_portfolio_from_balances(balances)
             
             logger.info(f"✅ Binance import completed: {len(portfolio_items)} items ready for import")
             
@@ -991,7 +991,9 @@ class BinanceImportService:
                     portfolio_items if 'portfolio_items' in locals() else [],
                     {},
                     fiat_payments_list if 'fiat_payments_list' in locals() else [],
-                    fiat_orders_list if 'fiat_orders_list' in locals() else []
+                    fiat_orders_list if 'fiat_orders_list' in locals() else [],
+                    all_deposits if 'all_deposits' in locals() else [],
+                    all_withdrawals if 'all_withdrawals' in locals() else []
                 )
             except:
                 pass
