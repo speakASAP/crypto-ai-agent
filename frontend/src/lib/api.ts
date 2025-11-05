@@ -149,8 +149,19 @@ class ApiClient {
           }
         }
         
+        // Handle 404 errors for chart endpoints - suppress console errors
+        if (error.response?.status === 404) {
+          const url = error.config?.url || ''
+          // Suppress console errors for chart endpoints (404 is expected when data doesn't exist)
+          if (url.includes('/charts/mini/') || url.includes('/charts/history/')) {
+            logger.debug(`⚠️ Chart data not found (404) for ${url}`)
+            // Don't log to console, just return error gracefully
+            return Promise.reject(this.handleError(error))
+          }
+        }
+        
         // For other errors, log normally
-        if (error.response?.status !== 503) {
+        if (error.response?.status !== 503 && error.response?.status !== 404) {
           logger.error('❌ Response error:', error.response?.data || error.message)
         }
         

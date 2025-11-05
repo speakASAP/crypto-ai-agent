@@ -58,6 +58,10 @@ class HistoricalPriceService:
             "AXS": "axie-infinity",
             "CHZ": "chiliz",
             "ENJ": "enjincoin",
+            "TON": "toncoin",
+            "FLR": "flare",
+            "RENDER": "render-token",
+            "RNDR": "render-token",  # Legacy symbol support (RENDER rebranded from RNDR)
         }
         return symbol_map.get(symbol.upper(), symbol.lower())
 

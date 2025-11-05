@@ -78,7 +78,12 @@ export function PriceChart({
           // Max retries exceeded or other error
           if (status === 503) {
             setError('Service unavailable')
-          } else if (status === 404 || status === 429) {
+          } else if (status === 404) {
+            // 404 means chart data not available - show N/A or Failed to load chart
+            setError('Failed to load chart')
+            // Don't log 404 errors to console (handled gracefully)
+            logger.debug(`Chart data not available for ${symbol} (404)`)
+          } else if (status === 429) {
             setError('Rate limited - try again later')
           } else {
             setError('Failed to load chart')
