@@ -184,6 +184,7 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
         updated_count = 0
         deleted_count = 0
         now = datetime.now().isoformat() + "Z"
+        items_with_missing_data = []
 
         for item in aggregated_items:
             try:
@@ -389,6 +390,23 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                         item_fees_decimal = Decimal(str(item.get('fees', 0)))
                         item_value_decimal = Decimal(str(item.get('value', 0)))
                         
+                        # Check for missing data before inserting
+                        missing_fields = []
+                        item_price = item.get('price', 0)
+                        item_date = item.get('date')
+                        if not item_price or item_price == 0:
+                            missing_fields.append('Buy Price')
+                        if not item_date or item_date == '' or item_date == 'Unknown':
+                            missing_fields.append('Purchase Date')
+                        
+                        # Track items with missing data
+                        if missing_fields:
+                            items_with_missing_data.append({
+                                'symbol': symbol,
+                                'missing_fields': missing_fields,
+                                'amount': item['quantity']
+                            })
+                        
                         if currency != 'USD':
                             exchange_rate = currency_service.rates.get(currency, 1.0)
                             exchange_rate_decimal = Decimal(str(exchange_rate))
@@ -487,6 +505,7 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
             'success': True,
             'message': f'Successfully processed CSV: {imported_count} inserted, {updated_count} updated, {deleted_count} deleted',
             'items_imported': imported_count,
+            'items_with_missing_data': items_with_missing_data,
             'items_updated': updated_count,
             'items_deleted': deleted_count,
             'total_processed': total_processed,
