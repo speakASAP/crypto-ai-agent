@@ -248,13 +248,37 @@ export default function Home() {
   }
 
   const loadCryptoTimestamps = async () => {
-    try {
-      const timestamps = await apiClient.getSymbolLastUpdated()
-      setCryptoLastUpdated(timestamps.last_bulk_update)
-      setCryptoLastUpdatedFormatted(timestamps.last_bulk_update_formatted)
-      setSymbolTimestamps(timestamps.symbol_timestamps)
-    } catch (error) {
-      logger.error('Failed to load crypto timestamps:', error)
+    const maxRetries = 3
+    const initialDelay = 10000 // 10 seconds
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const timestamps = await apiClient.getSymbolLastUpdated()
+        setCryptoLastUpdated(timestamps.last_bulk_update)
+        setCryptoLastUpdatedFormatted(timestamps.last_bulk_update_formatted)
+        setSymbolTimestamps(timestamps.symbol_timestamps)
+        return // Success - exit retry loop
+      } catch (error: any) {
+        const status = error?.response?.status || error?.status
+        
+        // Handle 503 Service Unavailable with retry
+        if (status === 503 && attempt < maxRetries) {
+          const delay = initialDelay * Math.pow(2, attempt) // 10s, 20s, 40s
+          logger.debug(`Service Unavailable (503) for crypto timestamps, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`)
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue // Retry
+        } else {
+          // Non-503 error or max retries exceeded - log but don't show error to user
+          if (status !== 503) {
+            logger.error('Failed to load crypto timestamps:', error)
+          } else {
+            logger.debug(`Service Unavailable (503) for crypto timestamps after ${maxRetries} retries`)
+          }
+          return // Exit retry loop
+        }
+      }
     }
   }
 
@@ -791,103 +815,104 @@ export default function Home() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-4 md:p-6 space-y-6 max-w-full overflow-x-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-bold">Crypto AI Agent v2.0</h1>
-          <p className="text-gray-600 mt-1">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="min-w-0 flex-shrink">
+          <h1 className="text-2xl md:text-4xl font-bold break-words">Crypto AI Agent v2.0</h1>
+          <p className="text-gray-600 mt-1 text-sm md:text-base break-words">
             {user 
               ? `Welcome back, ${user.full_name || user.username}!`
               : 'Welcome to Crypto AI Agent!'
             }
           </p>
         </div>
-        <div className="flex items-center space-x-4">
+        <div className="flex flex-wrap items-center gap-2 md:gap-4">
           {user ? (
             <>
               <Link href="/profile">
-                <Button variant="outline" title="Profile">
+                <Button variant="outline" title="Profile" size="sm" className="md:size-auto">
                   <User className="h-4 w-4" />
                 </Button>
               </Link>
-              <Button variant="outline" onClick={logout} title="Logout">
+              <Button variant="outline" onClick={logout} title="Logout" size="sm" className="md:size-auto">
                 <LogOut className="h-4 w-4" />
               </Button>
             </>
           ) : (
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 md:space-x-4">
               <Link href="/login">
-                <Button variant="outline">
+                <Button variant="outline" size="sm" className="md:size-auto">
                   Login
                 </Button>
               </Link>
               <Link href="/register">
-                <Button variant="outline">
+                <Button variant="outline" size="sm" className="md:size-auto">
                   Register
                 </Button>
               </Link>
             </div>
           )}
-        </div>
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-muted-foreground">Currency:</span>
-            <div className="relative">
-              <select 
-                value={selectedCurrency} 
-                onChange={(e) => handleCurrencyChange(e.target.value)}
-                className="px-3 py-1 border rounded transition-all duration-300 ease-in-out disabled:opacity-50"
-                disabled={loading || currencyChanging}
+          <div className="flex flex-wrap items-center gap-2 md:gap-4">
+            <div className="flex items-center space-x-1 md:space-x-2">
+              <span className="text-xs md:text-sm text-muted-foreground whitespace-nowrap">Currency:</span>
+              <div className="relative">
+                <select 
+                  value={selectedCurrency} 
+                  onChange={(e) => handleCurrencyChange(e.target.value)}
+                  className="px-2 md:px-3 py-1 text-xs md:text-sm border rounded transition-all duration-300 ease-in-out disabled:opacity-50"
+                  disabled={loading || currencyChanging}
+                >
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="CZK">CZK</option>
+                </select>
+                {(loading || currencyChanging) && (
+                  <div className="absolute -right-6 top-1/2 transform -translate-y-1/2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  </div>
+                )}
+              </div>
+              <Button 
+                onClick={refreshExchangeRates}
+                disabled={refreshingRates}
+                size="sm"
+                variant="outline"
+                className="text-xs"
               >
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="CZK">CZK</option>
-              </select>
-              {(loading || currencyChanging) && (
-                <div className="absolute -right-6 top-1/2 transform -translate-y-1/2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                {refreshingRates ? 'Refreshing...' : '🔄'}
+              </Button>
+            </div>
+            <div className="flex items-center space-x-1 md:space-x-2">
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-xs md:text-sm text-muted-foreground whitespace-nowrap">
+                {isConnected ? 'Connected' : 'Disconnected'}
+              </span>
+            </div>
+            <div className="flex flex-col space-y-1 min-w-0">
+              {lastUpdatedFormatted && (
+                <div className="text-xs text-muted-foreground">
+                  <div className="flex items-center space-x-1">
+                    <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getFreshnessColorClass(getDataFreshness(lastUpdated))}`} />
+                    <span className="truncate">Currency Rates: {lastUpdatedFormatted}</span>
+                  </div>
+                  <div className="text-xs text-gray-500 ml-2 truncate">
+                    {getRelativeTime(lastUpdated)}
+                  </div>
+                </div>
+              )}
+              {cryptoLastUpdatedFormatted && (
+                <div className="text-xs text-muted-foreground">
+                  <div className="flex items-center space-x-1">
+                    <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getFreshnessColorClass(getDataFreshness(cryptoLastUpdated))}`} />
+                    <span className="truncate">Crypto Prices: {cryptoLastUpdatedFormatted}</span>
+                  </div>
+                  <div className="text-xs text-gray-500 ml-2 truncate">
+                    {getRelativeTime(cryptoLastUpdated)}
+                  </div>
                 </div>
               )}
             </div>
-            <Button 
-              onClick={refreshExchangeRates}
-              disabled={refreshingRates}
-              size="sm"
-              variant="outline"
-            >
-              {refreshingRates ? 'Refreshing...' : '🔄'}
-            </Button>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-            <span className="text-sm text-muted-foreground">
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-          <div className="flex flex-col space-y-1">
-            {lastUpdatedFormatted && (
-              <div className="text-xs text-muted-foreground">
-                <div className="flex items-center space-x-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${getFreshnessColorClass(getDataFreshness(lastUpdated))}`} />
-                  <span>Currency Rates: {lastUpdatedFormatted}</span>
-                </div>
-                <div className="text-xs text-gray-500 ml-2">
-                  {getRelativeTime(lastUpdated)}
-                </div>
-              </div>
-            )}
-            {cryptoLastUpdatedFormatted && (
-              <div className="text-xs text-muted-foreground">
-                <div className="flex items-center space-x-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${getFreshnessColorClass(getDataFreshness(cryptoLastUpdated))}`} />
-                  <span>Crypto Prices: {cryptoLastUpdatedFormatted}</span>
-                </div>
-                <div className="text-xs text-gray-500 ml-2">
-                  {getRelativeTime(cryptoLastUpdated)}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1578,14 +1603,14 @@ export default function Home() {
                 const priceDiff = calculatePriceDifference(currentPrice, alert.threshold_price)
                 
                 return (
-                  <div key={alert.id} className="flex items-center justify-between p-3 border rounded">
+                  <div key={alert.id} className="flex flex-col md:flex-row md:items-center md:justify-between p-3 border rounded gap-3">
                     {/* Left side - Current price and percentage difference */}
-                    <div className="flex items-center space-x-4">
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 min-w-[120px]">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 min-w-0 flex-1">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 md:p-3 w-full sm:w-auto min-w-0 sm:min-w-[100px]">
                         <div className="text-xs text-blue-600 font-medium mb-1">
                           {alert.symbol} Current Price
                         </div>
-                        <div className="text-lg font-bold text-blue-800">
+                        <div className="text-base md:text-lg font-bold text-blue-800 break-words">
                           {loadingAlertPrices ? (
                             <div className="animate-pulse">Loading...</div>
                           ) : currentPrice > 0 ? (
@@ -1595,7 +1620,7 @@ export default function Home() {
                           )}
                         </div>
                         {currentPrice > 0 && (
-                          <div className={`text-xs mt-1 ${
+                          <div className={`text-xs mt-1 break-words ${
                             priceDiff.isAbove ? 'text-green-600' : 'text-red-600'
                           }`}>
                             {priceDiff.isAbove ? '📈' : '📉'} {priceDiff.percentage.toFixed(1)}% {priceDiff.isAbove ? 'above' : 'below'} threshold
@@ -1604,15 +1629,15 @@ export default function Home() {
                       </div>
                       
                       {/* Alert details */}
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium">{alert.symbol}</span>
-                          <span className="text-sm text-muted-foreground">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-2">
+                          <span className="font-medium break-words">{alert.symbol}</span>
+                          <span className="text-xs sm:text-sm text-muted-foreground break-words">
                             {alert.alert_type} {formatCurrencyAmount(alert.threshold_price)}
                           </span>
                         </div>
                         {alert.message && (
-                          <div className="text-sm text-muted-foreground mt-1">
+                          <div className="text-xs sm:text-sm text-muted-foreground mt-1 break-words">
                             {alert.message}
                           </div>
                         )}
@@ -1620,8 +1645,8 @@ export default function Home() {
                     </div>
                     
                     {/* Right side - Status and actions */}
-                    <div className="flex items-center space-x-2">
-                      <span className={`px-2 py-1 text-xs rounded ${
+                    <div className="flex items-center space-x-2 flex-shrink-0">
+                      <span className={`px-2 py-1 text-xs rounded whitespace-nowrap ${
                         alert.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                       }`}>
                         {alert.is_active ? 'Active' : 'Inactive'}
@@ -1631,6 +1656,7 @@ export default function Home() {
                           variant="outline" 
                           size="sm"
                           onClick={() => handleEditAlert(alert)}
+                          className="text-xs md:text-sm"
                         >
                           Edit
                         </Button>
@@ -1638,7 +1664,7 @@ export default function Home() {
                           variant="outline" 
                           size="sm"
                           onClick={() => handleDeleteAlert(alert.id)}
-                          className="text-red-600 hover:text-red-700"
+                          className="text-red-600 hover:text-red-700 text-xs md:text-sm"
                         >
                           Delete
                         </Button>

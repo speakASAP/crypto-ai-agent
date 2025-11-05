@@ -89,7 +89,36 @@ class ApiClient {
         return response
       },
       async (error) => {
-        logger.error('❌ Response error:', error.response?.data || error.message)
+        // Handle 503 Service Unavailable errors with retry logic
+        if (error.response?.status === 503) {
+          const config = error.config || {}
+          const retryCount = config.__retryCount || 0
+          const maxRetries = 3
+          const initialDelay = 2000 // 2 seconds
+          
+          // Suppress console errors for 503 - only log internally
+          logger.debug(`⚠️ Service Unavailable (503) for ${config.url}, attempt ${retryCount + 1}/${maxRetries + 1}`)
+          
+          if (retryCount < maxRetries) {
+            // Calculate exponential backoff delay: 2s, 4s, 8s
+            const delay = initialDelay * Math.pow(2, retryCount)
+            
+            // Update retry count in config
+            config.__retryCount = retryCount + 1
+            
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, delay))
+            
+            // Retry the request
+            logger.debug(`🔄 Retrying request for ${config.url} after ${delay}ms delay`)
+            return this.client(config)
+          } else {
+            // Max retries exceeded - log internally but don't throw to console
+            logger.debug(`❌ Service Unavailable (503) for ${config.url} after ${maxRetries} retries`)
+            // Return error but don't log to console
+            return Promise.reject(this.handleError(error))
+          }
+        }
         
         // Handle 401 errors (token expired)
         if (error.response?.status === 401) {
@@ -118,6 +147,11 @@ class ApiClient {
               return Promise.reject(this.handleError(error))
             }
           }
+        }
+        
+        // For other errors, log normally
+        if (error.response?.status !== 503) {
+          logger.error('❌ Response error:', error.response?.data || error.message)
         }
         
         return Promise.reject(this.handleError(error))

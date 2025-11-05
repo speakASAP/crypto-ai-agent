@@ -25,9 +25,15 @@ export function PriceChart({
   const [chartData, setChartData] = useState<ChartDataPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
 
   useEffect(() => {
-    const fetchChartData = async () => {
+    let retryTimeout: NodeJS.Timeout | null = null
+    let isMounted = true
+
+    const fetchChartData = async (attempt: number = 0) => {
+      if (!isMounted) return
+
       try {
         setLoading(true)
         setError(null)
@@ -42,22 +48,60 @@ export function PriceChart({
           ? await apiClient.getMiniChart(symbol, days)
           : await apiClient.getPriceHistory(symbol, days === 7 ? 365 : days)
         
-        setChartData(data.data || [])
+        if (isMounted) {
+          setChartData(data.data || [])
+          setRetryCount(0) // Reset retry count on success
+        }
       } catch (err: any) {
-        logger.error(`Error fetching chart data for ${symbol}:`, err)
-        // Check if it's a rate limit or API error
-        if (err?.response?.status === 404 || err?.response?.status === 429) {
-          setError('Rate limited - try again later')
-        } else {
+        if (!isMounted) return
+
+        const status = err?.response?.status
+        const maxRetries = 3
+        
+        // Handle 503 Service Unavailable with automatic retry
+        if (status === 503 && attempt < maxRetries) {
+          const retryDelays = [30000, 60000, 120000] // 30s, 60s, 120s
+          const delay = retryDelays[attempt]
+          
           setError('Failed to load chart')
+          setRetryCount(attempt + 1)
+          
+          // Schedule retry
+          retryTimeout = setTimeout(() => {
+            if (isMounted) {
+              fetchChartData(attempt + 1)
+            }
+          }, delay)
+          
+          logger.debug(`Retrying chart fetch for ${symbol} after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`)
+        } else {
+          // Max retries exceeded or other error
+          if (status === 503) {
+            setError('Service unavailable')
+          } else if (status === 404 || status === 429) {
+            setError('Rate limited - try again later')
+          } else {
+            setError('Failed to load chart')
+          }
+          setRetryCount(0)
         }
       } finally {
-        setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+        }
       }
     }
 
     if (symbol) {
-      fetchChartData()
+      fetchChartData(0)
+    }
+
+    // Cleanup function
+    return () => {
+      isMounted = false
+      if (retryTimeout) {
+        clearTimeout(retryTimeout)
+      }
     }
   }, [symbol, days, mini])
 

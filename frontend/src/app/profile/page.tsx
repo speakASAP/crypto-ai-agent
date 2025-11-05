@@ -435,15 +435,15 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Profile Settings</h1>
-              <p className="mt-2 text-gray-600">Manage your account settings and preferences</p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 break-words">Profile Settings</h1>
+              <p className="mt-2 text-sm sm:text-base text-gray-600 break-words">Manage your account settings and preferences</p>
             </div>
             <Button
               onClick={() => router.push('/dashboard')}
               variant="outline"
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 w-full sm:w-auto"
             >
               ← Return to Dashboard
             </Button>
@@ -451,8 +451,8 @@ export default function ProfilePage() {
         </div>
 
         <div className="mb-6">
-          <div className="border-b border-gray-200">
-            <nav className="-mb-px flex space-x-8">
+          <div className="border-b border-gray-200 overflow-x-auto">
+            <nav className="-mb-px flex space-x-4 sm:space-x-8 min-w-max">
               <button
                 onClick={() => setActiveTab('profile')}
                 className={`py-2 px-1 border-b-2 font-medium text-sm ${
