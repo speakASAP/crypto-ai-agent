@@ -103,6 +103,7 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
         cursor = conn.cursor()
         imported_count = 0
         now = datetime.now().isoformat() + "Z"
+        items_with_missing_data = []
 
         for item in result['portfolio_items']:
             try:
@@ -117,6 +118,23 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
                 base_currency = item.get('base_currency', 'USD')
                 price_buy = item['price_buy']
                 commission = item.get('commission', 0.0)
+                purchase_date = item.get('purchase_date')
+                
+                # Check for missing data
+                missing_fields = []
+                if not price_buy or price_buy == 0:
+                    missing_fields.append('Buy Price')
+                if not purchase_date or purchase_date == '' or purchase_date == 'Unknown':
+                    missing_fields.append('Purchase Date')
+                
+                # Track items with missing data
+                if missing_fields:
+                    items_with_missing_data.append({
+                        'symbol': item['symbol'],
+                        'missing_fields': missing_fields,
+                        'amount': item['amount']
+                    })
+                
                 if base_currency != 'USD' and price_buy > 0:
                     price_buy_usd = currency_service.convert_amount(price_buy, base_currency, 'USD')
                     commission_usd = currency_service.convert_amount(commission, base_currency, 'USD')
@@ -163,7 +181,8 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
             'success': True,
             'message': f'Successfully imported {imported_count} portfolio items from Binance',
             'items_imported': imported_count,
-            'total_found': len(result['portfolio_items'])
+            'total_found': len(result['portfolio_items']),
+            'items_with_missing_data': items_with_missing_data
         }
     except HTTPException:
         raise
@@ -205,6 +224,7 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
         cursor = conn.cursor()
         imported_count = 0
         now = datetime.now().isoformat() + "Z"
+        items_with_missing_data = []
 
         for item in result['portfolio_items']:
             try:
@@ -219,6 +239,23 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
                 base_currency = item.get('base_currency', 'USD')
                 price_buy = item['price_buy']
                 commission = item.get('commission', 0.0)
+                purchase_date = item.get('purchase_date')
+                
+                # Check for missing data
+                missing_fields = []
+                if not price_buy or price_buy == 0:
+                    missing_fields.append('Buy Price')
+                if not purchase_date or purchase_date == '' or purchase_date == 'Unknown':
+                    missing_fields.append('Purchase Date')
+                
+                # Track items with missing data
+                if missing_fields:
+                    items_with_missing_data.append({
+                        'symbol': item['symbol'],
+                        'missing_fields': missing_fields,
+                        'amount': item['amount']
+                    })
+                
                 if base_currency != 'USD' and price_buy > 0:
                     price_buy_usd = currency_service.convert_amount(price_buy, base_currency, 'USD')
                     commission_usd = currency_service.convert_amount(commission, base_currency, 'USD')
@@ -265,7 +302,8 @@ async def execute_bitfinex_import(current_user: dict = Depends(get_current_activ
             'success': True,
             'message': f'Successfully imported {imported_count} portfolio items from Bitfinex',
             'items_imported': imported_count,
-            'total_found': len(result['portfolio_items'])
+            'total_found': len(result['portfolio_items']),
+            'items_with_missing_data': items_with_missing_data
         }
     except HTTPException:
         raise
