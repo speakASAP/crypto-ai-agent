@@ -116,8 +116,10 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
       // Convert ISO datetime to date format for date input
       const formatDateForInput = (isoDate: string | undefined): string => {
         if (!isoDate) return ''
-        // Extract just the date portion (yyyy-MM-dd) from ISO string
-        return isoDate.split('T')[0]
+        // Handle both ISO format (with T) and space-separated format
+        // Extract just the date portion (yyyy-MM-dd) from datetime string
+        const datePart = isoDate.split('T')[0].split(' ')[0]
+        return datePart
       }
 
       setFormData({
