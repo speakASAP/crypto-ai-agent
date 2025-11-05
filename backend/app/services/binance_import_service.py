@@ -693,6 +693,13 @@ class BinanceImportService:
                     payment.get('coin', '')
                 ).upper()
                 
+                # Extract fiat currency from payment
+                fiat_currency = (
+                    payment.get('fiatCurrency', '') or
+                    payment.get('currency', '') or
+                    'USD'  # Default to USD if not specified
+                ).upper()
+                
                 # Check if this is a buy transaction (transactionType=0)
                 # NOTE: The transactionType is passed in the API call, not in the response
                 # We need to check the payment data structure differently
@@ -707,13 +714,16 @@ class BinanceImportService:
                     status in ['COMPLETED', 'SUCCESS', 'SUCCESSFUL', '1', '2']
                 )
                 
-                logger.info(f"🔍 Processing fiat payment: crypto='{crypto}', transaction_type='{transaction_type}', status='{status}', is_buy={is_buy}")
+                logger.info(f"🔍 Processing fiat payment: crypto='{crypto}', fiat_currency='{fiat_currency}', transaction_type='{transaction_type}', status='{status}', is_buy={is_buy}")
                 
                 if crypto and crypto not in ['USDT', 'USDC', 'BUSD', 'TUSD', ''] and is_buy:
                     if crypto not in fiat_purchases:
                         fiat_purchases[crypto] = []
-                    fiat_purchases[crypto].append(payment)
-                    logger.info(f"✅ Fiat buy payment found: {crypto} - amount={payment.get('obtainAmount', 'N/A')}, price={payment.get('price', 'N/A')}, date={payment.get('createTime', 'N/A')}")
+                    # Store fiat currency with the payment for later conversion
+                    payment_with_currency = payment.copy()
+                    payment_with_currency['_fiat_currency'] = fiat_currency
+                    fiat_purchases[crypto].append(payment_with_currency)
+                    logger.info(f"✅ Fiat buy payment found: {crypto} - amount={payment.get('obtainAmount', 'N/A')}, price={payment.get('price', 'N/A')}, fiat_currency={fiat_currency}, date={payment.get('createTime', 'N/A')}")
                 else:
                     logger.info(f"⚠️ Fiat payment skipped - crypto: '{crypto}', is_buy: {is_buy}, transaction_type: {transaction_type}, status: {status}")
         except Exception as e:
@@ -802,19 +812,35 @@ class BinanceImportService:
                             fiat_payment.get('createTimestamp', 0))))
                         )
                         
+                        # Get the fiat currency from payment (stored during processing)
+                        fiat_currency = fiat_payment.get('_fiat_currency', 'USD').upper()
+                        
                         if crypto_amount > 0 and fiat_amount > 0:
                             # Calculate price: total fiat paid / crypto amount
-                            price_per_unit = fiat_amount / crypto_amount
+                            # This price is in the fiat currency (CZK, EUR, etc.), not USD
+                            price_per_unit_fiat = fiat_amount / crypto_amount
+                            
+                            # Convert price from fiat currency to USD
+                            # Ensure currency service is initialized
+                            if not currency_service.rates:
+                                currency_service.ensure_rates_initialized()
+                            
+                            if fiat_currency == 'USD' or fiat_currency == 'USDT':
+                                price_per_unit_usd = price_per_unit_fiat
+                            else:
+                                # Convert from fiat currency to USD
+                                price_per_unit_usd = currency_service.convert_amount(price_per_unit_fiat, fiat_currency, 'USD')
+                                logger.info(f"💰 Converted {asset} price from {fiat_currency}: {price_per_unit_fiat:.2f} → USD: {price_per_unit_usd:.2f}")
                             
                             buy_trades.append({
                                 'symbol': f"{asset}FIAT",
                                 'qty': crypto_amount,
-                                'price': price_per_unit,
+                                'price': price_per_unit_usd,  # Store price in USD
                                 'time': payment_time if payment_time else int(time.time() * 1000),
                                 'commission': 0.0,
                             })
                             payment_date = datetime.fromtimestamp(payment_time/1000).isoformat() if payment_time else "N/A"
-                            logger.info(f"✅ Added fiat buy payment: {asset} amount={crypto_amount}, total_price=${fiat_amount:.2f}, price_per_unit=${price_per_unit:.4f}, date={payment_date}")
+                            logger.info(f"✅ Added fiat buy payment: {asset} amount={crypto_amount}, total_price={fiat_amount:.2f} {fiat_currency}, price_per_unit={price_per_unit_usd:.2f} USD, date={payment_date}")
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Error parsing fiat payment for {asset}: {e}, payment: {fiat_payment}")
                         continue
