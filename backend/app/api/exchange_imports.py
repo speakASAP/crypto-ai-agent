@@ -107,13 +107,23 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
 
         for item in result['portfolio_items']:
             try:
+                # Normalize symbol for checking (TRON -> TRX, case-insensitive)
+                symbol = item['symbol'].upper()
+                if symbol == 'TRON':
+                    symbol = 'TRX'
+                
+                source = item.get('source', 'Binance')
+                
+                # Check if exact duplicate exists (same symbol, same amount, same source)
+                # This allows same symbol from different sources (Revolut, Binance, Bitfinex)
                 check_duplicate_sql = _normalize_placeholders(
-                    "SELECT id FROM portfolio_items WHERE user_id = %s AND symbol = %s AND ABS(amount - %s) < 0.001"
+                    "SELECT id FROM portfolio_items WHERE user_id = %s AND UPPER(symbol) = UPPER(%s) AND source = %s AND ABS(amount - %s) < 0.001"
                 )
-                cursor.execute(check_duplicate_sql, (current_user["id"], item['symbol'], item['amount']))
+                cursor.execute(check_duplicate_sql, (current_user["id"], symbol, source, item['amount']))
                 if cursor.fetchone():
-                    logger.info(f"Skipping duplicate item: {item['symbol']}")
+                    logger.info(f"Skipping duplicate item: {symbol} from {source} (same amount: {item['amount']})")
                     continue
+                
                 currency_service.ensure_rates_initialized()
                 base_currency = item.get('base_currency', 'USD')
                 price_buy = item['price_buy']
@@ -130,7 +140,7 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
                 # Track items with missing data
                 if missing_fields:
                     items_with_missing_data.append({
-                        'symbol': item['symbol'],
+                        'symbol': symbol,
                         'missing_fields': missing_fields,
                         'amount': item['amount']
                     })
@@ -144,6 +154,7 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
                     commission_usd = commission
                     exchange_rate = None
                 
+                # New item - insert it (same symbol from different sources are allowed)
                 insert_sql = _normalize_placeholders(
                     "INSERT INTO portfolio_items "
                     "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
@@ -152,8 +163,8 @@ async def execute_binance_import(current_user: dict = Depends(get_current_active
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 )
                 cursor.execute(insert_sql, (
-                    current_user["id"], item['symbol'], item['amount'], price_buy,
-                    item['purchase_date'], base_currency, item['source'], commission,
+                    current_user["id"], symbol, item['amount'], price_buy,
+                    purchase_date, base_currency, source, commission,
                     item['total_investment_text'], now, now,
                     round(price_buy, 8), round(item['amount'] * price_buy, 8), 0.0, 0.0,
                     round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate
