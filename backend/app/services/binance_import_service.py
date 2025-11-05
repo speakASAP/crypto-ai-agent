@@ -841,10 +841,12 @@ class BinanceImportService:
                     logger.warning(f"Error processing trades for {pair}: {e}")
                     continue
             
-            # Add fiat purchases to buy trades
-            buy_trades.extend(fiat_purchases)
+            # NOTE: Fiat purchases are already added to buy_trades in the loop above (lines 783-820)
+            # We don't need to extend again here - fiat_purchases is a dict, not a list
             
-            logger.info(f"Total buy trades found for {asset}: {len(buy_trades)} (including {len(fiat_purchases)} fiat purchases)")
+            # Count fiat purchases for this asset
+            fiat_count = len(fiat_purchases.get(asset, []))
+            logger.info(f"Total buy trades found for {asset}: {len(buy_trades)} (including {fiat_count} fiat purchases)")
             
             if buy_trades:
                 # Sort trades by time to get earliest
