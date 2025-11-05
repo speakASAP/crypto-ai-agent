@@ -126,6 +126,43 @@ export default function Home() {
   const [missingDataDialogOpen, setMissingDataDialogOpen] = useState(false)
   const [itemsWithMissingData, setItemsWithMissingData] = useState<Array<{symbol: string; missing_fields: string[]; amount: number}>>([])
 
+  // Suppress console errors for 503/404 chart endpoints
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.console) {
+      const originalError = console.error
+      const originalWarn = console.warn
+      
+      // Filter out 503/404 errors for chart endpoints
+      console.error = (...args: any[]) => {
+        const errorStr = args.join(' ')
+        // Suppress 503/404 errors for chart endpoints
+        if (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) {
+          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable')) {
+            return // Suppress these errors
+          }
+        }
+        originalError.apply(console, args)
+      }
+      
+      console.warn = (...args: any[]) => {
+        const errorStr = args.join(' ')
+        // Suppress 503/404 warnings for chart endpoints
+        if (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) {
+          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable')) {
+            return // Suppress these warnings
+          }
+        }
+        originalWarn.apply(console, args)
+      }
+      
+      // Restore original console methods on cleanup
+      return () => {
+        console.error = originalError
+        console.warn = originalWarn
+      }
+    }
+  }, [])
+
   useEffect(() => {
     // Fetch initial data
     fetchPortfolio()
@@ -1355,26 +1392,26 @@ export default function Home() {
               {sortedItems.map((item) => (
                 <div key={item.id} className="border rounded-lg overflow-hidden">
                   {/* Main Portfolio Item Row */}
-                  <div className="flex items-center justify-between p-4 bg-white">
-                    <div className="flex items-center space-x-4 flex-1">
-                      <div className="font-semibold">{item.symbol}</div>
-                      <div className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 bg-white gap-3">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 flex-1 min-w-0">
+                      <div className="font-semibold flex-shrink-0">{item.symbol}</div>
+                      <div className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded flex-shrink-0">
                         {formatInvestmentAmount((item.amount * item.price_buy) + item.commission)}
                       </div>
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-sm text-muted-foreground break-words min-w-0 flex-1">
                         {formatCryptoAmountValue(item.amount, item.symbol)} @ {formatCurrencyAmount(item.price_buy)}
+                        {item.source && (
+                          <span className="whitespace-nowrap"> via {item.source}</span>
+                        )}
                       </div>
-                      {item.source && (
-                        <div className="text-sm text-muted-foreground">
-                          via {item.source}
-                        </div>
-                      )}
                     </div>
-                    {/* Mini Chart */}
-                    <div className="w-16 mx-4">
-                      <PriceChart symbol={item.symbol} days={7} mini={true} />
-                    </div>
-                    <div className="flex items-center space-x-4">
+                    {/* Mini Chart and Right Side Info */}
+                    <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
+                      {/* Mini Chart */}
+                      <div className="w-16 flex-shrink-0">
+                        <PriceChart symbol={item.symbol} days={7} mini={true} />
+                      </div>
+                      <div className="flex items-center space-x-2 sm:space-x-4">
                     <div className="text-right">
                       <div className="text-sm text-muted-foreground transition-all duration-300 ease-in-out">
                         {(loading || currencyChanging) ? (
@@ -1410,33 +1447,34 @@ export default function Home() {
                         </div>
                       </div>
                     )}
-                    <div className="flex items-center space-x-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleAddAlertForCoin(item)}
-                        className="text-blue-600 hover:text-blue-700"
-                        disabled={!item.current_price}
-                      >
-                        Set Alert
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleEditPortfolioItem(item)}
-                      >
-                        Edit
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleDeletePortfolioItem(item.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        Delete
-                      </Button>
+                        <div className="flex items-center space-x-1 flex-shrink-0">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleAddAlertForCoin(item)}
+                            className="text-blue-600 hover:text-blue-700"
+                            disabled={!item.current_price}
+                          >
+                            Set Alert
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleEditPortfolioItem(item)}
+                          >
+                            Edit
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleDeletePortfolioItem(item.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
                   </div>
                   {/* AI Predictions Row */}
                   <div className="bg-gray-50 px-4 py-2 border-t">
