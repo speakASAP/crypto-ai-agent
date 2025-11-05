@@ -126,19 +126,29 @@ export default function Home() {
   const [missingDataDialogOpen, setMissingDataDialogOpen] = useState(false)
   const [itemsWithMissingData, setItemsWithMissingData] = useState<Array<{symbol: string; missing_fields: string[]; amount: number}>>([])
 
-  // Suppress console errors for 503/404 chart endpoints
+  // Suppress console errors for 503/404 chart endpoints and network errors
   useEffect(() => {
     if (typeof window !== 'undefined' && window.console) {
       const originalError = console.error
       const originalWarn = console.warn
       
-      // Filter out 503/404 errors for chart endpoints
+      // Filter out 503/404 errors for chart endpoints and network resource errors
       console.error = (...args: any[]) => {
         const errorStr = args.join(' ')
         // Suppress 503/404 errors for chart endpoints
         if (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) {
-          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable')) {
+          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable') || 
+              errorStr.includes('Failed to load resource') || errorStr.includes('the server responded with a status')) {
             return // Suppress these errors
+          }
+        }
+        // Suppress browser network resource errors for chart endpoints
+        if (errorStr.includes('Failed to load resource') && 
+            (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/') || 
+             errorStr.includes('SOL') || errorStr.includes('BONK') || errorStr.includes('FLR') || 
+             errorStr.includes('XRP') || errorStr.includes('TON') || errorStr.includes('SXP') || errorStr.includes('TRX'))) {
+          if (errorStr.includes('404') || errorStr.includes('503')) {
+            return // Suppress these network errors
           }
         }
         originalError.apply(console, args)
@@ -148,17 +158,43 @@ export default function Home() {
         const errorStr = args.join(' ')
         // Suppress 503/404 warnings for chart endpoints
         if (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) {
-          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable')) {
+          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable') ||
+              errorStr.includes('Failed to load resource') || errorStr.includes('the server responded with a status')) {
             return // Suppress these warnings
           }
         }
+        // Suppress browser network resource warnings for chart endpoints
+        if (errorStr.includes('Failed to load resource') && 
+            (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/') || 
+             errorStr.includes('SOL') || errorStr.includes('BONK') || errorStr.includes('FLR') || 
+             errorStr.includes('XRP') || errorStr.includes('TON') || errorStr.includes('SXP') || errorStr.includes('TRX'))) {
+          if (errorStr.includes('404') || errorStr.includes('503')) {
+            return // Suppress these network warnings
+          }
+        }
         originalWarn.apply(console, args)
+      }
+      
+      // Also intercept uncaught errors from network requests
+      const originalErrorHandler = window.onerror
+      window.onerror = function(message, source, lineno, colno, error) {
+        const errorStr = String(message || '')
+        // Suppress network errors for chart endpoints
+        if ((errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) &&
+            (errorStr.includes('404') || errorStr.includes('503') || errorStr.includes('Failed to load resource'))) {
+          return true // Suppress this error
+        }
+        if (originalErrorHandler) {
+          return originalErrorHandler(message, source, lineno, colno, error)
+        }
+        return false
       }
       
       // Restore original console methods on cleanup
       return () => {
         console.error = originalError
         console.warn = originalWarn
+        window.onerror = originalErrorHandler
       }
     }
   }, [])
@@ -510,11 +546,15 @@ export default function Home() {
       logger.error('Binance import error:', error)
       // Check for missing credentials error in the error response
       const errorMessage = error.response?.data?.detail || error.message || ''
-      if (errorMessage.includes('No Binance credentials') || errorMessage.includes('credentials')) {
+      
+      // Handle network/timeout errors more gracefully
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout') || error.message?.includes('Network error')) {
+        setImportMessage('Import is taking longer than expected. Please wait a moment and check if items were imported. If not, try again.')
+      } else if (errorMessage.includes('No Binance credentials') || errorMessage.includes('credentials')) {
         setCredentialDialogType('binance')
         setCredentialDialogOpen(true)
       } else {
-        setImportMessage(errorMessage || 'Failed to import from Binance')
+        setImportMessage(errorMessage || 'Failed to import from Binance. Please check your connection and try again.')
       }
     } finally {
       setImportingBinance(false)
