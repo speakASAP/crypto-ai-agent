@@ -96,8 +96,8 @@ class ApiClient {
           const maxRetries = 3
           const initialDelay = 2000 // 2 seconds
           
-          // Suppress console errors for 503 - only log internally
-          logger.debug(`⚠️ Service Unavailable (503) for ${config.url}, attempt ${retryCount + 1}/${maxRetries + 1}`)
+          // Log 503 errors - these indicate real service issues that need attention
+          logger.warn(`⚠️ Service Unavailable (503) for ${config.url}, attempt ${retryCount + 1}/${maxRetries + 1}`)
           
           if (retryCount < maxRetries) {
             // Calculate exponential backoff delay: 2s, 4s, 8s
@@ -113,9 +113,8 @@ class ApiClient {
             logger.debug(`🔄 Retrying request for ${config.url} after ${delay}ms delay`)
             return this.client(config)
           } else {
-            // Max retries exceeded - log internally but don't throw to console
-            logger.debug(`❌ Service Unavailable (503) for ${config.url} after ${maxRetries} retries`)
-            // Return error but don't log to console
+            // Max retries exceeded - log error
+            logger.error(`❌ Service Unavailable (503) for ${config.url} after ${maxRetries} retries`)
             return Promise.reject(this.handleError(error))
           }
         }
