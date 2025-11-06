@@ -118,7 +118,6 @@ async def get_symbol_prices(symbols: str = None, current_user: dict = Depends(ge
             return []
         
         # Read prices from centralized crypto_prices table
-        from ..services.price_service import price_service
         prices_from_db = price_service.get_prices_from_db(symbol_list)
         
         # Identify symbols that are missing from the database
@@ -216,7 +215,6 @@ async def get_symbol_price(symbol: str, current_user: dict = Depends(get_current
         symbol_upper = symbol.upper()
         
         # Read price from centralized crypto_prices table
-        from ..services.price_service import price_service
         price = price_service.get_price_from_db(symbol_upper)
         
         if price is not None:
