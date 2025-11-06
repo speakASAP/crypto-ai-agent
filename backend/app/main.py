@@ -144,6 +144,26 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# Add global exception handler to log 503 errors
+@app.exception_handler(503)
+async def service_unavailable_handler(request: Request, exc: Exception):
+    """Log all 503 Service Unavailable errors for debugging"""
+    logger.error(f"❌ 503 Service Unavailable: {request.method} {request.url.path} - {str(exc)}")
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=503,
+            content=exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail)}
+        )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Service Unavailable"}
+    )
+
+# Import HTTPException for exception handler
+from fastapi import HTTPException
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
 # Import routers
 from .api.auth import router as auth_router
 app.include_router(auth_router)
