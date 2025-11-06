@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import asyncio
 import logging
@@ -158,11 +159,6 @@ async def service_unavailable_handler(request: Request, exc: Exception):
         status_code=503,
         content={"detail": "Service Unavailable"}
     )
-
-# Import HTTPException for exception handler
-from fastapi import HTTPException
-from fastapi import Request
-from fastapi.responses import JSONResponse
 
 # Import routers
 from .api.auth import router as auth_router
