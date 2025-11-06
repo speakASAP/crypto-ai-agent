@@ -126,75 +126,70 @@ export default function Home() {
   const [missingDataDialogOpen, setMissingDataDialogOpen] = useState(false)
   const [itemsWithMissingData, setItemsWithMissingData] = useState<Array<{symbol: string; missing_fields: string[]; amount: number}>>([])
 
-  // Suppress console errors for 503/404 chart endpoints and network errors
+  // Intercept uncaught errors and send to centralized logging
+  // Suppress known non-critical errors (404/503 for chart endpoints)
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.console) {
-      const originalError = console.error
-      const originalWarn = console.warn
-      
-      // Filter out 503/404 errors for chart endpoints and network resource errors
-      console.error = (...args: any[]) => {
-        const errorStr = args.join(' ')
-        // Suppress 503/404 errors for chart endpoints
-        if (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) {
-          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable') || 
-              errorStr.includes('Failed to load resource') || errorStr.includes('the server responded with a status')) {
-            return // Suppress these errors
-          }
-        }
-        // Suppress browser network resource errors for chart endpoints
-        if (errorStr.includes('Failed to load resource') && 
-            (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/') || 
-             errorStr.includes('SOL') || errorStr.includes('BONK') || errorStr.includes('FLR') || 
-             errorStr.includes('XRP') || errorStr.includes('TON') || errorStr.includes('SXP') || errorStr.includes('TRX'))) {
-          if (errorStr.includes('404') || errorStr.includes('503')) {
-            return // Suppress these network errors
-          }
-        }
-        originalError.apply(console, args)
-      }
-      
-      console.warn = (...args: any[]) => {
-        const errorStr = args.join(' ')
-        // Suppress 503/404 warnings for chart endpoints
-        if (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) {
-          if (errorStr.includes('503') || errorStr.includes('404') || errorStr.includes('Service Unavailable') ||
-              errorStr.includes('Failed to load resource') || errorStr.includes('the server responded with a status')) {
-            return // Suppress these warnings
-          }
-        }
-        // Suppress browser network resource warnings for chart endpoints
-        if (errorStr.includes('Failed to load resource') && 
-            (errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/') || 
-             errorStr.includes('SOL') || errorStr.includes('BONK') || errorStr.includes('FLR') || 
-             errorStr.includes('XRP') || errorStr.includes('TON') || errorStr.includes('SXP') || errorStr.includes('TRX'))) {
-          if (errorStr.includes('404') || errorStr.includes('503')) {
-            return // Suppress these network warnings
-          }
-        }
-        originalWarn.apply(console, args)
-      }
-      
-      // Also intercept uncaught errors from network requests
+    if (typeof window !== 'undefined') {
       const originalErrorHandler = window.onerror
       window.onerror = function(message, source, lineno, colno, error) {
         const errorStr = String(message || '')
-        // Suppress network errors for chart endpoints
+        
+        // Suppress known non-critical errors (404/503 for chart endpoints)
+        // These are expected and don't need to be logged
         if ((errorStr.includes('/charts/mini/') || errorStr.includes('/charts/history/')) &&
             (errorStr.includes('404') || errorStr.includes('503') || errorStr.includes('Failed to load resource'))) {
-          return true // Suppress this error
+          // Suppress these errors - they're expected when chart data is unavailable
+          return true
         }
+        
+        // Log other errors to centralized system
+        if (error) {
+          logger.error('Uncaught error', {
+            message: errorStr,
+            source: String(source),
+            lineno,
+            colno,
+            error: error.toString(),
+            stack: error.stack
+          })
+        }
+        
+        // Call original handler if it exists
         if (originalErrorHandler) {
           return originalErrorHandler(message, source, lineno, colno, error)
         }
         return false
       }
       
-      // Restore original console methods on cleanup
+      // Intercept unhandled promise rejections
+      const originalUnhandledRejection = window.onunhandledrejection
+      window.onunhandledrejection = function(event: PromiseRejectionEvent) {
+        const reason = event.reason
+        const reasonStr = String(reason || '')
+        
+        // Suppress known non-critical errors
+        if (reasonStr.includes('/charts/mini/') || reasonStr.includes('/charts/history/')) {
+          if (reasonStr.includes('404') || reasonStr.includes('503')) {
+            event.preventDefault() // Suppress these errors
+            return
+          }
+        }
+        
+        // Log other unhandled rejections
+        logger.error('Unhandled promise rejection', {
+          reason: reasonStr,
+          error: reason
+        })
+        
+        if (originalUnhandledRejection) {
+          originalUnhandledRejection(event)
+        }
+      }
+      
+      // Restore original handlers on cleanup
       return () => {
-        console.error = originalError
-        console.warn = originalWarn
         window.onerror = originalErrorHandler
+        window.onunhandledrejection = originalUnhandledRejection
       }
     }
   }, [])
