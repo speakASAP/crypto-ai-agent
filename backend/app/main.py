@@ -143,6 +143,10 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 from .api.auth import router as auth_router
 app.include_router(auth_router)
 
+# Logging endpoints (for frontend logs)
+from .api.logging import router as logging_router
+app.include_router(logging_router)
+
 # Portfolio endpoints
 from .api.portfolio import router as portfolio_router
 app.include_router(portfolio_router)

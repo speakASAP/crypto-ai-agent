@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { logger } from '@/lib/logger'
 
 export function middleware(request: NextRequest) {
   const authStorage = request.cookies.get('auth-storage')?.value
@@ -12,10 +13,8 @@ export function middleware(request: NextRequest) {
       isAuthenticated = !!(parsed.state?.accessToken && parsed.state?.user)
       
     } catch (e) {
-      // Only log in debug mode (server-side, so check env directly)
-      if (process.env.DEBUG === 'true' || process.env.DEBUG === '1') {
-        console.log('❌ Middleware: Invalid auth storage', e)
-      }
+      // Log to centralized logging system
+      logger.error('Middleware: Invalid auth storage', e)
     }
   }
 
