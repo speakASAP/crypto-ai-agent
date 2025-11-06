@@ -1,15 +1,15 @@
 import aiohttp
 import asyncio
 import json
-import logging
 import ssl
 from typing import Dict, List, Optional
 from decimal import Decimal
 from datetime import datetime, timezone
 from ..core.config import settings
 from ..utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.price_service")
 
 
 class PriceService:

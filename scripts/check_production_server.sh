@@ -69,15 +69,18 @@ if [ -n "$BLUE_BACKEND" ]; then
     echo "   Database connection test:"
     docker exec $BLUE_BACKEND python3 -c "
 from app.utils.db import connect_with_retry
+from app.utils.logger import get_logger
+import sys
+logger = get_logger('scripts.check_production_server')
 try:
     conn = connect_with_retry(max_retries=1, initial_delay=0.5, max_delay=1.0, is_startup=False)
     cur = conn.cursor()
     cur.execute('SELECT COUNT(*) FROM users')
     count = cur.fetchone()[0]
-    print(f'      ✅ Database accessible: {count} users')
+    logger.info(f'      ✅ Database accessible: {count} users')
     conn.close()
 except Exception as e:
-    print(f'      ❌ Database connection failed: {str(e)[:100]}')
+    logger.error(f'      ❌ Database connection failed: {str(e)[:100]}')
 " 2>/dev/null || echo "      ⚠️  Could not test database connection"
 fi
 

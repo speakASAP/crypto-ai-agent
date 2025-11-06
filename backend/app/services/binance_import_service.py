@@ -1,7 +1,6 @@
 import aiohttp
 import asyncio
 import json
-import logging
 import ssl
 import hmac
 import hashlib
@@ -15,8 +14,9 @@ from binance.client import Client as BinanceClient
 from ..core.config import settings
 from ..utils.time_utils import get_current_timestamp
 from ..services.currency_service import currency_service
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.binance_import_service")
 
 
 class BinanceImportService:

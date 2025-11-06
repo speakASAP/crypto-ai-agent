@@ -8,6 +8,15 @@ import statistics
 import json
 from typing import List, Dict, Any
 import argparse
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.utils.logger import get_logger
+
+logger = get_logger("backend.tests.load_test")
 
 
 class LoadTester:
@@ -181,32 +190,32 @@ class LoadTester:
         return sorted_data[min(index, len(sorted_data) - 1)]
     
     def print_results(self, stats: Dict[str, Any]):
-        """Print load test results"""
-        print("\n" + "="*60)
-        print("LOAD TEST RESULTS")
-        print("="*60)
+        """Print load test results to logger"""
+        logger.info("="*60)
+        logger.info("LOAD TEST RESULTS")
+        logger.info("="*60)
         
-        print(f"Total Requests: {stats['total_requests']}")
-        print(f"Successful Requests: {stats['successful_requests']}")
-        print(f"Failed Requests: {stats['failed_requests']}")
-        print(f"Success Rate: {stats['success_rate']:.2f}%")
-        print(f"Requests per Second: {stats['requests_per_second']:.2f}")
+        logger.info(f"Total Requests: {stats['total_requests']}")
+        logger.info(f"Successful Requests: {stats['successful_requests']}")
+        logger.info(f"Failed Requests: {stats['failed_requests']}")
+        logger.info(f"Success Rate: {stats['success_rate']:.2f}%")
+        logger.info(f"Requests per Second: {stats['requests_per_second']:.2f}")
         
-        print("\nResponse Times:")
+        logger.info("Response Times:")
         rt = stats['response_times']
-        print(f"  Min: {rt['min']:.3f}s")
-        print(f"  Max: {rt['max']:.3f}s")
-        print(f"  Mean: {rt['mean']:.3f}s")
-        print(f"  Median: {rt['median']:.3f}s")
-        print(f"  95th Percentile: {rt['p95']:.3f}s")
-        print(f"  99th Percentile: {rt['p99']:.3f}s")
+        logger.info(f"  Min: {rt['min']:.3f}s")
+        logger.info(f"  Max: {rt['max']:.3f}s")
+        logger.info(f"  Mean: {rt['mean']:.3f}s")
+        logger.info(f"  Median: {rt['median']:.3f}s")
+        logger.info(f"  95th Percentile: {rt['p95']:.3f}s")
+        logger.info(f"  99th Percentile: {rt['p99']:.3f}s")
         
-        print("\nPer-Endpoint Statistics:")
+        logger.info("Per-Endpoint Statistics:")
         for endpoint, data in stats['endpoint_stats'].items():
-            print(f"  {endpoint}:")
-            print(f"    Total: {data['total']}")
-            print(f"    Success Rate: {data['success_rate']:.2f}%")
-            print(f"    Avg Response Time: {data['avg_response_time']:.3f}s")
+            logger.info(f"  {endpoint}:")
+            logger.info(f"    Total: {data['total']}")
+            logger.info(f"    Success Rate: {data['success_rate']:.2f}%")
+            logger.info(f"    Avg Response Time: {data['avg_response_time']:.3f}s")
 
 
 async def run_load_test(base_url: str, concurrency: int, num_requests: int):
@@ -235,8 +244,8 @@ async def run_load_test(base_url: str, concurrency: int, num_requests: int):
         }
     ]
     
-    print(f"Starting load test with {concurrency} concurrent connections...")
-    print(f"Total requests: {num_requests * len(endpoint_configs)}")
+    logger.info(f"Starting load test with {concurrency} concurrent connections...")
+    logger.info(f"Total requests: {num_requests * len(endpoint_configs)}")
     
     # Generate test requests
     requests = tester.generate_test_requests(endpoint_configs, num_requests)
@@ -256,7 +265,7 @@ async def run_load_test(base_url: str, concurrency: int, num_requests: int):
 
 async def run_stress_test(base_url: str, max_concurrency: int = 100):
     """Run stress test to find breaking point"""
-    print(f"\nStarting stress test (max concurrency: {max_concurrency})...")
+    logger.info(f"Starting stress test (max concurrency: {max_concurrency})...")
     
     concurrency_levels = [1, 5, 10, 20, 50, 100]
     results = []
@@ -265,7 +274,7 @@ async def run_stress_test(base_url: str, max_concurrency: int = 100):
         if concurrency > max_concurrency:
             break
             
-        print(f"\nTesting with {concurrency} concurrent connections...")
+        logger.info(f"Testing with {concurrency} concurrent connections...")
         tester = LoadTester(base_url)
         
         # Simple health check requests
@@ -282,9 +291,9 @@ async def run_stress_test(base_url: str, max_concurrency: int = 100):
             "requests_per_second": stats["requests_per_second"]
         })
         
-        print(f"  Success Rate: {stats['success_rate']:.2f}%")
-        print(f"  Avg Response Time: {stats['response_times']['mean']:.3f}s")
-        print(f"  Requests/sec: {stats['requests_per_second']:.2f}")
+        logger.info(f"  Success Rate: {stats['success_rate']:.2f}%")
+        logger.info(f"  Avg Response Time: {stats['response_times']['mean']:.3f}s")
+        logger.info(f"  Requests/sec: {stats['requests_per_second']:.2f}")
     
     # Find breaking point
     breaking_point = None
@@ -293,8 +302,8 @@ async def run_stress_test(base_url: str, max_concurrency: int = 100):
             breaking_point = result["concurrency"]
             break
     
-    print(f"\nStress Test Results:")
-    print(f"Breaking point: {breaking_point} concurrent connections")
+    logger.info("Stress Test Results:")
+    logger.info(f"Breaking point: {breaking_point} concurrent connections")
     
     return results
 

@@ -15,25 +15,35 @@ load_dotenv()
 from app.core.config import settings
 from app.utils.db import connect_with_retry
 
+try:
+    from backend.app.utils.logger import get_logger
+except ImportError:
+    try:
+        from app.utils.logger import get_logger
+    except ImportError:
+        from utils.logger import get_logger
+
+logger = get_logger("scripts.test_db_connection")
+
 def test_connection():
     """Test database connection and verify data."""
-    print("🔍 Testing database connection using application credentials...")
-    print(f"   Environment: {settings.environment}")
-    print(f"   Database URL: {'SET' if settings.database_url else 'NOT SET'}")
+    logger.info("🔍 Testing database connection using application credentials...")
+    logger.info(f"   Environment: {settings.environment}")
+    logger.info(f"   Database URL: {'SET' if settings.database_url else 'NOT SET'}")
     
     if not settings.database_url:
-        print("\n❌ DATABASE_URL is required for PostgreSQL connection")
+        logger.error("❌ DATABASE_URL is required for PostgreSQL connection")
         return False
     
     try:
         # Test connection with retry logic
-        print("\n📡 Attempting PostgreSQL connection...")
+        logger.info("📡 Attempting PostgreSQL connection...")
         conn = connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
         
         cur = conn.cursor()
         
         # Test basic connectivity
-        print("✅ Connection established")
+        logger.info("✅ Connection established")
         
         # Check if users table exists
         cur.execute("""
@@ -49,31 +59,31 @@ def test_connection():
             # Count users
             cur.execute("SELECT COUNT(*) FROM users")
             user_count = cur.fetchone()[0]
-            print(f"✅ Users table exists with {user_count} users")
+            logger.info(f"✅ Users table exists with {user_count} users")
             
             # Get some sample data (without sensitive info)
             cur.execute("SELECT id, email, username FROM users LIMIT 5")
             users = cur.fetchall()
             if users:
-                print("\n📊 Sample users (first 5):")
+                logger.info("📊 Sample users (first 5):")
                 for user in users:
-                    print(f"   ID: {user[0]}, Email: {user[1]}, Username: {user[2]}")
+                    logger.info(f"   ID: {user[0]}, Email: {user[1]}, Username: {user[2]}")
         else:
-            print("⚠️  Users table does not exist")
+            logger.warning("⚠️  Users table does not exist")
         
         cur.close()
         conn.close()
         
-        print("\n✅ Database connection test PASSED")
-        print("   ✓ Connection successful")
-        print("   ✓ Database accessible")
-        print("   ✓ Ready for blue/green deployment")
+        logger.info("✅ Database connection test PASSED")
+        logger.info("   ✓ Connection successful")
+        logger.info("   ✓ Database accessible")
+        logger.info("   ✓ Ready for blue/green deployment")
         return True
         
     except Exception as e:
-        print(f"\n❌ Database connection test FAILED")
-        print(f"   Error: {str(e)}")
-        print(f"   Type: {type(e).__name__}")
+        logger.error(f"❌ Database connection test FAILED")
+        logger.error(f"   Error: {str(e)}")
+        logger.error(f"   Type: {type(e).__name__}", exc_info=True)
         return False
 
 if __name__ == "__main__":

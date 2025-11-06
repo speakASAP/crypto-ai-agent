@@ -1,5 +1,4 @@
 import aiohttp
-import logging
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta, timezone
 from ..core.config import settings

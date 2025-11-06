@@ -17,6 +17,16 @@ from docker.errors import DockerException
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+try:
+    from backend.app.utils.logger import get_logger
+except ImportError:
+    try:
+        from app.utils.logger import get_logger
+    except ImportError:
+        from utils.logger import get_logger
+
+logger = get_logger("tests.test_service_connections")
+
 class ServiceConnectionTester:
     """Test service connections and network configuration"""
     
@@ -55,7 +65,7 @@ class ServiceConnectionTester:
             self.docker_client.ping()
             return True
         except DockerException as e:
-            print(f"❌ Failed to connect to Docker: {e}")
+            logger.error(f"❌ Failed to connect to Docker: {e}")
             return False
     
     def get_container(self, container_name: str):
@@ -64,7 +74,7 @@ class ServiceConnectionTester:
             containers = self.docker_client.containers.list(all=True, filters={'name': container_name})
             return containers[0] if containers else None
         except Exception as e:
-            print(f"❌ Error getting container {container_name}: {e}")
+            logger.error(f"❌ Error getting container {container_name}: {e}")
             return None
     
     def check_container_running(self, container_name: str) -> Tuple[bool, Optional[str]]:
@@ -92,8 +102,8 @@ class ServiceConnectionTester:
     
     def test_docker_network(self) -> bool:
         """Test Docker network configuration"""
-        print("\n🔍 Testing Docker Network Configuration...")
-        print("-" * 60)
+        logger.info("🔍 Testing Docker Network Configuration...")
+        logger.info("-" * 60)
         
         if not self.init_docker_client():
             self.test_results['docker_network'] = False
@@ -105,12 +115,12 @@ class ServiceConnectionTester:
         try:
             networks = self.docker_client.networks.list(names=['nginx-network'])
             if not networks:
-                print("❌ Network 'nginx-network' not found")
+                logger.error("❌ Network 'nginx-network' not found")
                 all_passed = False
             else:
-                print("✅ Network 'nginx-network' exists")
+                logger.info("✅ Network 'nginx-network' exists")
         except Exception as e:
-            print(f"❌ Error checking network: {e}")
+            logger.error(f"❌ Error checking network: {e}")
             all_passed = False
         
         # Check all containers are on the network
@@ -120,26 +130,26 @@ class ServiceConnectionTester:
             
             is_running, error = self.check_container_running(container_name)
             if error:
-                print(f"⚠️  {container_name}: {error}")
+                logger.warning(f"⚠️  {container_name}: {error}")
                 continue
             
             if is_running:
-                print(f"✅ {container_name} is running")
+                logger.info(f"✅ {container_name} is running")
             
             on_network, error = self.check_network_connectivity(container_name, network_name)
             if error:
-                print(f"❌ {container_name}: {error}")
+                logger.error(f"❌ {container_name}: {error}")
                 all_passed = False
             else:
-                print(f"✅ {container_name} is on network {network_name}")
+                logger.info(f"✅ {container_name} is on network {network_name}")
         
         self.test_results['docker_network'] = all_passed
         return all_passed
     
     def test_backend_health(self) -> bool:
         """Test backend health endpoint"""
-        print("\n🔍 Testing Backend Health...")
-        print("-" * 60)
+        logger.info("🔍 Testing Backend Health...")
+        logger.info("-" * 60)
         
         test_urls = [
             ('Internal', 'http://crypto-ai-backend:8100/health'),
@@ -152,23 +162,23 @@ class ServiceConnectionTester:
             try:
                 response = requests.get(url, timeout=5, verify=False)
                 if response.status_code == 200:
-                    print(f"✅ {label} ({url}): OK - {response.status_code}")
+                    logger.info(f"✅ {label} ({url}): OK - {response.status_code}")
                     try:
                         data = response.json()
-                        print(f"   Response: {json.dumps(data, indent=2)}")
+                        logger.debug(f"   Response: {json.dumps(data, indent=2)}")
                     except:
-                        print(f"   Response: {response.text[:100]}")
+                        logger.debug(f"   Response: {response.text[:100]}")
                 else:
-                    print(f"❌ {label} ({url}): {response.status_code}")
+                    logger.error(f"❌ {label} ({url}): {response.status_code}")
                     all_passed = False
             except requests.exceptions.ConnectionError:
-                print(f"❌ {label} ({url}): Connection refused")
+                logger.error(f"❌ {label} ({url}): Connection refused")
                 all_passed = False
             except requests.exceptions.Timeout:
-                print(f"❌ {label} ({url}): Timeout")
+                logger.error(f"❌ {label} ({url}): Timeout")
                 all_passed = False
             except Exception as e:
-                print(f"❌ {label} ({url}): {e}")
+                logger.error(f"❌ {label} ({url}): {e}")
                 all_passed = False
         
         self.test_results['backend_health'] = all_passed
@@ -176,8 +186,8 @@ class ServiceConnectionTester:
     
     def test_backend_api_endpoints(self) -> bool:
         """Test backend API endpoints"""
-        print("\n🔍 Testing Backend API Endpoints...")
-        print("-" * 60)
+        logger.info("🔍 Testing Backend API Endpoints...")
+        logger.info("-" * 60)
         
         # Test endpoints that should exist
         endpoints = [
@@ -197,7 +207,7 @@ class ServiceConnectionTester:
         
         all_passed = True
         for endpoint in endpoints:
-            print(f"\n📋 Testing endpoint: {endpoint}")
+            logger.info(f"📋 Testing endpoint: {endpoint}")
             
             for label, base_url in test_urls:
                 url = f"{base_url}{endpoint}"
@@ -208,24 +218,24 @@ class ServiceConnectionTester:
                     })
                     
                     if response.status_code == 401:
-                        print(f"   ✅ {label}: {url} - Auth required (401)")
+                        logger.info(f"   ✅ {label}: {url} - Auth required (401)")
                     elif response.status_code == 404:
-                        print(f"   ❌ {label}: {url} - Not Found (404)")
-                        print(f"      Response: {response.text[:200]}")
+                        logger.error(f"   ❌ {label}: {url} - Not Found (404)")
+                        logger.debug(f"      Response: {response.text[:200]}")
                         all_passed = False
                     elif response.status_code == 200:
-                        print(f"   ✅ {label}: {url} - OK (200)")
+                        logger.info(f"   ✅ {label}: {url} - OK (200)")
                     else:
-                        print(f"   ⚠️  {label}: {url} - {response.status_code}")
+                        logger.warning(f"   ⚠️  {label}: {url} - {response.status_code}")
                         
                 except requests.exceptions.ConnectionError:
-                    print(f"   ❌ {label}: {url} - Connection refused")
+                    logger.error(f"   ❌ {label}: {url} - Connection refused")
                     all_passed = False
                 except requests.exceptions.Timeout:
-                    print(f"   ❌ {label}: {url} - Timeout")
+                    logger.error(f"   ❌ {label}: {url} - Timeout")
                     all_passed = False
                 except Exception as e:
-                    print(f"   ❌ {label}: {url} - {e}")
+                    logger.error(f"   ❌ {label}: {url} - {e}")
                     all_passed = False
         
         self.test_results['backend_api_endpoints'] = all_passed
@@ -233,8 +243,8 @@ class ServiceConnectionTester:
     
     def test_frontend_connectivity(self) -> bool:
         """Test frontend connectivity"""
-        print("\n🔍 Testing Frontend Connectivity...")
-        print("-" * 60)
+        logger.info("🔍 Testing Frontend Connectivity...")
+        logger.info("-" * 60)
         
         test_urls = [
             ('Internal', 'http://crypto-ai-frontend:3100'),
@@ -247,22 +257,22 @@ class ServiceConnectionTester:
             try:
                 response = requests.get(url, timeout=5, verify=False)
                 if response.status_code == 200:
-                    print(f"✅ {label} ({url}): OK - {response.status_code}")
+                    logger.info(f"✅ {label} ({url}): OK - {response.status_code}")
                     if 'crypto' in response.text.lower() or 'portfolio' in response.text.lower():
-                        print(f"   ✅ Content appears to be frontend")
+                        logger.info(f"   ✅ Content appears to be frontend")
                     else:
-                        print(f"   ⚠️  Content doesn't look like frontend")
+                        logger.warning(f"   ⚠️  Content doesn't look like frontend")
                 else:
-                    print(f"❌ {label} ({url}): {response.status_code}")
+                    logger.error(f"❌ {label} ({url}): {response.status_code}")
                     all_passed = False
             except requests.exceptions.ConnectionError:
-                print(f"❌ {label} ({url}): Connection refused")
+                logger.error(f"❌ {label} ({url}): Connection refused")
                 all_passed = False
             except requests.exceptions.Timeout:
-                print(f"❌ {label} ({url}): Timeout")
+                logger.error(f"❌ {label} ({url}): Timeout")
                 all_passed = False
             except Exception as e:
-                print(f"❌ {label} ({url}): {e}")
+                logger.error(f"❌ {label} ({url}): {e}")
                 all_passed = False
         
         self.test_results['frontend_connectivity'] = all_passed
@@ -270,8 +280,8 @@ class ServiceConnectionTester:
     
     def test_nginx_proxy_config(self) -> bool:
         """Test nginx proxy configuration"""
-        print("\n🔍 Testing Nginx Proxy Configuration...")
-        print("-" * 60)
+        logger.info("🔍 Testing Nginx Proxy Configuration...")
+        logger.info("-" * 60)
         
         # Test API proxy through nginx
         api_endpoints = [
@@ -285,7 +295,7 @@ class ServiceConnectionTester:
         all_passed = True
         nginx_url = 'https://crypto-ai-agent.statex.cz'
         
-        print(f"\n📋 Testing API proxy through nginx: {nginx_url}")
+        logger.info(f"📋 Testing API proxy through nginx: {nginx_url}")
         
         for endpoint in api_endpoints:
             url = f"{nginx_url}{endpoint}"
@@ -296,18 +306,18 @@ class ServiceConnectionTester:
                 
                 # Should get 401 (auth required) or 200, not 404
                 if response.status_code == 401:
-                    print(f"   ✅ {endpoint} - Auth required (401) - Proxy working")
+                    logger.info(f"   ✅ {endpoint} - Auth required (401) - Proxy working")
                 elif response.status_code == 404:
-                    print(f"   ❌ {endpoint} - Not Found (404) - Proxy misconfigured")
-                    print(f"      Response: {response.text[:200]}")
+                    logger.error(f"   ❌ {endpoint} - Not Found (404) - Proxy misconfigured")
+                    logger.debug(f"      Response: {response.text[:200]}")
                     all_passed = False
                 elif response.status_code == 200:
-                    print(f"   ✅ {endpoint} - OK (200) - Proxy working")
+                    logger.info(f"   ✅ {endpoint} - OK (200) - Proxy working")
                 else:
-                    print(f"   ⚠️  {endpoint} - {response.status_code}")
+                    logger.warning(f"   ⚠️  {endpoint} - {response.status_code}")
                     
             except requests.exceptions.SSLError as e:
-                print(f"   ⚠️  {endpoint} - SSL Error (using verify=False): {e}")
+                logger.warning(f"   ⚠️  {endpoint} - SSL Error (using verify=False): {e}")
                 # Try HTTP instead
                 http_url = url.replace('https://', 'http://')
                 try:
@@ -315,27 +325,27 @@ class ServiceConnectionTester:
                         'Authorization': 'Bearer test-token'
                     }, allow_redirects=False)
                     if response.status_code == 401:
-                        print(f"   ✅ {endpoint} (HTTP) - Auth required (401)")
+                        logger.info(f"   ✅ {endpoint} (HTTP) - Auth required (401)")
                     elif response.status_code == 404:
-                        print(f"   ❌ {endpoint} (HTTP) - Not Found (404)")
+                        logger.error(f"   ❌ {endpoint} (HTTP) - Not Found (404)")
                         all_passed = False
                 except Exception as e2:
-                    print(f"   ❌ {endpoint} (HTTP fallback): {e2}")
+                    logger.error(f"   ❌ {endpoint} (HTTP fallback): {e2}")
                     all_passed = False
             except Exception as e:
-                print(f"   ❌ {endpoint}: {e}")
+                logger.error(f"   ❌ {endpoint}: {e}")
                 all_passed = False
         
         # Test frontend proxy
-        print(f"\n📋 Testing frontend proxy through nginx: {nginx_url}")
+        logger.info(f"📋 Testing frontend proxy through nginx: {nginx_url}")
         try:
             response = requests.get(nginx_url, timeout=5, verify=False, allow_redirects=False)
             if response.status_code == 200:
-                print(f"   ✅ Frontend proxy working (200)")
+                logger.info(f"   ✅ Frontend proxy working (200)")
             else:
-                print(f"   ⚠️  Frontend proxy returned {response.status_code}")
+                logger.warning(f"   ⚠️  Frontend proxy returned {response.status_code}")
         except Exception as e:
-            print(f"   ❌ Frontend proxy error: {e}")
+            logger.error(f"   ❌ Frontend proxy error: {e}")
             all_passed = False
         
         self.test_results['nginx_proxy_config'] = all_passed
@@ -343,8 +353,8 @@ class ServiceConnectionTester:
     
     def test_dns_resolution(self) -> bool:
         """Test DNS resolution between containers"""
-        print("\n🔍 Testing DNS Resolution Between Containers...")
-        print("-" * 60)
+        logger.info("🔍 Testing DNS Resolution Between Containers...")
+        logger.info("-" * 60)
         
         if not self.init_docker_client():
             self.test_results['dns_resolution'] = False
@@ -353,7 +363,7 @@ class ServiceConnectionTester:
         # Get backend container
         backend_container = self.get_container('crypto-ai-backend')
         if not backend_container:
-            print("❌ Backend container not found")
+            logger.error("❌ Backend container not found")
             self.test_results['dns_resolution'] = False
             return False
         
@@ -374,18 +384,18 @@ class ServiceConnectionTester:
                 )
                 
                 if exec_result.exit_code == 0:
-                    print(f"✅ {hostname}: DNS resolution OK")
+                    logger.info(f"✅ {hostname}: DNS resolution OK")
                     output = exec_result.output.decode('utf-8') if exec_result.output else ''
                     if output:
-                        print(f"   Output: {output[:100]}")
+                        logger.debug(f"   Output: {output[:100]}")
                 else:
-                    print(f"❌ {hostname}: DNS resolution failed")
+                    logger.error(f"❌ {hostname}: DNS resolution failed")
                     output = exec_result.output.decode('utf-8') if exec_result.output else ''
                     if output:
-                        print(f"   Error: {output[:200]}")
+                        logger.debug(f"   Error: {output[:200]}")
                     all_passed = False
             except Exception as e:
-                print(f"❌ {hostname}: Error testing DNS - {e}")
+                logger.error(f"❌ {hostname}: Error testing DNS - {e}")
                 all_passed = False
         
         self.test_results['dns_resolution'] = all_passed
@@ -393,12 +403,12 @@ class ServiceConnectionTester:
     
     def test_nginx_config_syntax(self) -> bool:
         """Test nginx configuration syntax"""
-        print("\n🔍 Testing Nginx Configuration Syntax...")
-        print("-" * 60)
+        logger.info("🔍 Testing Nginx Configuration Syntax...")
+        logger.info("-" * 60)
         
         nginx_container = self.get_container('nginx-microservice')
         if not nginx_container:
-            print("❌ Nginx container not found")
+            logger.error("❌ Nginx container not found")
             self.test_results['nginx_config_syntax'] = False
             return False
         
@@ -407,32 +417,32 @@ class ServiceConnectionTester:
             exec_result = nginx_container.exec_run("nginx -t")
             
             if exec_result.exit_code == 0:
-                print("✅ Nginx configuration syntax is valid")
+                logger.info("✅ Nginx configuration syntax is valid")
                 output = exec_result.output.decode('utf-8') if exec_result.output else ''
                 if output:
-                    print(f"   Output: {output}")
+                    logger.debug(f"   Output: {output}")
                 self.test_results['nginx_config_syntax'] = True
                 return True
             else:
-                print("❌ Nginx configuration syntax error")
+                logger.error("❌ Nginx configuration syntax error")
                 output = exec_result.output.decode('utf-8') if exec_result.output else ''
                 if output:
-                    print(f"   Error: {output}")
+                    logger.debug(f"   Error: {output}")
                 self.test_results['nginx_config_syntax'] = False
                 return False
         except Exception as e:
-            print(f"❌ Error testing nginx config: {e}")
+            logger.error(f"❌ Error testing nginx config: {e}")
             self.test_results['nginx_config_syntax'] = False
             return False
     
     def analyze_nginx_logs(self) -> bool:
         """Analyze nginx logs for errors"""
-        print("\n🔍 Analyzing Nginx Logs...")
-        print("-" * 60)
+        logger.info("🔍 Analyzing Nginx Logs...")
+        logger.info("-" * 60)
         
         nginx_container = self.get_container('nginx-microservice')
         if not nginx_container:
-            print("❌ Nginx container not found")
+            logger.error("❌ Nginx container not found")
             self.test_results['nginx_logs'] = False
             return False
         
@@ -449,29 +459,29 @@ class ServiceConnectionTester:
                     error_count += 1
                     error_lines.append(line)
                     if error_count <= 10:  # Show first 10 errors
-                        print(f"   ⚠️  {line}")
+                        logger.warning(f"   ⚠️  {line}")
             
             if error_count == 0:
-                print("✅ No errors found in nginx logs")
+                logger.info("✅ No errors found in nginx logs")
                 self.test_results['nginx_logs'] = True
                 return True
             else:
-                print(f"⚠️  Found {error_count} potential errors in nginx logs")
+                logger.warning(f"⚠️  Found {error_count} potential errors in nginx logs")
                 if error_count > 10:
-                    print(f"   (Showing first 10, total: {error_count})")
+                    logger.info(f"   (Showing first 10, total: {error_count})")
                 self.test_results['nginx_logs'] = False
                 return False
                 
         except Exception as e:
-            print(f"❌ Error analyzing nginx logs: {e}")
+            logger.error(f"❌ Error analyzing nginx logs: {e}")
             self.test_results['nginx_logs'] = False
             return False
     
     def run_all_tests(self) -> bool:
         """Run all service connection tests"""
-        print("=" * 60)
-        print("🚀 Starting Service Connection Tests")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("🚀 Starting Service Connection Tests")
+        logger.info("=" * 60)
         
         tests = [
             ("Docker Network", self.test_docker_network),
@@ -492,23 +502,21 @@ class ServiceConnectionTester:
                 if test_func():
                     passed += 1
             except Exception as e:
-                print(f"❌ {test_name} - Exception: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"❌ {test_name} - Exception: {e}", exc_info=True)
         
         # Print summary
-        print("\n" + "=" * 60)
-        print("TEST SUMMARY")
-        print("=" * 60)
-        print(f"Total Tests: {total}")
-        print(f"Passed: {passed}")
-        print(f"Failed: {total - passed}")
-        print(f"Success Rate: {(passed / total) * 100:.1f}%")
+        logger.info("=" * 60)
+        logger.info("TEST SUMMARY")
+        logger.info("=" * 60)
+        logger.info(f"Total Tests: {total}")
+        logger.info(f"Passed: {passed}")
+        logger.info(f"Failed: {total - passed}")
+        logger.info(f"Success Rate: {(passed / total) * 100:.1f}%")
         
-        print("\nDetailed Results:")
+        logger.info("Detailed Results:")
         for test_name, result in self.test_results.items():
             status = "✅ PASSED" if result else "❌ FAILED"
-            print(f"  {test_name}: {status}")
+            logger.info(f"  {test_name}: {status}")
         
         return passed == total
 
