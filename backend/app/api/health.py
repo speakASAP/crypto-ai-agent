@@ -4,7 +4,7 @@ from ..core.config import settings
 from .ws import manager
 from ..dependencies.auth import get_db_connection
 
-router = APIRouter(tags=["health"])
+router = APIRouter(prefix="/api", tags=["health"])
 
 
 @router.get("/health")
