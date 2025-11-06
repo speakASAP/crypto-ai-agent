@@ -184,7 +184,12 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
         updated_count = 0
         deleted_count = 0
         now = datetime.now().isoformat() + "Z"
-        items_with_missing_data = []
+        items_with_issues = []  # Track all items with issues (not just missing data)
+        
+        # Get current prices for fallback when price is missing
+        from ..services.multi_exchange_price_service import multi_exchange_price_service
+        all_symbols = [item['symbol'].upper() for item in aggregated_items]
+        current_prices = await multi_exchange_price_service.get_current_prices(all_symbols)
 
         for item in aggregated_items:
             try:
@@ -250,10 +255,53 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                         if is_sell_only:
                             # Sell-only: keep existing price (we're reducing quantity, not changing buy price)
                             merged_price = existing_price
-                            merged_price_usd = existing_price_usd if existing_price_usd else existing_price
+                            # CRITICAL: Ensure price_buy_usd is valid - use existing_price_usd or calculate from existing_price
+                            # Currency conversion formula: price_buy_usd = price_buy / exchange_rate (for non-USD currencies)
+                            if existing_price_usd and existing_price_usd > 0:
+                                merged_price_usd = existing_price_usd
+                            elif existing_price and existing_price > 0:
+                                # Calculate from existing price if price_buy_usd is missing
+                                if existing_currency == 'USD':
+                                    merged_price_usd = existing_price
+                                elif existing_exchange_rate and existing_exchange_rate > 0:
+                                    # Convert from existing currency to USD: divide by exchange rate
+                                    merged_price_usd = existing_price / existing_exchange_rate
+                                else:
+                                    # Fallback: use current exchange rate
+                                    exchange_rate = currency_service.rates.get(existing_currency, 1.0)
+                                    merged_price_usd = existing_price / exchange_rate if exchange_rate > 0 else existing_price
+                            else:
+                                # Use fallback - never skip
+                                logger.warning(f"⚠️ {symbol}: existing price is invalid, using fallback")
+                                # Try to get current market price
+                                symbol_upper = symbol.upper()
+                                if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                    merged_price_usd = current_prices[symbol_upper]
+                                    merged_price = merged_price_usd if existing_currency == 'USD' else merged_price_usd * (existing_exchange_rate or 1.0)
+                                    items_with_issues.append({
+                                        'symbol': symbol,
+                                        'amount': new_amount,
+                                        'issues': [],
+                                        'warnings': [f"Invalid existing price - used current market price (${merged_price_usd:.2f}) as fallback for update."],
+                                        'price_buy': merged_price,
+                                        'price_buy_usd': merged_price_usd,
+                                        'purchase_date': None
+                                    })
+                                else:
+                                    merged_price_usd = 9999999.0
+                                    merged_price = 9999999.0
+                                    items_with_issues.append({
+                                        'symbol': symbol,
+                                        'amount': new_amount,
+                                        'issues': ["CRITICAL: Invalid existing price - using fallback 9999999. MUST be updated manually."],
+                                        'warnings': [],
+                                        'price_buy': merged_price,
+                                        'price_buy_usd': merged_price_usd,
+                                        'purchase_date': None
+                                    })
                             # Commission stays the same (we already paid it)
                             merged_commission = existing_commission
-                            merged_commission_usd = existing_commission_usd
+                            merged_commission_usd = existing_commission_usd if existing_commission_usd is not None else 0.0
                             merged_exchange_rate = existing_exchange_rate
                         else:
                             # Has buys in CSV: calculate weighted average
@@ -297,13 +345,71 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                                 merged_price = float(total_value_decimal / total_quantity_for_price_decimal) if total_quantity_for_price_decimal > 0 else existing_price
 
                                 # Calculate USD prices
+                                # CRITICAL: Validate CSV price - use fallback if invalid (never skip)
+                                csv_price = item.get('price', 0)
+                                if not csv_price or csv_price <= 0:
+                                    logger.warning(f"⚠️ {symbol}: CSV price is invalid ({csv_price}), using fallback")
+                                    # Try to use current market price
+                                    symbol_upper = symbol.upper()
+                                    if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                        csv_price = current_prices[symbol_upper]
+                                        items_with_issues.append({
+                                            'symbol': symbol,
+                                            'amount': new_amount,
+                                            'issues': [],
+                                            'warnings': [f"Invalid CSV price - used current market price (${csv_price:.2f}) as fallback for update."],
+                                            'price_buy': csv_price,
+                                            'price_buy_usd': csv_price,
+                                            'purchase_date': None
+                                        })
+                                    else:
+                                        csv_price = 9999999.0
+                                        items_with_issues.append({
+                                            'symbol': symbol,
+                                            'amount': new_amount,
+                                            'issues': ["CRITICAL: Invalid CSV price - using fallback 9999999. MUST be updated manually."],
+                                            'warnings': [],
+                                            'price_buy': csv_price,
+                                            'price_buy_usd': csv_price,
+                                            'purchase_date': None
+                                        })
+                                
+                                # Currency conversion formula:
+                                # Exchange rate format: 1 USD = exchange_rate CZK (e.g., 20.94 means 1 USD = 20.94 CZK)
+                                # To convert CZK to USD: price_buy_usd = price_buy / exchange_rate
+                                # To convert USD to CZK (for display): price_buy = price_buy_usd * exchange_rate
                                 if currency != 'USD':
                                     csv_exchange_rate = currency_service.rates.get(currency, 1.0)
+                                    if csv_exchange_rate <= 0:
+                                        csv_exchange_rate = 1.0
+                                        logger.warning(f"⚠️ {symbol}: Invalid exchange rate for {currency}, using fallback 1.0")
                                     csv_exchange_rate_decimal = Decimal(str(csv_exchange_rate))
+                                    # Convert from CSV currency to USD: divide by exchange rate
                                     csv_price_usd = float(csv_price_decimal / csv_exchange_rate_decimal)
+                                    logger.debug(f"💰 {symbol}: Currency conversion {currency} -> USD: rate={csv_exchange_rate}, csv_price={float(csv_price_decimal):.8f} {currency} -> csv_price_usd={csv_price_usd:.8f} USD")
                                 else:
-                                    csv_exchange_rate = None
+                                    csv_exchange_rate = 1.0
                                     csv_price_usd = float(csv_price_decimal)
+                                
+                                # Validate csv_price_usd - use fallback if invalid (never skip)
+                                if not csv_price_usd or csv_price_usd <= 0:
+                                    logger.warning(f"⚠️ {symbol}: calculated csv_price_usd is invalid ({csv_price_usd}), using fallback")
+                                    symbol_upper = symbol.upper()
+                                    if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                        csv_price_usd = current_prices[symbol_upper]
+                                        csv_price = csv_price_usd if currency == 'USD' else csv_price_usd * csv_exchange_rate
+                                    else:
+                                        csv_price_usd = 9999999.0
+                                        csv_price = 9999999.0
+                                    items_with_issues.append({
+                                        'symbol': symbol,
+                                        'amount': new_amount,
+                                        'issues': [],
+                                        'warnings': [f"Invalid calculated csv_price_usd - used fallback (${csv_price_usd:.2f}) for update."],
+                                        'price_buy': csv_price,
+                                        'price_buy_usd': csv_price_usd,
+                                        'purchase_date': None
+                                    })
 
                                 # Merge commission (only from buys, not sells)
                                 existing_commission_decimal = Decimal(str(existing_commission))
@@ -322,28 +428,147 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                                 csv_price_usd_decimal = Decimal(str(csv_price_usd))
                                 csv_buy_value_usd_decimal = csv_buy_qty_decimal * csv_price_usd_decimal
                                 total_value_usd_decimal = Decimal(str(existing_value_usd)) + csv_buy_value_usd_decimal
-                                merged_price_usd = float(total_value_usd_decimal / total_quantity_for_price_decimal) if total_quantity_for_price_decimal > 0 else (existing_price_usd or csv_price_usd)
+                                
+                                # CRITICAL: Calculate merged_price_usd with validation
+                                if total_quantity_for_price_decimal > 0:
+                                    merged_price_usd = float(total_value_usd_decimal / total_quantity_for_price_decimal)
+                                else:
+                                    # Fallback: use existing_price_usd if valid, otherwise csv_price_usd
+                                    if existing_price_usd and existing_price_usd > 0:
+                                        merged_price_usd = existing_price_usd
+                                    elif csv_price_usd and csv_price_usd > 0:
+                                        merged_price_usd = csv_price_usd
+                                    else:
+                                        # Use fallback - never skip
+                                        logger.warning(f"⚠️ {symbol}: both existing_price_usd and csv_price_usd are invalid, using fallback")
+                                        symbol_upper = symbol.upper()
+                                        if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                            merged_price_usd = current_prices[symbol_upper]
+                                        else:
+                                            merged_price_usd = 9999999.0
+                                        items_with_issues.append({
+                                            'symbol': symbol,
+                                            'amount': new_amount,
+                                            'issues': ["CRITICAL: Both existing and CSV prices invalid - using fallback 9999999. MUST be updated manually."],
+                                            'warnings': [],
+                                            'price_buy': merged_price_usd,
+                                            'price_buy_usd': merged_price_usd,
+                                            'purchase_date': None
+                                        })
+                                
+                                # Validate merged_price_usd - use fallback if invalid (never skip)
+                                if not merged_price_usd or merged_price_usd <= 0:
+                                    logger.warning(f"⚠️ {symbol}: calculated merged_price_usd is invalid ({merged_price_usd}), using fallback")
+                                    symbol_upper = symbol.upper()
+                                    if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                        merged_price_usd = current_prices[symbol_upper]
+                                    else:
+                                        merged_price_usd = 0.01
+                                    items_with_issues.append({
+                                        'symbol': symbol,
+                                        'amount': new_amount,
+                                        'issues': [],
+                                        'warnings': [f"Invalid merged_price_usd - used fallback (${merged_price_usd:.2f}) for update."],
+                                        'price_buy': merged_price_usd,
+                                        'price_buy_usd': merged_price_usd,
+                                        'purchase_date': None
+                                    })
                                 
                                 if currency != 'USD':
                                     csv_exchange_rate_decimal = Decimal(str(csv_exchange_rate))
-                                    existing_commission_usd_decimal = Decimal(str(existing_commission_usd))
+                                    existing_commission_usd_decimal = Decimal(str(existing_commission_usd or 0))
                                     merged_commission_usd = float(existing_commission_usd_decimal + (item_fees_decimal / csv_exchange_rate_decimal))
                                     merged_exchange_rate = csv_exchange_rate
                                 else:
-                                    existing_commission_usd_decimal = Decimal(str(existing_commission_usd))
+                                    existing_commission_usd_decimal = Decimal(str(existing_commission_usd or 0))
                                     merged_commission_usd = float(existing_commission_usd_decimal + item_fees_decimal)
-                                    merged_exchange_rate = None
+                                    merged_exchange_rate = 1.0
                             else:
                                 # Net decrease (partial sell): keep existing price
                                 merged_price = existing_price
-                                merged_price_usd = existing_price_usd if existing_price_usd else existing_price
+                                # CRITICAL: Ensure price_buy_usd is valid
+                                # Currency conversion formula: price_buy_usd = price_buy / exchange_rate (for non-USD currencies)
+                                if existing_price_usd and existing_price_usd > 0:
+                                    merged_price_usd = existing_price_usd
+                                elif existing_price and existing_price > 0:
+                                    # Calculate from existing price if price_buy_usd is missing
+                                    if existing_currency == 'USD':
+                                        merged_price_usd = existing_price
+                                    elif existing_exchange_rate and existing_exchange_rate > 0:
+                                        # Convert from existing currency to USD: divide by exchange rate
+                                        merged_price_usd = existing_price / existing_exchange_rate
+                                    else:
+                                        # Fallback: use current exchange rate
+                                        exchange_rate = currency_service.rates.get(existing_currency, 1.0)
+                                        merged_price_usd = existing_price / exchange_rate if exchange_rate > 0 else existing_price
+                                else:
+                                    # Use fallback - never skip
+                                    logger.warning(f"⚠️ {symbol}: existing price is invalid, using fallback")
+                                    symbol_upper = symbol.upper()
+                                    if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                        merged_price_usd = current_prices[symbol_upper]
+                                        merged_price = merged_price_usd if existing_currency == 'USD' else merged_price_usd * (existing_exchange_rate or 1.0)
+                                    else:
+                                        merged_price_usd = 9999999.0
+                                        merged_price = 9999999.0
+                                    items_with_issues.append({
+                                        'symbol': symbol,
+                                        'amount': new_amount,
+                                        'issues': ["CRITICAL: Invalid existing price - using fallback 9999999. MUST be updated manually."],
+                                        'warnings': [],
+                                        'price_buy': merged_price,
+                                        'price_buy_usd': merged_price_usd,
+                                        'purchase_date': None
+                                    })
+                                
+                                # Validate merged_price_usd - use fallback if invalid (never skip)
+                                if not merged_price_usd or merged_price_usd <= 0:
+                                    logger.warning(f"⚠️ {symbol}: calculated merged_price_usd is invalid ({merged_price_usd}), using fallback")
+                                    symbol_upper = symbol.upper()
+                                    if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                        merged_price_usd = current_prices[symbol_upper]
+                                    else:
+                                        merged_price_usd = 9999999.0
+                                    items_with_issues.append({
+                                        'symbol': symbol,
+                                        'amount': new_amount,
+                                        'issues': [],
+                                        'warnings': [f"Invalid merged_price_usd - used fallback (${merged_price_usd:.2f}) for update."],
+                                        'price_buy': merged_price_usd,
+                                        'price_buy_usd': merged_price_usd,
+                                        'purchase_date': None
+                                    })
+                                
                                 merged_commission = existing_commission  # Don't add fees from sells
-                                merged_commission_usd = existing_commission_usd
+                                merged_commission_usd = existing_commission_usd if existing_commission_usd is not None else 0.0
                                 if currency != 'USD':
                                     merged_exchange_rate = currency_service.rates.get(currency, 1.0)
                                 else:
-                                    merged_exchange_rate = existing_exchange_rate
+                                    merged_exchange_rate = 1.0 if existing_exchange_rate is None else existing_exchange_rate
 
+                        # CRITICAL: Final validation before update - use fallback if invalid (never skip)
+                        if not merged_price_usd or merged_price_usd <= 0:
+                            logger.warning(f"⚠️ {symbol}: merged_price_usd is invalid ({merged_price_usd}) before update, using fallback")
+                            symbol_upper = symbol.upper()
+                            if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                merged_price_usd = current_prices[symbol_upper]
+                                merged_price = merged_price_usd if currency == 'USD' else merged_price_usd * (merged_exchange_rate or 1.0)
+                            else:
+                                merged_price_usd = 9999999.0
+                                merged_price = 9999999.0
+                            items_with_issues.append({
+                                'symbol': symbol,
+                                'amount': new_amount,
+                                'issues': ["CRITICAL: Invalid price before update - using fallback 9999999. MUST be updated manually."],
+                                'warnings': [],
+                                'price_buy': merged_price,
+                                'price_buy_usd': merged_price_usd,
+                                'purchase_date': None
+                            })
+                        
+                        if merged_commission_usd is None:
+                            merged_commission_usd = 0.0
+                        
                         # Calculate total investment for display (using Decimal for precision)
                         new_amount_decimal_display = Decimal(str(new_amount))
                         merged_price_decimal = Decimal(str(merged_price))
@@ -363,6 +588,22 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                         currency_symbol = currency_symbols.get(currency, currency + ' ')
                         total_investment_text = f"{currency_symbol}{total_investment:.2f}"
 
+                        # CRITICAL: Final validation before update - ensure price_buy_usd > 0
+                        if not merged_price_usd or merged_price_usd <= 0:
+                            logger.error(f"❌ {symbol}: merged_price_usd is {merged_price_usd} before update, forcing to 9999999")
+                            merged_price_usd = 9999999.0
+                            merged_price = 9999999.0 if currency == 'USD' else 9999999.0 * (merged_exchange_rate or 1.0)
+                            issues.append("CRITICAL: price_buy_usd validation failed before update - using fallback 9999999. MUST be updated manually.")
+                            items_with_issues.append({
+                                'symbol': symbol,
+                                'amount': new_amount,
+                                'issues': issues,
+                                'warnings': warnings,
+                                'price_buy': merged_price,
+                                'price_buy_usd': merged_price_usd,
+                                'purchase_date': None
+                            })
+
                         # Update portfolio item
                         update_sql = _normalize_placeholders(
                             "UPDATE portfolio_items SET "
@@ -371,53 +612,111 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                             "total_investment_text = %s, updated_at = %s, source = %s "
                             "WHERE id = %s AND user_id = %s"
                         )
-                        cursor.execute(update_sql, (
-                            new_amount, merged_price, merged_commission,
-                            merged_price_usd, merged_commission_usd, merged_exchange_rate,
-                            total_investment_text, now, exchange.capitalize(),
-                            existing_id, current_user["id"]
-                        ))
-                        updated_count += 1
-                        logger.info(f"🔄 Updated {symbol}: {existing_amount} -> {new_amount} (change: {net_change:+.8f})")
+                        try:
+                            cursor.execute(update_sql, (
+                                new_amount, merged_price, merged_commission,
+                                merged_price_usd, merged_commission_usd, merged_exchange_rate,
+                                total_investment_text, now, exchange.capitalize(),
+                                existing_id, current_user["id"]
+                            ))
+                            updated_count += 1
+                            logger.info(f"🔄 Updated {symbol}: {existing_amount} -> {new_amount} (change: {net_change:+.8f}), price_buy_usd={merged_price_usd:.8f}, currency={currency}, rate={merged_exchange_rate}")
+                        except Exception as db_error:
+                            error_msg = str(db_error)
+                            logger.error(f"❌ Database error updating {symbol}: {error_msg} (price_buy_usd={merged_price_usd}, currency={currency}, rate={merged_exchange_rate})", exc_info=True)
+                            issues.append(f"Database error: {error_msg}. Item was NOT updated. Please update manually.")
+                            items_with_issues.append({
+                                'symbol': symbol,
+                                'amount': new_amount,
+                                'issues': issues,
+                                'warnings': warnings,
+                                'price_buy': merged_price,
+                                'price_buy_usd': merged_price_usd,
+                                'purchase_date': None
+                            })
+                            raise
                 else:
                     # Portfolio item doesn't exist
                     logger.info(f"📋 {symbol} not found in portfolio (net_change={net_change})")
                     if net_change > 0:
                         # Insert new item (net change is positive = buy)
+                        # Track all issues for this item
+                        issues = []
+                        warnings = []
+                        
+                        item_price = item.get('price', 0)
+                        item_date = item.get('date')
+                        
+                        # Check for missing or invalid price - use fallback (never skip)
+                        symbol_upper = symbol.upper()
+                        if not item_price or item_price <= 0:
+                            # Try to use current market price as fallback
+                            if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                item_price = current_prices[symbol_upper]
+                                warnings.append(f"Missing buy price - used current market price (${item_price:.2f}) as fallback. Please verify and update manually.")
+                                logger.info(f"⚠️ {symbol}: Missing buy price - used current market price ${item_price:.2f} as fallback")
+                            else:
+                                # Last resort: use huge amount (9999999) to alert user
+                                item_price = 9999999.0
+                                issues.append("CRITICAL: Missing buy price - could not fetch current market price. Using fallback 9999999. MUST be updated manually.")
+                                logger.warning(f"❌ {symbol}: Missing buy price - could not fetch market price, using fallback 9999999")
+                        
+                        # Check for missing purchase date
+                        if not item_date or item_date == '' or item_date == 'Unknown':
+                            item_date = datetime.now().isoformat()
+                            warnings.append("Missing purchase date - used current date as fallback. Please update with the actual purchase date.")
+                        
                         # Use Decimal for all calculations to preserve precision
-                        item_price_decimal = Decimal(str(item['price']))
+                        item_price_decimal = Decimal(str(item_price))
                         item_quantity_decimal = Decimal(str(item['quantity']))
                         item_fees_decimal = Decimal(str(item.get('fees', 0)))
                         item_value_decimal = Decimal(str(item.get('value', 0)))
                         
-                        # Check for missing data before inserting
-                        missing_fields = []
-                        item_price = item.get('price', 0)
-                        item_date = item.get('date')
-                        if not item_price or item_price == 0:
-                            missing_fields.append('Buy Price')
-                        if not item_date or item_date == '' or item_date == 'Unknown':
-                            missing_fields.append('Purchase Date')
-                        
-                        # Track items with missing data
-                        if missing_fields:
-                            items_with_missing_data.append({
-                                'symbol': symbol,
-                                'missing_fields': missing_fields,
-                                'amount': item['quantity']
-                            })
-                        
+                        # Currency conversion formula:
+                        # Exchange rate format: 1 USD = exchange_rate CZK (e.g., 20.94 means 1 USD = 20.94 CZK)
+                        # To convert CZK to USD: price_buy_usd = price_buy / exchange_rate
+                        # To convert USD to CZK (for display): price_buy = price_buy_usd * exchange_rate
                         if currency != 'USD':
                             exchange_rate = currency_service.rates.get(currency, 1.0)
+                            if exchange_rate is None or exchange_rate <= 0:
+                                exchange_rate = 1.0
+                                logger.warning(f"⚠️ {symbol}: Invalid exchange rate for {currency}, using fallback 1.0")
                             exchange_rate_decimal = Decimal(str(exchange_rate))
+                            # Convert from CSV currency to USD: divide by exchange rate
                             price_usd = float(item_price_decimal / exchange_rate_decimal)
-                            fees_usd = float(item_fees_decimal / exchange_rate_decimal) if item['fees'] > 0 else 0.0
+                            fees_usd = float(item_fees_decimal / exchange_rate_decimal) if item.get('fees', 0) > 0 else 0.0
                             value_usd = float(item_value_decimal / exchange_rate_decimal) if item.get('value', 0) > 0 else 0.0
+                            logger.debug(f"💰 {symbol}: Currency conversion {currency} -> USD: rate={exchange_rate}, price={float(item_price_decimal):.8f} {currency} -> price_usd={price_usd:.8f} USD")
                         else:
-                            exchange_rate = None
+                            exchange_rate = 1.0
                             price_usd = float(item_price_decimal)
                             fees_usd = float(item_fees_decimal)
                             value_usd = float(item_value_decimal)
+                        
+                        # Validate price_usd - use fallback if invalid (never skip)
+                        if not price_usd or price_usd <= 0:
+                            logger.warning(f"⚠️ {symbol}: calculated price_usd is invalid ({price_usd}), using fallback")
+                            if symbol_upper in current_prices and current_prices[symbol_upper] > 0:
+                                price_usd = current_prices[symbol_upper]
+                                item_price = price_usd if currency == 'USD' else price_usd * exchange_rate
+                                warnings.append(f"Invalid calculated price_usd - used current market price (${price_usd:.2f}) as fallback.")
+                            else:
+                                price_usd = 9999999.0
+                                item_price = 9999999.0
+                                issues.append("CRITICAL: Invalid calculated price_usd - using fallback 9999999. MUST be updated manually.")
+                                logger.warning(f"⚠️ {symbol}: Invalid calculated price_usd (currency={currency}, rate={exchange_rate}), using fallback 9999999")
+                        
+                        # Track item if it has any issues or warnings
+                        if issues or warnings:
+                            items_with_issues.append({
+                                'symbol': symbol,
+                                'amount': item['quantity'],
+                                'issues': issues,
+                                'warnings': warnings,
+                                'price_buy': item_price,
+                                'price_buy_usd': price_usd,
+                                'purchase_date': item_date
+                            })
 
                         if item.get('value', 0) > 0:
                             total_investment = float(item_value_decimal + item_fees_decimal)
@@ -428,26 +727,71 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
                         currency_symbol = currency_symbols.get(currency, currency + ' ')
                         total_investment_text = f"{currency_symbol}{total_investment:.2f}"
 
+                        # CRITICAL: Final validation before insert - ensure price_usd > 0
+                        if not price_usd or price_usd <= 0:
+                            logger.error(f"❌ {symbol}: price_usd is {price_usd} before insert, forcing to 9999999")
+                            price_usd = 9999999.0
+                            item_price = 9999999.0 if currency == 'USD' else 9999999.0 * exchange_rate
+                            issues.append("CRITICAL: price_usd validation failed before insert - using fallback 9999999. MUST be updated manually.")
+                            items_with_issues.append({
+                                'symbol': symbol,
+                                'amount': item['quantity'],
+                                'issues': issues,
+                                'warnings': warnings,
+                                'price_buy': item_price,
+                                'price_buy_usd': price_usd,
+                                'purchase_date': item_date
+                            })
+
+                        if fees_usd is None:
+                            fees_usd = 0.0
+
                         insert_sql = _normalize_placeholders(
                             "INSERT INTO portfolio_items "
                             "(user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, "
                             "total_investment_text, created_at, updated_at, price_buy_usd, commission_usd, exchange_rate_at_purchase) "
                             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                         )
-                        cursor.execute(insert_sql, (
-                            current_user["id"], symbol, item['quantity'], item['price'],
-                            item['date'], currency, exchange.capitalize(), item['fees'],
-                            total_investment_text, now, now, price_usd, fees_usd, exchange_rate,
-                        ))
-                        imported_count += 1
-                        logger.info(f"➕ Inserted new {symbol}: {item['quantity']}")
+                        try:
+                            cursor.execute(insert_sql, (
+                                current_user["id"], symbol, item['quantity'], item_price,
+                                item_date, currency, exchange.capitalize(), item.get('fees', 0),
+                                total_investment_text, now, now, price_usd, fees_usd, exchange_rate,
+                            ))
+                            imported_count += 1
+                            logger.info(f"➕ Inserted new {symbol}: {item['quantity']}, price_buy_usd={price_usd:.8f}, currency={currency}, rate={exchange_rate}")
+                        except Exception as db_error:
+                            error_msg = str(db_error)
+                            logger.error(f"❌ Database error inserting {symbol}: {error_msg} (price_usd={price_usd}, currency={currency}, rate={exchange_rate})", exc_info=True)
+                            issues.append(f"Database error: {error_msg}. Item was NOT imported. Please add manually.")
+                            items_with_issues.append({
+                                'symbol': symbol,
+                                'amount': item['quantity'],
+                                'issues': issues,
+                                'warnings': warnings,
+                                'price_buy': item_price,
+                                'price_buy_usd': price_usd,
+                                'purchase_date': item_date
+                            })
+                            raise
                     else:
                         # Selling non-existent position - log warning but don't create negative amount
                         logger.warning(f"⚠️ Attempted to sell {symbol} ({abs(net_change)}) that doesn't exist in portfolio - skipping")
 
             except Exception as e:
-                logger.error(f"Failed to process item {item.get('symbol', 'unknown')}: {e}", exc_info=True)
-                continue
+                logger.error(f"❌ Failed to process item {item.get('symbol', 'unknown')}: {e}", exc_info=True)
+                # Still track the item with error - never skip
+                symbol = item.get('symbol', 'UNKNOWN').upper()
+                items_with_issues.append({
+                    'symbol': symbol,
+                    'amount': item.get('quantity', item.get('net_change', 0)),
+                    'issues': [f"Import failed: {str(e)}. Item was NOT imported. Please add manually."],
+                    'warnings': [],
+                    'price_buy': 0,
+                    'price_buy_usd': 0,
+                    'purchase_date': None
+                })
+                # DO NOT continue - we want to process all items, but track errors
 
         column_mapping_data = {
             'column_mapping': template.get('column_mapping', {}),
@@ -505,7 +849,7 @@ async def execute_csv_import(file: UploadFile = File(...), exchange: str = Form(
             'success': True,
             'message': f'Successfully processed CSV: {imported_count} inserted, {updated_count} updated, {deleted_count} deleted',
             'items_imported': imported_count,
-            'items_with_missing_data': items_with_missing_data,
+            'items_with_issues': items_with_issues,  # Changed from items_with_missing_data to items_with_issues
             'items_updated': updated_count,
             'items_deleted': deleted_count,
             'total_processed': total_processed,

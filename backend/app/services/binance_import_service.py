@@ -7,13 +7,12 @@ import hashlib
 import time
 import csv
 import os
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone
-from decimal import Decimal
+from typing import Dict, List, Tuple
+from datetime import datetime
 from binance.client import Client as BinanceClient
 from ..core.config import settings
-from ..utils.time_utils import get_current_timestamp
 from ..services.currency_service import currency_service
+from ..services.multi_exchange_price_service import MultiExchangePriceService
 from ..utils.logger import get_logger
 
 logger = get_logger("backend.app.services.binance_import_service")
@@ -914,28 +913,51 @@ class BinanceImportService:
                         'commission': scaled_commission,
                         'total_investment_text': f"${scaled_cost + scaled_commission:.2f}"
                     })
-            else:
-                # If no trading history, try to use deposit history date as buy date
-                # This might be from airdrops, staking rewards, transfers, or other sources
-                if earliest_deposit_time and earliest_deposit_time > 0:
-                    # Use earliest deposit date as buy date
-                    deposit_dt = datetime.utcfromtimestamp(earliest_deposit_time / 1000)
-                    purchase_date = deposit_dt.isoformat()
-                    logger.info(f"📅 Buy date for {asset}: {purchase_date} (from earliest deposit - no trades found)")
                 else:
-                    # Fallback to current date if no deposits either
-                    purchase_date = datetime.utcnow().isoformat()
-                    logger.warning(f"⚠️ No buy trades or deposits found for {asset}, using current date: {purchase_date}")
+                    # Total quantity is 0 but we still have the asset - use fallback price
+                    logger.warning(f"⚠️ Total quantity is 0 for {asset}, using fallback price")
+                    # Use fallback price - will be tracked as issue in API layer
+                    price_buy_usd = 9999999.0
+                    trade_date = datetime.utcnow().isoformat()
+                    portfolio_items.append({
+                        'symbol': asset,
+                        'amount': total_amount,
+                        'price_buy': price_buy_usd,
+                        'purchase_date': trade_date,
+                        'base_currency': 'USD',
+                        'source': 'Binance',
+                        'commission': 0.0,
+                        'total_investment_text': f"${total_amount * price_buy_usd:.2f}",
+                        '_needs_price_fallback': True  # Flag for API layer to track as issue
+                    })
+            else:
+                # If no trading history, use fallback price - NEVER skip
+                logger.warning(f"⚠️ No buy trades found for {asset}, using fallback price (will be tracked as issue)")
+                # Try to get current market price as fallback
+                try:
+                    price_service = MultiExchangePriceService()
+                    current_prices = await price_service.get_current_prices([asset])
+                    if asset in current_prices and current_prices[asset] > 0:
+                        price_buy_usd = current_prices[asset]
+                        logger.info(f"✅ Using current market price ${price_buy_usd:.2f} as fallback for {asset}")
+                    else:
+                        price_buy_usd = 9999999.0
+                        logger.warning(f"⚠️ Could not fetch market price for {asset}, using fallback 9999999")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error fetching market price for {asset}: {e}, using fallback 9999999")
+                    price_buy_usd = 9999999.0
                 
+                trade_date = datetime.utcnow().isoformat()
                 portfolio_items.append({
                     'symbol': asset,
                     'amount': total_amount,
-                    'price_buy': 0.0,  # Unknown price
-                    'purchase_date': purchase_date,  # Buy date from deposit or current date
-                    'base_currency': 'USDT',
+                    'price_buy': price_buy_usd,
+                    'purchase_date': trade_date,
+                    'base_currency': 'USD',
                     'source': 'Binance',
                     'commission': 0.0,
-                    'total_investment_text': "Unknown"
+                    'total_investment_text': f"${total_amount * price_buy_usd:.2f}",
+                    '_needs_price_fallback': True  # Flag for API layer to track as issue
                 })
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Binance balances")

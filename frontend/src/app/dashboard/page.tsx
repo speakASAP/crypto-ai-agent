@@ -124,7 +124,15 @@ export default function Home() {
   
   // Missing data dialog state
   const [missingDataDialogOpen, setMissingDataDialogOpen] = useState(false)
-  const [itemsWithMissingData, setItemsWithMissingData] = useState<Array<{symbol: string; missing_fields: string[]; amount: number}>>([])
+  const [itemsWithIssues, setItemsWithIssues] = useState<Array<{
+    symbol: string;
+    amount: number;
+    issues: string[];
+    warnings: string[];
+    price_buy?: number;
+    price_buy_usd?: number;
+    purchase_date?: string;
+  }>>([])
 
   // Intercept uncaught errors and send to centralized logging
   // Suppress known non-critical errors (404/503 for chart endpoints)
@@ -521,9 +529,9 @@ export default function Home() {
         // Refresh portfolio data
         await fetchPortfolio()
         await fetchSummary()
-        // Show missing data dialog if there are items with missing data
-        if (result.items_with_missing_data && result.items_with_missing_data.length > 0) {
-          setItemsWithMissingData(result.items_with_missing_data)
+        // Show issues dialog if there are items with issues or warnings
+        if (result.items_with_issues && result.items_with_issues.length > 0) {
+          setItemsWithIssues(result.items_with_issues)
           setMissingDataDialogOpen(true)
         }
         // Clear message after 5 seconds
@@ -594,9 +602,9 @@ export default function Home() {
         // Refresh portfolio data
         await fetchPortfolio()
         await fetchSummary()
-        // Show missing data dialog if there are items with missing data
-        if (result.items_with_missing_data && result.items_with_missing_data.length > 0) {
-          setItemsWithMissingData(result.items_with_missing_data)
+        // Show issues dialog if there are items with issues or warnings
+        if (result.items_with_issues && result.items_with_issues.length > 0) {
+          setItemsWithIssues(result.items_with_issues)
           setMissingDataDialogOpen(true)
         }
         // Clear message after 5 seconds
@@ -676,9 +684,9 @@ export default function Home() {
         // Refresh portfolio data
         await fetchPortfolio()
         await fetchSummary()
-        // Show missing data dialog if there are items with missing data
-        if (result.items_with_missing_data && result.items_with_missing_data.length > 0) {
-          setItemsWithMissingData(result.items_with_missing_data)
+        // Show issues dialog if there are items with issues or warnings
+        if (result.items_with_issues && result.items_with_issues.length > 0) {
+          setItemsWithIssues(result.items_with_issues)
           setMissingDataDialogOpen(true)
         }
         // Close modal and reset after 3 seconds
@@ -2307,9 +2315,9 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Missing Data Dialog */}
+      {/* Import Issues Dialog */}
       <Dialog open={missingDataDialogOpen} onOpenChange={setMissingDataDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3 text-xl">
               <div className="flex items-center justify-center w-12 h-12 rounded-full bg-yellow-100 dark:bg-yellow-900">
@@ -2317,34 +2325,67 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               </div>
-              <span>Items Requiring Manual Input</span>
+              <span>Import Issues & Warnings</span>
             </DialogTitle>
           </DialogHeader>
           <div className="py-4">
             <div className="space-y-4">
               <p className="text-base text-gray-700 dark:text-gray-300 leading-relaxed">
-                The following cryptocurrencies were imported but are missing some data. Please fill in the missing information manually:
+                All cryptocurrencies were imported successfully. However, some items have issues or warnings that require your attention:
               </p>
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                <div className="space-y-3">
-                  {itemsWithMissingData.map((item, index) => (
-                    <div key={index} className="flex items-start justify-between gap-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-yellow-200 dark:border-yellow-800">
+              <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                {itemsWithIssues.map((item, index) => (
+                  <div key={index} className="border rounded-lg p-4 bg-white dark:bg-gray-800">
+                    <div className="flex items-start justify-between gap-4 mb-3">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-gray-900 dark:text-gray-100">{item.symbol}</span>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="font-semibold text-lg text-gray-900 dark:text-gray-100">{item.symbol}</span>
                           <span className="text-sm text-gray-500 dark:text-gray-400">({item.amount.toFixed(8)})</span>
                         </div>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {item.missing_fields.map((field, fieldIndex) => (
-                            <span key={fieldIndex} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                              {field}
-                            </span>
-                          ))}
-                        </div>
+                        {item.price_buy_usd && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                            Price: ${item.price_buy_usd.toFixed(8)} USD
+                            {item.purchase_date && ` • Date: ${new Date(item.purchase_date).toLocaleDateString()}`}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
+                    
+                    {/* Critical Issues */}
+                    {item.issues && item.issues.length > 0 && (
+                      <div className="mb-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg className="w-4 h-4 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span className="text-sm font-semibold text-red-600 dark:text-red-400">Critical Issues (Must Fix):</span>
+                        </div>
+                        <ul className="list-disc list-inside space-y-1 ml-6">
+                          {item.issues.map((issue, issueIndex) => (
+                            <li key={issueIndex} className="text-sm text-red-700 dark:text-red-300">{issue}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {/* Warnings */}
+                    {item.warnings && item.warnings.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg className="w-4 h-4 text-yellow-600 dark:text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">Warnings (Recommended to Fix):</span>
+                        </div>
+                        <ul className="list-disc list-inside space-y-1 ml-6">
+                          {item.warnings.map((warning, warningIndex) => (
+                            <li key={warningIndex} className="text-sm text-yellow-700 dark:text-yellow-300">{warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                 <div className="flex items-start gap-3">
@@ -2352,8 +2393,10 @@ export default function Home() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <div className="text-sm text-blue-800 dark:text-blue-200">
-                    <p className="font-medium mb-1">Tip:</p>
-                    <p>You can edit these items by clicking on them in your portfolio table and filling in the missing information.</p>
+                    <p className="font-medium mb-1">How to Fix:</p>
+                    <p>Click on any item in your portfolio table to edit it. Update the price, purchase date, or other information as needed. Items with critical issues should be fixed immediately to ensure accurate portfolio tracking.</p>
+                    <p className="mt-2 font-medium">Zero Tolerance Policy:</p>
+                    <p>The system enforces zero tolerance for invalid prices. If you see a price of 9999999, this indicates missing price data that must be updated manually. All prices are validated before saving to ensure data integrity.</p>
                   </div>
                 </div>
               </div>
