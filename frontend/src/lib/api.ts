@@ -495,7 +495,15 @@ class ApiClient {
     message: string;
     items_imported: number;
     portfolio_items?: any[];
-    items_with_missing_data?: Array<{symbol: string; missing_fields: string[]; amount: number}>;
+    items_with_issues?: Array<{
+      symbol: string;
+      amount: number;
+      issues: string[];
+      warnings: string[];
+      price_buy?: number;
+      price_buy_usd?: number;
+      purchase_date?: string;
+    }>;
     error?: string;
   }> {
     // Increase timeout to 120 seconds for Binance import (can take a while)
@@ -511,7 +519,15 @@ class ApiClient {
     message: string;
     items_imported: number;
     portfolio_items?: any[];
-    items_with_missing_data?: Array<{symbol: string; missing_fields: string[]; amount: number}>;
+    items_with_issues?: Array<{
+      symbol: string;
+      amount: number;
+      issues: string[];
+      warnings: string[];
+      price_buy?: number;
+      price_buy_usd?: number;
+      purchase_date?: string;
+    }>;
     error?: string;
   }> {
     // Increase timeout to 120 seconds for Bitfinex import (can take a while)
@@ -551,7 +567,15 @@ class ApiClient {
     message: string;
     items_imported: number;
     total_found: number;
-    items_with_missing_data?: Array<{symbol: string; missing_fields: string[]; amount: number}>;
+    items_with_issues?: Array<{
+      symbol: string;
+      amount: number;
+      issues: string[];
+      warnings: string[];
+      price_buy?: number;
+      price_buy_usd?: number;
+      purchase_date?: string;
+    }>;
   }> {
     const formData = new FormData()
     formData.append('file', file)

@@ -30,6 +30,7 @@ from .core.database import (
     init_postgres_database,
     ensure_ai_advisor_tables,
     ensure_comments_column,
+    ensure_price_buy_usd_mandatory,
     populate_initial_prices,
 )
 
@@ -74,6 +75,10 @@ async def lifespan(app: FastAPI):
     # Ensure comments column exists in portfolio_items table
     ensure_comments_column()
     logger.info("✅ Portfolio items comments column migration check complete")
+
+    # Ensure price_buy_usd is mandatory (NOT NULL) in portfolio_items table
+    ensure_price_buy_usd_mandatory()
+    logger.info("✅ Portfolio items price_buy_usd mandatory constraint check complete")
 
     # Populate initial prices in crypto_prices table if empty
     await populate_initial_prices()

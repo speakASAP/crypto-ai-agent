@@ -10,11 +10,12 @@ The Bitfinex Portfolio Import feature allows users to automatically import their
 
 - ✅ **Automatic Portfolio Import** - Import all cryptocurrency holdings from Bitfinex
 - ✅ **Real-time Price Updates** - Live price tracking for imported assets
-- ✅ **Multi-currency Support** - USD, EUR, CZK tracking
+- ✅ **Multi-currency Support** - USD, EUR, CZK tracking with automatic conversion
 - ✅ **Source Tracking** - Mark assets as imported from "Bitfinex"
 - ✅ **Import History** - Track all import operations
-- ✅ **Duplicate Prevention** - Avoid importing duplicate assets
+- ✅ **Duplicate Prevention** - Avoid importing duplicate assets (same symbol, amount, source)
 - ✅ **Secure API Integration** - Read-only access for security
+- ✅ **Currency Conversion** - All prices automatically converted to USD using current exchange rates
 
 ## Prerequisites
 
@@ -252,6 +253,51 @@ CREATE TABLE portfolio_items (
 3. **User Isolation** - Each user's data is completely separate
 4. **API Key Encryption** - Credentials stored securely
 5. **Duplicate Prevention** - Avoid importing duplicate assets
+
+## Zero Tolerance Policy for price_buy_usd
+
+The system enforces **zero tolerance** for missing or invalid `price_buy_usd` values:
+
+- **Database Constraints**: The database enforces `price_buy_usd > 0` with CHECK constraint
+- **Validation**: All imports validate `price_buy_usd > 0` before database operations
+- **Fallback Strategy**: If price cannot be determined:
+  1. First tries current market price
+  2. If unavailable, uses **9999999** (huge amount) to alert user
+- **User Notification**: All issues are shown in popup dialog after import
+- **No Skipping**: Every symbol is imported, even if price data is missing
+
+**Important**: If you see a price of 9999999, this indicates missing price data. You must update it manually with the correct purchase price.
+
+For more details, see [Import Issues Tracking](IMPORT_ISSUES_TRACKING.md).
+
+## Currency Conversion
+
+The Bitfinex import automatically converts all prices to USD for consistent tracking across your portfolio.
+
+### How It Works
+
+**Exchange Rate Format:**
+
+- The system uses rates in the format: **1 USD = exchange_rate CZK**
+- Example: If CZK rate is 20.94, it means 1 USD = 20.94 CZK
+
+**Conversion Formula:**
+
+- **From non-USD to USD**: `price_buy_usd = price_buy / exchange_rate`
+- **From USD to non-USD (for display)**: `price_buy = price_buy_usd * exchange_rate`
+
+**Example:**
+
+- If you bought 1 ETH for 1,700 EUR and exchange rate is 0.85:
+  - `price_buy_usd = 1,700 / 0.85 = 2,000 USD`
+  - The system stores: `price_buy = 1,700 EUR` and `price_buy_usd = 2,000 USD`
+
+**Important Notes:**
+
+- All prices are stored in USD in the `price_buy_usd` field (required for accurate portfolio calculations)
+- The original currency price is preserved in the `price_buy` field for display
+- Exchange rates are fetched from the currency service and cached for 30 minutes
+- Invalid exchange rates are replaced with 1.0 with a warning
 
 ## Troubleshooting
 

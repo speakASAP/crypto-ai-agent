@@ -14,8 +14,9 @@ The CSV Portfolio Import feature allows users to import cryptocurrency transacti
 - ✅ **Transaction Aggregation** - Combine multiple buy/sell transactions into net positions
 - ✅ **Weighted Average Pricing** - Calculate accurate buy prices from transaction history
 - ✅ **Multi-Currency Support** - Automatic USD conversion for all currencies
-- ✅ **Duplicate Prevention** - Avoid importing duplicate positions
+- ✅ **Duplicate Prevention** - Avoid importing duplicate positions (same symbol, amount, source)
 - ✅ **Import History** - Track all CSV imports
+- ✅ **Currency Conversion** - All prices automatically converted to USD using current exchange rates
 
 ## Supported Exchanges
 
@@ -336,6 +337,54 @@ Templates are JSON files in `backend/templates/`:
 - KuCoin
 - Crypto.com
 - Bybit
+
+## Zero Tolerance Policy for price_buy_usd
+
+The system enforces **zero tolerance** for missing or invalid `price_buy_usd` values:
+
+- **Database Constraints**: The database enforces `price_buy_usd > 0` with CHECK constraint
+- **Validation**: All imports validate `price_buy_usd > 0` before database operations (both INSERT and UPDATE)
+- **Fallback Strategy**: If price cannot be determined:
+  1. First tries current market price
+  2. If unavailable, uses **9999999** (huge amount) to alert user
+- **User Notification**: All issues are shown in popup dialog after import
+- **No Skipping**: Every symbol is imported, even if price data is missing
+- **Weighted Average**: For updates, calculates weighted average price correctly
+
+**Important**: If you see a price of 9999999, this indicates missing price data. You must update it manually with the correct purchase price.
+
+For more details, see [Import Issues Tracking](IMPORT_ISSUES_TRACKING.md).
+
+## Currency Conversion
+
+The CSV import automatically converts all prices to USD for consistent tracking across your portfolio, regardless of the currency in your CSV file.
+
+### How It Works
+
+**Exchange Rate Format:**
+
+- The system uses rates in the format: **1 USD = exchange_rate CZK**
+- Example: If CZK rate is 20.94, it means 1 USD = 20.94 CZK
+
+**Conversion Formula:**
+
+- **From non-USD to USD**: `price_buy_usd = price_buy / exchange_rate`
+- **From USD to non-USD (for display)**: `price_buy = price_buy_usd * exchange_rate`
+
+**Example with Revolut CSV:**
+
+- CSV contains: `Value: "2,000.00 CZK"` and `Price: "15.60 CZK"`
+- If exchange rate is 20.94:
+  - `price_buy_usd = 15.60 / 20.94 = 0.745 USD`
+  - The system stores: `price_buy = 15.60 CZK` and `price_buy_usd = 0.745 USD`
+
+**Important Notes:**
+
+- Currency is auto-detected from the CSV value field (e.g., "2,000.00 CZK" → CZK)
+- All prices are stored in USD in the `price_buy_usd` field (required for accurate portfolio calculations)
+- The original currency price is preserved in the `price_buy` field for display
+- Exchange rates are fetched from the currency service and cached for 30 minutes
+- Invalid exchange rates are replaced with 1.0 with a warning
 
 ## Troubleshooting
 

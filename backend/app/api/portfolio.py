@@ -141,8 +141,17 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
     if item.base_currency != "USD":
         exchange_rate = currency_service.get_rate(item.base_currency)
 
+    # CRITICAL: Always calculate price_buy_usd - it's mandatory
     price_buy_usd = item.price_buy / exchange_rate if item.base_currency != "USD" else item.price_buy
     commission_usd = item.commission / exchange_rate if item.base_currency != "USD" else item.commission
+    
+    # CRITICAL: Validate price_buy_usd is valid (zero tolerance)
+    if not price_buy_usd or price_buy_usd <= 0:
+        logger.error(f"❌ Invalid price_buy_usd for {item.symbol}: {price_buy_usd} (currency={item.base_currency}, rate={exchange_rate}, price_buy={item.price_buy})")
+        raise HTTPException(status_code=400, detail=f"Invalid price: price_buy_usd must be greater than 0 (calculated: {price_buy_usd:.8f})")
+
+    if commission_usd is None:
+        commission_usd = 0.0
 
     total_investment = (item.amount * item.price_buy) + item.commission
     formatted_total_investment = item.total_investment_text
@@ -165,9 +174,17 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate, item.comments,
     )
     sql = _normalize_placeholders(insert_sql)
-    item_id = _execute_insert_and_get_id(cursor, sql, params)
-    conn.commit()
-    conn.close()
+    try:
+        item_id = _execute_insert_and_get_id(cursor, sql, params)
+        conn.commit()
+        logger.info(f"✅ Created portfolio item {item.symbol}: amount={item.amount}, price_buy_usd={price_buy_usd:.8f}, currency={item.base_currency}, rate={exchange_rate}")
+    except Exception as db_error:
+        conn.rollback()
+        error_msg = str(db_error)
+        logger.error(f"❌ Database error creating portfolio item {item.symbol}: {error_msg} (price_buy_usd={price_buy_usd}, currency={item.base_currency}, rate={exchange_rate})", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Database error: {error_msg}")
+    finally:
+        conn.close()
 
     # Immediately fetch prices and generate predictions for the newly added symbol
     symbol_upper = item.symbol.upper()
@@ -318,9 +335,22 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
             new_data = cursor.fetchone()
             if new_data:
                 amount, price_buy, commission, base_currency = new_data
+                # CRITICAL: Always calculate price_buy_usd - it's mandatory
+                if not price_buy or price_buy <= 0:
+                    raise HTTPException(status_code=400, detail="Invalid price: price_buy must be greater than 0")
+                
                 exchange_rate = 1.0 if base_currency == "USD" else currency_service.get_rate(base_currency)
                 price_buy_usd = price_buy / exchange_rate if base_currency != "USD" else price_buy
                 commission_usd = commission / exchange_rate if base_currency != "USD" else commission
+                
+                # CRITICAL: Validate price_buy_usd is valid (zero tolerance)
+                if not price_buy_usd or price_buy_usd <= 0:
+                    logger.error(f"❌ Invalid price_buy_usd for item {item_id}: {price_buy_usd} (currency={base_currency}, rate={exchange_rate}, price_buy={price_buy})")
+                    raise HTTPException(status_code=400, detail=f"Invalid price: calculated price_buy_usd must be greater than 0 (calculated: {price_buy_usd:.8f})")
+                
+                if commission_usd is None:
+                    commission_usd = 0.0
+                
                 upd_sql2 = '''
                     UPDATE portfolio_items 
                     SET price_buy_usd = %s, commission_usd = %s, exchange_rate_at_purchase = %s,
@@ -328,15 +358,22 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
                     WHERE id = %s
                 '''
                 upd_sql2 = _normalize_placeholders(upd_sql2)
-                cursor.execute(
-                    upd_sql2,
-                    (
-                        round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate,
-                        round(amount * price_buy, 8), round(amount * price_buy_usd, 8),
-                        0.0, 0.0, 0.0, 0.0, item_id,
-                    ),
-                )
-                conn.commit()
+                try:
+                    cursor.execute(
+                        upd_sql2,
+                        (
+                            round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate,
+                            round(amount * price_buy, 8), round(amount * price_buy_usd, 8),
+                            0.0, 0.0, 0.0, 0.0, item_id,
+                        ),
+                    )
+                    conn.commit()
+                    logger.info(f"✅ Updated portfolio item {item_id}: price_buy_usd={price_buy_usd:.8f}, currency={base_currency}, rate={exchange_rate}")
+                except Exception as db_error:
+                    conn.rollback()
+                    error_msg = str(db_error)
+                    logger.error(f"❌ Database error updating portfolio item {item_id}: {error_msg} (price_buy_usd={price_buy_usd}, currency={base_currency}, rate={exchange_rate})", exc_info=True)
+                    raise HTTPException(status_code=400, detail=f"Database error: {error_msg}")
 
                 try:
                     from ..services.price_tasks import fetch_prices_for_symbols  # lazy import to avoid cycles

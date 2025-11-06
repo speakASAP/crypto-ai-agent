@@ -143,8 +143,8 @@ def init_postgres_database():
             current_value REAL,
             pnl REAL,
             pnl_percent REAL,
-            price_buy_usd REAL,
-            commission_usd REAL,
+            price_buy_usd REAL NOT NULL,
+            commission_usd REAL NOT NULL DEFAULT 0.0,
             current_price_usd REAL,
             current_value_usd REAL,
             pnl_usd REAL,
@@ -403,6 +403,173 @@ def ensure_comments_column():
     except Exception as e:
         logger.error(f"❌ Error ensuring comments column: {e}", exc_info=True)
         # Don't raise - allow service to continue even if column addition fails
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+def ensure_price_buy_usd_mandatory():
+    """Ensure price_buy_usd and commission_usd are mandatory (NOT NULL) in portfolio_items table.
+    This function:
+    1. Backfills any NULL price_buy_usd/commission_usd values
+    2. Backfills any price_buy_usd <= 0 with 9999999 (huge amount to alert user)
+    3. Adds NOT NULL constraint to prevent future NULL values
+    4. Adds CHECK constraint to ensure price_buy_usd > 0
+    5. Adds CHECK constraint to ensure commission_usd >= 0
+    """
+    try:
+        from ..services.currency_service import CurrencyService
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # First check if portfolio_items table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'portfolio_items'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
+
+        if not table_exists:
+            logger.debug("⚠️ portfolio_items table does not exist yet. price_buy_usd constraint will be added when table is created.")
+            conn.close()
+            return
+
+        # Check if there are any NULL values or invalid values (<= 0) that need to be backfilled
+        cursor.execute("""
+            SELECT COUNT(*) FROM portfolio_items
+            WHERE price_buy_usd IS NULL OR commission_usd IS NULL OR price_buy_usd <= 0
+        """)
+        null_count = cursor.fetchone()[0]
+
+        if null_count > 0:
+            logger.info(f"📋 Found {null_count} items with NULL price_buy_usd or commission_usd. Backfilling values...")
+            currency_service = CurrencyService()
+            currency_service.ensure_rates_initialized()
+
+            # Get all items with NULL values or invalid values (<= 0)
+            cursor.execute("""
+                SELECT id, amount, price_buy, commission, base_currency, exchange_rate_at_purchase, price_buy_usd
+                FROM portfolio_items
+                WHERE price_buy_usd IS NULL OR commission_usd IS NULL OR price_buy_usd <= 0
+            """)
+            items = cursor.fetchall()
+
+            fixed_count = 0
+            for item_id, amount, price_buy, commission, base_currency, exchange_rate_at_purchase, existing_price_usd in items:
+                try:
+                    # Calculate price_buy_usd and commission_usd
+                    if base_currency == "USD":
+                        price_buy_usd = price_buy if price_buy and price_buy > 0 else None
+                        commission_usd = commission if commission else 0.0
+                        exchange_rate = 1.0
+                    else:
+                        # Use stored exchange rate if available, otherwise get current rate
+                        if exchange_rate_at_purchase:
+                            exchange_rate = exchange_rate_at_purchase
+                        else:
+                            exchange_rate = currency_service.get_rate(base_currency)
+                        
+                        if price_buy and price_buy > 0 and exchange_rate and exchange_rate > 0:
+                            price_buy_usd = price_buy / exchange_rate
+                        else:
+                            price_buy_usd = None
+                        commission_usd = (commission / exchange_rate) if (commission and exchange_rate) else 0.0
+
+                    # If calculated price is invalid or missing, use fallback 9999999 (huge amount to alert user)
+                    if not price_buy_usd or price_buy_usd <= 0:
+                        price_buy_usd = 9999999.0
+                        logger.warning(f"⚠️ Item {item_id} ({base_currency}): Invalid price_buy_usd, using fallback 9999999. User must update manually.")
+                    else:
+                        logger.debug(f"Fixed item {item_id}: {base_currency} -> USD, price_buy_usd={price_buy_usd:.8f}, commission_usd={commission_usd:.8f}")
+
+                    # Update the item
+                    cursor.execute("""
+                        UPDATE portfolio_items
+                        SET price_buy_usd = %s, commission_usd = %s, exchange_rate_at_purchase = %s
+                        WHERE id = %s
+                    """, (round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate, item_id))
+                    
+                    fixed_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error fixing item {item_id}: {e}")
+                    continue
+
+            conn.commit()
+            logger.info(f"✅ Backfilled {fixed_count} out of {null_count} items with missing or invalid price_buy_usd/commission_usd")
+
+        # Check if NOT NULL constraint already exists
+        cursor.execute("""
+            SELECT is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            AND table_name = 'portfolio_items'
+            AND column_name = 'price_buy_usd'
+        """)
+        result = cursor.fetchone()
+        
+        if result and result[0] == 'YES':
+            logger.info("📋 Adding NOT NULL constraint to price_buy_usd and commission_usd columns...")
+            try:
+                # First set default for commission_usd if NULL
+                cursor.execute("UPDATE portfolio_items SET commission_usd = 0.0 WHERE commission_usd IS NULL")
+                
+                # Add NOT NULL constraint
+                cursor.execute("ALTER TABLE portfolio_items ALTER COLUMN price_buy_usd SET NOT NULL")
+                cursor.execute("ALTER TABLE portfolio_items ALTER COLUMN commission_usd SET NOT NULL")
+                cursor.execute("ALTER TABLE portfolio_items ALTER COLUMN commission_usd SET DEFAULT 0.0")
+                conn.commit()
+                logger.info("✅ Successfully added NOT NULL constraint to price_buy_usd and commission_usd")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not add NOT NULL constraint (may already exist): {e}")
+                conn.rollback()
+        else:
+            logger.debug("✅ price_buy_usd and commission_usd already have NOT NULL constraint")
+
+        # Check if CHECK constraint for price_buy_usd > 0 already exists
+        cursor.execute("""
+            SELECT constraint_name
+            FROM information_schema.table_constraints
+            WHERE table_schema = 'public'
+            AND table_name = 'portfolio_items'
+            AND constraint_type = 'CHECK'
+            AND constraint_name LIKE '%price_buy_usd%'
+        """)
+        check_constraint_exists = cursor.fetchone()
+
+        if not check_constraint_exists:
+            logger.info("📋 Adding CHECK constraint to ensure price_buy_usd > 0 and commission_usd >= 0...")
+            try:
+                # Add CHECK constraint for price_buy_usd > 0
+                cursor.execute("""
+                    ALTER TABLE portfolio_items
+                    ADD CONSTRAINT check_price_buy_usd_positive
+                    CHECK (price_buy_usd > 0)
+                """)
+                # Add CHECK constraint for commission_usd >= 0
+                cursor.execute("""
+                    ALTER TABLE portfolio_items
+                    ADD CONSTRAINT check_commission_usd_non_negative
+                    CHECK (commission_usd >= 0)
+                """)
+                conn.commit()
+                logger.info("✅ Successfully added CHECK constraints for price_buy_usd > 0 and commission_usd >= 0")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not add CHECK constraint (may already exist): {e}")
+                conn.rollback()
+        else:
+            logger.debug("✅ CHECK constraints for price_buy_usd and commission_usd already exist")
+
+        conn.close()
+    except Exception as e:
+        logger.error(f"❌ Error ensuring price_buy_usd is mandatory: {e}", exc_info=True)
+        # Don't raise - allow service to continue even if constraint addition fails
         try:
             if conn:
                 conn.close()

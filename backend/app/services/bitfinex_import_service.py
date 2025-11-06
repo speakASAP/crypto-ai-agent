@@ -1,16 +1,12 @@
-import aiohttp
-import asyncio
 import json
-import ssl
 import hmac
 import hashlib
 import time
 import requests
-import warnings
 import urllib3
 import csv
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 from datetime import datetime
 from ..services.currency_service import currency_service
 from ..services.multi_exchange_price_service import MultiExchangePriceService
@@ -507,29 +503,50 @@ class BitfinexImportService:
                         'total_investment_text': f"${scaled_amount * avg_buy_price_usd:.2f}"
                     })
                 else:
-                    logger.warning(f"⚠️ Total quantity is 0 for {currency}, cannot calculate average price")
+                    # Total quantity is 0 but we still have the asset - use fallback price
+                    logger.warning(f"⚠️ Total quantity is 0 for {currency}, using fallback price")
+                    # Use fallback price - will be tracked as issue in API layer
+                    price_buy_usd = 9999999.0
+                    trade_date = datetime.utcnow().isoformat()
                     portfolio_items.append({
                         'symbol': currency,
                         'amount': total_amount,
-                        'price_buy': 0.0,
-                        'purchase_date': datetime.utcnow().isoformat(),
+                        'price_buy': price_buy_usd,
+                        'purchase_date': trade_date,
                         'base_currency': 'USD',
                         'source': 'Bitfinex',
                         'commission': 0.0,
-                        'total_investment_text': "Unknown"
+                        'total_investment_text': f"${total_amount * price_buy_usd:.2f}",
+                        '_needs_price_fallback': True  # Flag for API layer to track as issue
                     })
             else:
-                # If no trading history, create a placeholder entry
-                logger.warning(f"⚠️ No buy trades found for {currency}, creating placeholder entry with price_buy=0.0")
+                # If no trading history, use fallback price - NEVER skip
+                logger.warning(f"⚠️ No buy trades found for {currency}, using fallback price (will be tracked as issue)")
+                # Try to get current market price as fallback
+                try:
+                    price_service = MultiExchangePriceService()
+                    current_prices = await price_service.get_current_prices([currency])
+                    if currency in current_prices and current_prices[currency] > 0:
+                        price_buy_usd = current_prices[currency]
+                        logger.info(f"✅ Using current market price ${price_buy_usd:.2f} as fallback for {currency}")
+                    else:
+                        price_buy_usd = 9999999.0
+                        logger.warning(f"⚠️ Could not fetch market price for {currency}, using fallback 9999999")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error fetching market price for {currency}: {e}, using fallback 9999999")
+                    price_buy_usd = 9999999.0
+                
+                trade_date = datetime.utcnow().isoformat()
                 portfolio_items.append({
                     'symbol': currency,
                     'amount': total_amount,
-                    'price_buy': 0.0,
-                    'purchase_date': datetime.now().isoformat() + "Z",
+                    'price_buy': price_buy_usd,
+                    'purchase_date': trade_date,
                     'base_currency': 'USD',
                     'source': 'Bitfinex',
                     'commission': 0.0,
-                    'total_investment_text': "Unknown"
+                    'total_investment_text': f"${total_amount * price_buy_usd:.2f}",
+                    '_needs_price_fallback': True  # Flag for API layer to track as issue
                 })
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Bitfinex wallets")

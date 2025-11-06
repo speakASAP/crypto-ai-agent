@@ -185,13 +185,44 @@ export const usePortfolioStore = create<PortfolioState>()(
           if (item.symbol === symbol) {
             // CRITICAL: Always use price_buy_usd for calculations, never use price_buy
             // because price_buy may be in a different currency after conversion
-            if (!item.price_buy_usd) {
+            let priceBuyUsd = item.price_buy_usd
+            let commissionUsd = item.commission_usd
+            
+            // Calculate price_buy_usd if missing (fallback for legacy items)
+            if (!priceBuyUsd && item.price_buy && item.base_currency) {
+              if (item.base_currency === 'USD') {
+                priceBuyUsd = item.price_buy
+              } else if (exchangeRates && exchangeRates[item.base_currency]) {
+                // Convert from base currency to USD using exchange rate
+                const rate = exchangeRates[item.base_currency]
+                priceBuyUsd = item.price_buy / rate
+                logger.info(`Calculated price_buy_usd for ${item.symbol}: ${item.price_buy} ${item.base_currency} / ${rate} = ${priceBuyUsd}`)
+              } else {
+                logger.warn(`Item ${item.symbol} missing price_buy_usd and cannot calculate (base_currency: ${item.base_currency}, exchangeRates available: ${!!exchangeRates})`)
+                return item
+              }
+            }
+            
+            if (!priceBuyUsd) {
               logger.warn(`Item ${item.symbol} missing price_buy_usd, skipping WebSocket update`)
               return item
             }
             
-            const priceBuyUsd = item.price_buy_usd
-            const commissionUsd = item.commission_usd || 0
+            // Calculate commission_usd if missing
+            if (commissionUsd === null || commissionUsd === undefined) {
+              if (item.commission) {
+                if (item.base_currency === 'USD') {
+                  commissionUsd = item.commission
+                } else if (exchangeRates && exchangeRates[item.base_currency]) {
+                  const rate = exchangeRates[item.base_currency]
+                  commissionUsd = item.commission / rate
+                } else {
+                  commissionUsd = 0
+                }
+              } else {
+                commissionUsd = 0
+              }
+            }
             
             // Calculate USD values
             const currentValueUsd = item.amount * usdPrice
