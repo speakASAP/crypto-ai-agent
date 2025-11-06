@@ -163,7 +163,7 @@ export default function Home() {
       
       // Intercept unhandled promise rejections
       const originalUnhandledRejection = window.onunhandledrejection
-      window.onunhandledrejection = function(event: PromiseRejectionEvent) {
+      window.onunhandledrejection = ((event: PromiseRejectionEvent) => {
         const reason = event.reason
         const reasonStr = String(reason || '')
         
@@ -182,9 +182,9 @@ export default function Home() {
         })
         
         if (originalUnhandledRejection) {
-          originalUnhandledRejection(event)
+          originalUnhandledRejection.call(window, event)
         }
-      }
+      }) as typeof window.onunhandledrejection
       
       // Restore original handlers on cleanup
       return () => {

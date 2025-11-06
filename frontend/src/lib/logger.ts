@@ -88,7 +88,7 @@ class Logger {
     });
   }
 
-  private log(level: string, context: string, ...args: any[]): void {
+  private logInternal(level: string, context: string, ...args: any[]): void {
     const message = this.formatMessage(args);
     
     // Always send to backend (centralized logging)
@@ -105,33 +105,33 @@ class Logger {
   }
 
   log(...args: any[]): void {
-    this.log('log', 'app', ...args);
+    this.logInternal('log', 'app', ...args);
   }
 
   error(...args: any[]): void {
-    this.log('error', 'app', ...args);
+    this.logInternal('error', 'app', ...args);
   }
 
   warn(...args: any[]): void {
-    this.log('warn', 'app', ...args);
+    this.logInternal('warn', 'app', ...args);
   }
 
   info(...args: any[]): void {
-    this.log('info', 'app', ...args);
+    this.logInternal('info', 'app', ...args);
   }
 
   debug(...args: any[]): void {
-    this.log('debug', 'app', ...args);
+    this.logInternal('debug', 'app', ...args);
   }
 
   // Context-aware logging methods
   withContext(context: string) {
     return {
-      log: (...args: any[]) => this.log('log', context, ...args),
-      error: (...args: any[]) => this.log('error', context, ...args),
-      warn: (...args: any[]) => this.log('warn', context, ...args),
-      info: (...args: any[]) => this.log('info', context, ...args),
-      debug: (...args: any[]) => this.log('debug', context, ...args),
+      log: (...args: any[]) => this.logInternal('log', context, ...args),
+      error: (...args: any[]) => this.logInternal('error', context, ...args),
+      warn: (...args: any[]) => this.logInternal('warn', context, ...args),
+      info: (...args: any[]) => this.logInternal('info', context, ...args),
+      debug: (...args: any[]) => this.logInternal('debug', context, ...args),
     };
   }
 }
