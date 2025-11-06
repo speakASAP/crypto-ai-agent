@@ -1,14 +1,14 @@
 import aiohttp
 import asyncio
 import json
-import logging
 import ssl
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from ..core.config import settings
 from ..utils.time_utils import get_current_timestamp
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.multi_exchange_price_service")
 
 
 class MultiExchangePriceService:

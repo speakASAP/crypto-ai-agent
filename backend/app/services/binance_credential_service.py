@@ -1,14 +1,14 @@
 """
 Service for managing user Binance API credentials
 """
-import logging
 from typing import Optional, Dict, Any
 from ..dependencies.auth import get_db_connection
 from ..core.config import settings
 from ..utils.encryption import credential_encryption
 from .binance_import_service import BinanceImportService
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.binance_credential_service")
 
 class BinanceCredentialService:
     """Service for managing user Binance API credentials"""

@@ -4,15 +4,15 @@ Supports flexible column mapping with template presets
 """
 import csv
 import json
-import logging
 import os
 from typing import Dict, List, Optional, Tuple, Any
 from difflib import SequenceMatcher
 from dateutil import parser as date_parser
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.csv_import_service")
 
 
 class CSVImportService:

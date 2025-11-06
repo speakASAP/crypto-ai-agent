@@ -3,7 +3,10 @@ from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from ..core.config import settings
+from .logger import get_logger
 import secrets
+
+logger = get_logger("backend.app.utils.auth")
 
 # Password hashing context using pbkdf2_sha256 (no 72-byte limit, no bcrypt init issues), with bcrypt_sha256 and bcrypt for legacy hashes
 pwd_context = CryptContext(
@@ -22,8 +25,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Password verification failed: {e}, hash preview: {hashed_password[:20] if hashed_password else 'None'}...")
         return False
 

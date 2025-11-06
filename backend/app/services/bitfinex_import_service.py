@@ -1,7 +1,6 @@
 import aiohttp
 import asyncio
 import json
-import logging
 import ssl
 import hmac
 import hashlib
@@ -15,11 +14,12 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from ..services.currency_service import currency_service
 from ..services.multi_exchange_price_service import MultiExchangePriceService
+from ..utils.logger import get_logger
 
 # Suppress SSL warnings for Bitfinex API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.bitfinex_import_service")
 
 
 class BitfinexImportService:
@@ -75,15 +75,11 @@ class BitfinexImportService:
             }
             
             # Debug logging
-            print(f"[DEBUG] Bitfinex request - Nonce: {nonce}, Path: {path}")
-            print(f"[DEBUG] Signature Payload: {signature_payload}")
-            print(f"[DEBUG] Raw Body: {raw_body}")
-            print(f"[DEBUG] API Key: {self.api_key}")
-            print(f"[DEBUG] Signature: {signature[:50]}...")
-            logger.info(f"Bitfinex request - Nonce: {nonce}, Path: {path}")
-            logger.info(f"Signature Payload: {signature_payload}")
-            logger.info(f"Raw Body: {raw_body}")
-            logger.info(f"Signature: {signature[:20]}...")
+            logger.debug(f"Bitfinex request - Nonce: {nonce}, Path: {path}")
+            logger.debug(f"Signature Payload: {signature_payload}")
+            logger.debug(f"Raw Body: {raw_body}")
+            logger.debug(f"API Key: {self.api_key[:20]}...")
+            logger.debug(f"Signature: {signature[:50]}...")
             
             url = f"{self.api_url}{path}"
             

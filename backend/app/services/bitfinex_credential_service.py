@@ -1,13 +1,13 @@
 """
 Service for managing user Bitfinex API credentials
 """
-import logging
 from typing import Optional, Dict, Any
 from ..dependencies.auth import get_db_connection
 from ..utils.encryption import credential_encryption
 from .bitfinex_import_service import BitfinexImportService
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.bitfinex_credential_service")
 
 
 class BitfinexCredentialService:

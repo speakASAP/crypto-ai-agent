@@ -1,13 +1,13 @@
 import httpx
 from typing import Dict
-import logging
 import psycopg
 import json
 import redis
 from ..core.config import settings
 from ..utils.time_utils import format_timestamp, get_iso_timestamp, get_current_timestamp
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.currency_service")
 
 class CurrencyService:
     def __init__(self):

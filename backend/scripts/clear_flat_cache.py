@@ -13,6 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.database import get_db_connection
 from app.utils.db import normalize_placeholders
+from app.utils.logger import get_logger
+
+logger = get_logger("backend.scripts.clear_flat_cache")
 
 def clear_flat_cache_entries():
     """Clear cache entries where all prices are identical (synthesized/flat data)"""
@@ -49,7 +52,8 @@ def clear_flat_cache_entries():
                         )
                         cursor.execute(delete_sql, (symbol,))
                         cleared_count += 1
-                        print(f"Cleared flat cache for {symbol}")
+                        message = f"Cleared flat cache for {symbol}"
+                        logger.info(message)
                     else:
                         kept_count += 1
                 else:
@@ -59,7 +63,8 @@ def clear_flat_cache_entries():
                     )
                     cursor.execute(delete_sql, (symbol,))
                     cleared_count += 1
-                    print(f"Cleared single-point cache for {symbol}")
+                    message = f"Cleared single-point cache for {symbol}"
+                    logger.info(message)
 
             except json.JSONDecodeError:
                 # Invalid JSON - clear it
@@ -68,21 +73,25 @@ def clear_flat_cache_entries():
                 )
                 cursor.execute(delete_sql, (symbol,))
                 cleared_count += 1
-                print(f"Cleared invalid cache for {symbol}")
+                message = f"Cleared invalid cache for {symbol}"
+                logger.info(message)
 
         conn.commit()
-        print(f"\n✅ Cleared {cleared_count} flat/invalid cache entries")
-        print(f"✅ Kept {kept_count} valid cache entries")
+        summary_msg = f"✅ Cleared {cleared_count} flat/invalid cache entries, kept {kept_count} valid cache entries"
+        logger.info(summary_msg)
 
     except Exception as e:
         conn.rollback()
-        print(f"❌ Error clearing cache: {e}")
+        error_msg = f"❌ Error clearing cache: {e}"
+        logger.error(error_msg, exc_info=True)
         raise
     finally:
         conn.close()
 
 if __name__ == "__main__":
-    print("Clearing flat/synthesized price history cache entries...")
+    start_msg = "Clearing flat/synthesized price history cache entries..."
+    logger.info(start_msg)
     clear_flat_cache_entries()
-    print("Done!")
+    done_msg = "✅ Done!"
+    logger.info(done_msg)
 

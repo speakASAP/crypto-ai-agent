@@ -13,23 +13,33 @@ load_dotenv()
 
 import psycopg
 
+try:
+    from backend.app.utils.logger import get_logger
+except ImportError:
+    try:
+        from app.utils.logger import get_logger
+    except ImportError:
+        from utils.logger import get_logger
+
+logger = get_logger("scripts.check_production_database")
+
 def check_production_database():
     """Check production database status."""
-    print("=" * 70)
-    print("🔍 CHECKING PRODUCTION DATABASE")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("🔍 CHECKING PRODUCTION DATABASE")
+    logger.info("=" * 70)
     
     # Get production database URL
     prod_db_url = os.getenv('PRODUCTION_DATABASE_URL') or os.getenv('DATABASE_URL')
     
     if not prod_db_url:
-        print("\n❌ ERROR: Production DATABASE_URL not found!")
-        print("\nTo check production database, set one of these environment variables:")
-        print("   export PRODUCTION_DATABASE_URL='postgresql+psycopg://user:pass@host:5432/db'")
-        print("   OR")
-        print("   export DATABASE_URL='postgresql+psycopg://user:pass@host:5432/db'")
-        print("\nFor production server, the database should be accessible via:")
-        print("   postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}")
+        logger.error("❌ ERROR: Production DATABASE_URL not found!")
+        logger.info("To check production database, set one of these environment variables:")
+        logger.info("   export PRODUCTION_DATABASE_URL='postgresql+psycopg://user:pass@host:5432/db'")
+        logger.info("   OR")
+        logger.info("   export DATABASE_URL='postgresql+psycopg://user:pass@host:5432/db'")
+        logger.info("For production server, the database should be accessible via:")
+        logger.info("   postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}")
         return False
     
     # Clean URL (remove +psycopg if present)
@@ -44,17 +54,17 @@ def check_production_database():
             user = user_pass.split(':')[0]
             display_url = display_url.replace(user_pass, f"{user}:***")
     
-    print(f"\n📡 Production Database URL:")
-    print(f"   {display_url}")
+    logger.info(f"📡 Production Database URL:")
+    logger.info(f"   {display_url}")
     
     try:
-        print("\n🔌 Connecting to production database...")
+        logger.info("🔌 Connecting to production database...")
         conn = psycopg.connect(prod_url_clean)
         cur = conn.cursor()
-        print("✅ Connection successful!")
+        logger.info("✅ Connection successful!")
         
         # Check if users table exists
-        print("\n📊 Checking database schema...")
+        logger.info("📊 Checking database schema...")
         cur.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -65,33 +75,33 @@ def check_production_database():
         table_exists = cur.fetchone()[0]
         
         if not table_exists:
-            print("❌ Users table does NOT exist")
-            print("   Production database is empty - needs schema initialization")
+            logger.error("❌ Users table does NOT exist")
+            logger.error("   Production database is empty - needs schema initialization")
             cur.close()
             conn.close()
             return False
         
-        print("✅ Users table exists")
+        logger.info("✅ Users table exists")
         
         # Check user count
         cur.execute("SELECT COUNT(*) FROM users")
         user_count = cur.fetchone()[0]
         
-        print(f"\n👥 Customer Accounts: {user_count}")
+        logger.info(f"👥 Customer Accounts: {user_count}")
         
         if user_count == 0:
-            print("\n❌ PRODUCTION DATABASE IS EMPTY!")
-            print("   No customer data found")
-            print("   You need to migrate customer data from local database")
-            print("\n   Run: python3 scripts/migrate_to_production_db.py")
+            logger.error("❌ PRODUCTION DATABASE IS EMPTY!")
+            logger.error("   No customer data found")
+            logger.error("   You need to migrate customer data from local database")
+            logger.info("   Run: python3 scripts/migrate_to_production_db.py")
             cur.close()
             conn.close()
             return False
         
-        print(f"✅ Production database has {user_count} customer account(s)")
+        logger.info(f"✅ Production database has {user_count} customer account(s)")
         
         # List users
-        print("\n📋 Customer Accounts in Production:")
+        logger.info("📋 Customer Accounts in Production:")
         cur.execute("""
             SELECT id, email, username, full_name, is_active, created_at
             FROM users
@@ -102,42 +112,42 @@ def check_production_database():
         for user in users:
             user_id, email, username, full_name, is_active, created_at = user
             status = "✅ Active" if is_active else "⚠️  Inactive"
-            print(f"   ID {user_id}: {email} ({username}) - {status}")
+            logger.info(f"   ID {user_id}: {email} ({username}) - {status}")
         
         # Check portfolio items
         cur.execute("SELECT COUNT(*) FROM portfolio_items")
         portfolio_count = cur.fetchone()[0]
-        print(f"\n💼 Portfolio Items: {portfolio_count}")
+        logger.info(f"💼 Portfolio Items: {portfolio_count}")
         
         cur.close()
         conn.close()
         
-        print("\n" + "=" * 70)
-        print("✅ PRODUCTION DATABASE CHECK COMPLETE")
-        print("=" * 70)
-        print(f"   ✓ Connection: WORKING")
-        print(f"   ✓ Customer accounts: {user_count} users")
-        print(f"   ✓ Portfolio items: {portfolio_count} items")
-        print(f"   ✓ Ready for production use: YES")
-        print("=" * 70)
+        logger.info("=" * 70)
+        logger.info("✅ PRODUCTION DATABASE CHECK COMPLETE")
+        logger.info("=" * 70)
+        logger.info(f"   ✓ Connection: WORKING")
+        logger.info(f"   ✓ Customer accounts: {user_count} users")
+        logger.info(f"   ✓ Portfolio items: {portfolio_count} items")
+        logger.info(f"   ✓ Ready for production use: YES")
+        logger.info("=" * 70)
         
         return True
         
     except Exception as e:
-        print(f"\n❌ PRODUCTION DATABASE CHECK FAILED")
-        print(f"   Error: {str(e)}")
-        print(f"   Type: {type(e).__name__}")
+        logger.error(f"❌ PRODUCTION DATABASE CHECK FAILED")
+        logger.error(f"   Error: {str(e)}")
+        logger.error(f"   Type: {type(e).__name__}", exc_info=True)
         
         if "connection" in str(e).lower() or "connect" in str(e).lower():
-            print("\n⚠️  Connection failed. Possible issues:")
-            print("   1. Database server is not running")
-            print("   2. Incorrect DATABASE_URL")
-            print("   3. Network connectivity issue")
-            print("   4. Database credentials are wrong")
-            print("\n   For production, ensure:")
-            print("   - PostgreSQL container is running")
-            print("   - DATABASE_URL points to correct database")
-            print("   - Network 'nginx-network' is accessible")
+            logger.warning("⚠️  Connection failed. Possible issues:")
+            logger.warning("   1. Database server is not running")
+            logger.warning("   2. Incorrect DATABASE_URL")
+            logger.warning("   3. Network connectivity issue")
+            logger.warning("   4. Database credentials are wrong")
+            logger.info("   For production, ensure:")
+            logger.info("   - PostgreSQL container is running")
+            logger.info("   - DATABASE_URL points to correct database")
+            logger.info("   - Network 'nginx-network' is accessible")
         
         return False
 
