@@ -1,5 +1,6 @@
 import time
 import psycopg
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from ..core.config import settings
 try:
     from utils.logger import get_logger
@@ -58,6 +59,24 @@ def connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_start
     for attempt in range(1, max_retries + 1):
         try:
             pg_url = settings.database_url.replace("+psycopg", "") if "+psycopg" in settings.database_url else settings.database_url
+            # Add connection timeout to prevent hanging (5 seconds)
+            # Properly parse URL and add connect_timeout parameter
+            parsed = urlparse(pg_url)
+            query_params = parse_qs(parsed.query)
+            # Add connect_timeout if not already present
+            if 'connect_timeout' not in query_params:
+                query_params['connect_timeout'] = ['5']
+            # Reconstruct URL with timeout parameter
+            new_query = urlencode(query_params, doseq=True)
+            pg_url = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                new_query,
+                parsed.fragment
+            ))
+            
             conn = psycopg.connect(pg_url)
             logger.debug(f"✅ Database connection successful (PostgreSQL) - attempt {attempt}")
             return conn

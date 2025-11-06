@@ -1,3 +1,16 @@
+# ⚠️ WARNING: This file is ONLY for development or isolated deployments
+# ⚠️ DO NOT USE in production when database-server microservice is available
+# 
+# Production uses the shared database-server microservice located at:
+#   /home/statex/database-server
+#
+# Blue/green deployments (docker-compose.blue.yml, docker-compose.green.yml) 
+# are configured to use db-server-postgres and db-server-redis from database-server.
+#
+# This file should only be used for:
+# - Local development without database-server
+# - Isolated testing environments
+
 services:
   postgres:
     image: postgres:15
@@ -22,7 +35,10 @@ services:
       retries: 5
       start_period: 30s
     networks:
-      - nginx-network
+      nginx-network:
+        # NOTE: Network aliases removed - use database-server in production
+        # aliases:
+        #   - db-server-postgres
     logging:
       driver: "json-file"
       options:
@@ -49,7 +65,10 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - nginx-network
+      nginx-network:
+        # NOTE: Network aliases removed - use database-server in production
+        # aliases:
+        #   - db-server-redis
     logging:
       driver: "json-file"
       options:
