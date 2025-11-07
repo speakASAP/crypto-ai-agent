@@ -686,36 +686,66 @@ export default function Home() {
       items: csvPreview.aggregated_items.length 
     })
 
+    // Disable buttons and close modal immediately
     setImportingCSV(true)
-    setCsvMessage('Importing...')
+    setCsvImportOpen(false)
+    
+    // Store file and preview data for background import
+    const fileToImport = csvFile
+    const exchangeToImport = csvPreview.detected_exchange
+    const itemsCount = csvPreview.aggregated_items.length
 
+    // Reset modal state immediately
+    setCsvFile(null)
+    setCsvPreview(null)
+    setCsvMessage('')
+    if (csvFileInputRef.current) {
+      csvFileInputRef.current.value = ''
+    }
+
+    // Show starting notification
+    useNotificationStore.getState().showNotification(
+      `CSV import started. Processing ${itemsCount} items...`,
+      'info',
+      3000
+    )
+
+    // Continue import in background
     try {
-      const result = await apiClient.executeCSVImport(csvFile, csvPreview.detected_exchange)
+      const result = await apiClient.executeCSVImport(fileToImport, exchangeToImport)
       logger.log('✅ CSV import result:', result)
 
       if (result.success) {
-        setCsvMessage(`Successfully imported ${result.items_imported} items!`)
         // Refresh portfolio data
         await fetchPortfolio()
         await fetchSummary()
+        
+        // Show success notification
+        useNotificationStore.getState().showNotification(
+          `Successfully imported ${result.items_imported} items!`,
+          'success',
+          5000
+        )
+        
         // Show issues dialog if there are items with issues or warnings
         if (result.items_with_issues && result.items_with_issues.length > 0) {
           setItemsWithIssues(result.items_with_issues)
           setMissingDataDialogOpen(true)
         }
-        // Close modal and reset after 3 seconds
-        setTimeout(() => {
-          setCsvImportOpen(false)
-          setCsvFile(null)
-          setCsvPreview(null)
-          setCsvMessage('')
-        }, 3000)
       } else {
-        setCsvMessage(result.message || 'Import failed')
+        useNotificationStore.getState().showNotification(
+          result.message || 'Import failed',
+          'error',
+          5000
+        )
       }
     } catch (error: any) {
       logger.error('CSV import error:', error)
-      setCsvMessage(error.response?.data?.detail || 'Failed to import CSV')
+      useNotificationStore.getState().showNotification(
+        error.response?.data?.detail || 'Failed to import CSV',
+        'error',
+        5000
+      )
     } finally {
       setImportingCSV(false)
     }
@@ -2089,6 +2119,7 @@ export default function Home() {
                     }
                   }}
                   variant="outline"
+                  disabled={importingCSV}
                 >
                   Close
                 </Button>
