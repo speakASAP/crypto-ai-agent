@@ -109,6 +109,7 @@ export default function Home() {
   const [portfolioItemToDelete, setPortfolioItemToDelete] = useState<number | null>(null)
   const [deleteAlertConfirmOpen, setDeleteAlertConfirmOpen] = useState(false)
   const [alertToDelete, setAlertToDelete] = useState<number | null>(null)
+  const deleteButtonRef = useRef<HTMLButtonElement>(null)
   
   // CSV import states
   const [csvImportOpen, setCsvImportOpen] = useState(false)
@@ -504,6 +505,31 @@ export default function Home() {
       setPortfolioItemToDelete(null)
     }
   }
+
+  // Keyboard shortcuts for delete portfolio item dialog
+  useEffect(() => {
+    if (!deletePortfolioConfirmOpen) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        handleDeletePortfolioItemConfirmed()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        setDeletePortfolioConfirmOpen(false)
+        setPortfolioItemToDelete(null)
+      }
+    }
+
+    // Focus Delete button when dialog opens
+    deleteButtonRef.current?.focus()
+
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [deletePortfolioConfirmOpen, handleDeletePortfolioItemConfirmed])
 
   const handleImportFromBinance = async () => {
     // Check if credentials exist first
@@ -2239,6 +2265,7 @@ export default function Home() {
               Cancel
             </Button>
             <Button 
+              ref={deleteButtonRef}
               type="button"
               onClick={handleDeletePortfolioItemConfirmed}
               className="flex-1 sm:flex-none bg-red-600 hover:bg-red-700 text-white"
