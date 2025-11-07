@@ -17,8 +17,9 @@ class HistoricalPriceService:
 
     def __init__(self):
         self.coingecko_url = "https://api.coingecko.com/api/v3"
-        self.cache_duration = timedelta(hours=1)  # Cache for 1 hour (charts refresh hourly)
+        self.cache_duration = timedelta(hours=1)  # Cache valid for 1 hour (background task refresh hourly)
         # Rate limiting: CoinGecko free tier allows ~10-50 calls/minute
+        # Background task fetches sequentially (1 request per second) to avoid rate limits
         # Use semaphore to limit concurrent requests and delay between requests
         self._request_semaphore = asyncio.Semaphore(2)  # Max 2 concurrent requests
         self._min_request_delay = 1.5  # Minimum 1.5 seconds between requests
@@ -358,17 +359,17 @@ class HistoricalPriceService:
         self, symbol: str, days: int = 7
     ) -> List[Dict[str, any]]:
         """
-        Get mini chart data (last N days). Prefers cached data if fresh (< 1 hour old).
-        Otherwise fetches from CoinGecko API and caches the result.
+        Get mini chart data (last N days). Serves from database cache (refresh hourly by background task).
+        Only fetches from CoinGecko API if cache is missing or stale (fallback for new symbols).
 
         Args:
             symbol: Cryptocurrency symbol
             days: Number of days to return (default: 7)
 
         Returns:
-            List of price points for the last N days from cache or CoinGecko API
+            List of price points for the last N days from database cache or CoinGecko API (if cache miss)
         """
-        # Check cache first - if data is < 1 hour old, use it (background task keeps it fresh)
+        # Check database cache first - background task refresh hourly
         cached_data = self._get_from_cache(symbol)
         if cached_data:
             # Filter to last N days if needed

@@ -22,11 +22,11 @@ async def get_price_history(
             symbol.upper(), days=days
         )
 
+        # Return 200 with empty data instead of 404 to prevent browser console errors
+        # Frontend handles empty data gracefully by showing "No data" or "Failed to load chart"
         if not history:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No price history available for {symbol}",
-            )
+            logger.debug(f"No price history available for {symbol}")
+            return ChartData(symbol=symbol.upper(), data=[])
 
         data_points = [
             ChartDataPoint(
@@ -61,16 +61,12 @@ async def get_mini_chart(
             symbol.upper(), days=days
         )
 
-        # Don't synthesize data on rate limits - return empty instead
-        # This prevents creating flat lines that get cached
+        # Return 200 with empty data instead of 404 to prevent browser console errors
+        # Frontend handles empty data gracefully by showing "No data" or "Failed to load chart"
         if not mini_data:
-            # Check if we have any cached data (even if it's old)
-            # Only return 404 if truly no data exists
-            logger.debug(f"No mini chart data available for {symbol} (may be rate limited)")
-            raise HTTPException(
-                status_code=404,
-                detail=f"No mini chart data available for {symbol}. Please try again later."
-            )
+            logger.debug(f"No mini chart data available for {symbol} (may be rate limited or no cache)")
+            # Return 200 with empty data array instead of 404
+            return ChartData(symbol=symbol.upper(), data=[])
 
         data_points = [
             ChartDataPoint(
