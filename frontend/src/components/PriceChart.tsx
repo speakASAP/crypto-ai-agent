@@ -49,8 +49,23 @@ export function PriceChart({
           : await apiClient.getPriceHistory(symbol, days === 7 ? 365 : days)
         
         if (isMounted) {
-          setChartData(data.data || [])
+          const chartDataArray = data.data || []
+          setChartData(chartDataArray)
+          
+          // If no data, show "No data" immediately without retrying
+          // Don't show "Loading..." - just show "No data" right away
+          if (chartDataArray.length === 0) {
+            setError(null) // Clear any previous error
+            setLoading(false) // Stop loading immediately
+            // Optionally trigger background fetch for future use, but don't wait for it
+            apiClient.triggerChartFetch([symbol]).catch(() => {
+              // Ignore errors - background fetch is best effort
+            })
+            return
+          }
+          
           setRetryCount(0) // Reset retry count on success
+          setError(null) // Clear any errors
         }
       } catch (err: any) {
         if (!isMounted) return
@@ -64,7 +79,7 @@ export function PriceChart({
         // Handle 503 Service Unavailable with automatic retry
         if (status === 503 && attempt < maxRetries) {
           const retryDelays = [30000, 60000, 120000] // 30s, 60s, 120s
-          const delay = retryDelays[attempt]
+          const delay = retryDelays[Math.min(attempt, retryDelays.length - 1)]
           
           setError('Failed to load chart')
           setRetryCount(attempt + 1)
@@ -82,16 +97,21 @@ export function PriceChart({
           if (status === 503) {
             setError('Service unavailable')
           } else if (status === 404) {
-            // 404 means chart data not available - show N/A or Failed to load chart
-            setError('Failed to load chart')
-            // Don't log 404 errors to console (handled gracefully)
-            logger.debug(`Chart data not available for ${symbol} (404)`)
+            // 404 means chart data not available - show "No data" immediately
+            // Don't retry or show "Loading..." - just show "No data" right away
+            setError(null) // Clear error, will show "No data" from chartData.length === 0 check
+            // Optionally trigger background fetch for future use, but don't wait for it
+            apiClient.triggerChartFetch([symbol]).catch(() => {
+              // Ignore errors - background fetch is best effort
+            })
           } else if (status === 429) {
             setError('Rate limited - try again later')
           } else {
             setError('Failed to load chart')
           }
-          setRetryCount(0)
+          if (status !== 404 || attempt > 0) {
+            setRetryCount(0)
+          }
         }
       } finally {
         if (isMounted) {

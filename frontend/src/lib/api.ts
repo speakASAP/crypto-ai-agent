@@ -641,6 +641,11 @@ class ApiClient {
     return response.data
   }
 
+  async triggerChartFetch(symbols: string[]): Promise<{ message: string; symbols: string[] }> {
+    const response = await this.client.post('/api/charts/fetch', symbols)
+    return response.data
+  }
+
   async getMiniChart(symbol: string, days: number = 7): Promise<ChartData> {
     const response = await this.client.get(`/api/charts/mini/${symbol}?days=${days}`)
     return response.data

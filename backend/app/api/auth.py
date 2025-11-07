@@ -159,6 +159,31 @@ async def login(user_data: UserLogin):
     )
     conn.close()
 
+    # Trigger chart data fetching for user's portfolio symbols (non-blocking)
+    try:
+        # Get user's portfolio symbols
+        portfolio_conn = get_db_connection()
+        portfolio_cursor = portfolio_conn.cursor()
+        portfolio_sql = _normalize_placeholders(
+            "SELECT DISTINCT symbol FROM portfolio_items WHERE user_id = %s AND symbol IS NOT NULL"
+        )
+        portfolio_cursor.execute(portfolio_sql, (user[0],))
+        portfolio_rows = portfolio_cursor.fetchall()
+        portfolio_conn.close()
+        
+        if portfolio_rows:
+            symbols = [row[0] for row in portfolio_rows if row[0]]
+            if symbols:
+                from ..services.chart_tasks import fetch_chart_data_for_symbols
+                logger.info(f"📊 Triggering chart data fetch on login for {len(symbols)} symbols: {symbols}")
+                # Trigger background fetch (non-blocking, don't wait for completion)
+                asyncio.create_task(
+                    fetch_chart_data_for_symbols(symbols, days=7, skip_cached=False)
+                )
+    except Exception as e:
+        logger.error(f"⚠️ Failed to trigger chart fetch on login: {e}", exc_info=True)
+        # Don't fail login if chart fetch trigger fails
+
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=user_response)
 
 
