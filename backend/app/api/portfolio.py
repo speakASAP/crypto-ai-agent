@@ -197,6 +197,19 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         logger.error(f"⚠️ Failed to fetch prices for {symbol_upper}: {e}", exc_info=True)
         # Don't fail the creation if price fetch fails
     
+    # Immediately fetch chart data for the newly added symbol (non-blocking)
+    try:
+        from ..services.chart_tasks import fetch_chart_data_for_symbols
+        import asyncio
+        logger.info(f"📊 Triggering chart data fetch for newly added symbol: {symbol_upper}")
+        # Trigger background fetch (non-blocking, don't wait for completion)
+        asyncio.create_task(
+            fetch_chart_data_for_symbols([symbol_upper], days=7, skip_cached=False)
+        )
+    except Exception as e:
+        logger.error(f"⚠️ Failed to trigger chart fetch for {symbol_upper}: {e}", exc_info=True)
+        # Don't fail the creation if chart fetch trigger fails
+    
     # Generate AI predictions for the newly added symbol (if not already exists)
     try:
         from ..services.ai_advisor_service import ai_advisor_service

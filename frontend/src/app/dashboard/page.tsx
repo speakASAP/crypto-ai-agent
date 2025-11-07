@@ -212,6 +212,20 @@ export default function Home() {
     loadCryptoTimestamps()
   }, [fetchPortfolio, fetchSummary, fetchAlerts, fetchTrackedSymbols])
 
+  // Trigger chart data fetching when portfolio items are loaded
+  useEffect(() => {
+    if (items.length > 0 && isAuthenticated) {
+      const symbols = items.map(item => item.symbol).filter(Boolean)
+      if (symbols.length > 0) {
+        // Trigger chart fetch for all portfolio symbols (non-blocking)
+        apiClient.triggerChartFetch(symbols).catch(err => {
+          // Ignore errors - background fetch is best effort
+          logger.debug(`Failed to trigger chart fetch on portfolio load: ${err}`)
+        })
+      }
+    }
+  }, [items.length, isAuthenticated]) // Only trigger when items count changes or auth state changes
+
   useEffect(() => {
     // Update WebSocket exchange rates whenever they change
     setWebSocketExchangeRates(exchangeRates)

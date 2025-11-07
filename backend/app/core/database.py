@@ -330,7 +330,25 @@ def init_postgres_database():
             history_data TEXT NOT NULL,
             last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    ''')
+        ''')
+
+        # Create coingecko_symbol_mappings table for automatic symbol resolution
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS coingecko_symbol_mappings (
+            symbol TEXT PRIMARY KEY,
+            coin_id TEXT NOT NULL,
+            coin_name TEXT,
+            resolved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_used TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            resolution_method TEXT DEFAULT 'api_search',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        
+        # Create index for faster lookups
+        cur.execute('''
+        CREATE INDEX IF NOT EXISTS idx_coingecko_mappings_symbol ON coingecko_symbol_mappings(symbol)
+        ''')
 
         # Create crypto_prices table for centralized price storage
         cur.execute('''
@@ -723,6 +741,49 @@ def ensure_ai_advisor_tables():
                     CREATE INDEX idx_crypto_prices_updated_at ON crypto_prices(updated_at)
                 ''')
                 logger.info("✅ Created index on crypto_prices")
+
+        # Check and create coingecko_symbol_mappings table
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'coingecko_symbol_mappings'
+            )
+        """)
+        mappings_exists = cursor.fetchone()[0]
+
+        if not mappings_exists:
+            logger.info("📋 Creating missing coingecko_symbol_mappings table...")
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS coingecko_symbol_mappings (
+                    symbol TEXT PRIMARY KEY,
+                    coin_id TEXT NOT NULL,
+                    coin_name TEXT,
+                    resolved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_used TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    resolution_method TEXT DEFAULT 'api_search',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_coingecko_mappings_symbol ON coingecko_symbol_mappings(symbol)
+            ''')
+            tables_created.append("coingecko_symbol_mappings")
+            logger.info("✅ Created coingecko_symbol_mappings table for automatic symbol resolution")
+        else:
+            # Ensure index exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM pg_indexes
+                    WHERE tablename = 'coingecko_symbol_mappings'
+                    AND indexname = 'idx_coingecko_mappings_symbol'
+                )
+            """)
+            index_exists = cursor.fetchone()[0]
+            if not index_exists:
+                cursor.execute('''
+                    CREATE INDEX idx_coingecko_mappings_symbol ON coingecko_symbol_mappings(symbol)
+                ''')
+                logger.info("✅ Created index on coingecko_symbol_mappings")
 
         conn.commit()
         conn.close()

@@ -9,6 +9,9 @@ from ..utils.logger import get_logger
 from .multi_exchange_price_service import multi_exchange_price_service
 from ..utils.db import get_db_connection, normalize_placeholders
 
+# Create a shared timeout configuration
+CLIENT_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10)
+
 logger = get_logger("backend.app.services.historical_price_service")
 
 
@@ -26,44 +29,26 @@ class HistoricalPriceService:
         self._last_request_time = 0.0
         self._rate_limit_retry_delay = 60  # Wait 60 seconds on rate limit
 
-    def _symbol_to_coingecko_id(self, symbol: str) -> str:
-        """Map common symbols to CoinGecko coin IDs"""
-        symbol_map = {
-            "BTC": "bitcoin",
-            "ETH": "ethereum",
-            "BNB": "binancecoin",
-            "SOL": "solana",
-            "ADA": "cardano",
-            "XRP": "ripple",
-            "DOT": "polkadot",
-            "DOGE": "dogecoin",
-            "AVAX": "avalanche-2",
-            "MATIC": "matic-network",
-            "LINK": "chainlink",
-            "UNI": "uniswap",
-            "LTC": "litecoin",
-            "ATOM": "cosmos",
-            "ETC": "ethereum-classic",
-            "BCH": "bitcoin-cash",
-            "XLM": "stellar",
-            "ALGO": "algorand",
-            "VET": "vechain",
-            "FIL": "filecoin",
-            "TRX": "tron",
-            "EOS": "eos",
-            "AAVE": "aave",
-            "GRT": "the-graph",
-            "SAND": "the-sandbox",
-            "MANA": "decentraland",
-            "AXS": "axie-infinity",
-            "CHZ": "chiliz",
-            "ENJ": "enjincoin",
-            "TON": "toncoin",
-            "FLR": "flare",
-            "RENDER": "render-token",
-            "RNDR": "render-token",  # Legacy symbol support (RENDER rebranded from RNDR)
-        }
-        return symbol_map.get(symbol.upper(), symbol.lower())
+    def _symbol_to_coingecko_id(self, symbol: str) -> Optional[str]:
+        """
+        Map symbols to CoinGecko coin IDs with automatic resolution.
+        Priority: 1) Database cache, 2) Return None to trigger auto-resolution via API
+        
+        Note: all symbols are resolved via database cache or API.
+        Common symbols are automatically cached in database on first use.
+        """
+        symbol_upper = symbol.upper()
+        
+        # Check database cache (fastest, most up-to-date)
+        cached_mapping = self._get_cached_coingecko_id(symbol_upper)
+        if cached_mapping:
+            # Update last_used timestamp
+            self._update_mapping_last_used(symbol_upper)
+            return cached_mapping
+        
+        # Return None to trigger automatic resolution via API
+        # The API will resolve and cache the result for future use
+        return None
 
     async def get_price_history(
         self, symbol: str, days: int = 365
@@ -86,6 +71,14 @@ class HistoricalPriceService:
 
         # Fetch from CoinGecko with rate limiting
         coin_id = self._symbol_to_coingecko_id(symbol)
+        
+        # If coin_id is None, try to auto-resolve it
+        if coin_id is None:
+            coin_id = await self._auto_resolve_coingecko_id(symbol)
+            if coin_id is None:
+                logger.warning(f"Could not resolve CoinGecko ID for {symbol}, returning empty history")
+                return []
+        
         async with self._request_semaphore:
             # Ensure minimum delay between requests
             current_time = time.time()
@@ -97,7 +90,7 @@ class HistoricalPriceService:
             self._last_request_time = time.time()
             
             try:
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(timeout=CLIENT_TIMEOUT) as session:
                     url = f"{self.coingecko_url}/coins/{coin_id}/market_chart"
                     params = {
                         "vs_currency": "usd",
@@ -108,7 +101,7 @@ class HistoricalPriceService:
                     if days > 90:
                         params["interval"] = "daily"
 
-                    async with session.get(url, params=params, timeout=30) as response:
+                    async with session.get(url, params=params) as response:
                         if response.status == 200:
                             data = await response.json()
                             prices = data.get("prices", [])
@@ -134,10 +127,19 @@ class HistoricalPriceService:
                             return history
                         elif response.status == 404:
                             logger.warning(
-                                f"CoinGecko coin ID not found for {symbol}, trying alternative"
+                                f"CoinGecko coin ID '{coin_id}' not found for {symbol}, attempting auto-resolution"
                             )
-                            # Try with symbol directly
-                            return await self._fetch_alternative(symbol, days)
+                            # Try to auto-resolve the symbol
+                            resolved_coin_id = await self._auto_resolve_coingecko_id(symbol)
+                            if resolved_coin_id and resolved_coin_id != coin_id:
+                                # Retry with resolved coin_id
+                                logger.info(f"🔄 Retrying with auto-resolved coin_id: {resolved_coin_id}")
+                                # Recursive call with resolved coin_id (but limit depth to prevent infinite loop)
+                                # Instead, we'll try the alternative fetch method
+                                return await self._fetch_alternative(symbol, days)
+                            else:
+                                # Fallback to alternative fetch method
+                                return await self._fetch_alternative(symbol, days)
                         elif response.status == 429:
                             # Rate limit - try to use cached data if available
                             error_text = await response.text()
@@ -172,12 +174,12 @@ class HistoricalPriceService:
     async def _fetch_alternative(self, symbol: str, days: int) -> List[Dict[str, any]]:
         """Alternative fetch method using coin list search"""
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=CLIENT_TIMEOUT) as session:
                 # First, search for the coin
                 url = f"{self.coingecko_url}/search"
                 params = {"query": symbol}
 
-                async with session.get(url, params=params, timeout=30) as response:
+                async with session.get(url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
                         coins = data.get("coins", [])
@@ -195,7 +197,7 @@ class HistoricalPriceService:
                                 params["interval"] = "daily"
 
                             async with session.get(
-                                url, params=params, timeout=30
+                                url, params=params
                             ) as response:
                                 if response.status == 200:
                                     data = await response.json()
@@ -391,6 +393,13 @@ class HistoricalPriceService:
         # Cache miss or stale - fetch from CoinGecko API
         coin_id = self._symbol_to_coingecko_id(symbol)
         
+        # If coin_id is None, try to auto-resolve it
+        if coin_id is None:
+            coin_id = await self._auto_resolve_coingecko_id(symbol)
+            if coin_id is None:
+                logger.warning(f"Could not resolve CoinGecko ID for {symbol}, returning empty chart data")
+                return []
+        
         async with self._request_semaphore:
             # Ensure minimum delay between requests
             current_time = time.time()
@@ -402,7 +411,7 @@ class HistoricalPriceService:
             self._last_request_time = time.time()
             
             try:
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(timeout=CLIENT_TIMEOUT) as session:
                     url = f"{self.coingecko_url}/coins/{coin_id}/market_chart"
                     params = {
                         "vs_currency": "usd",
@@ -413,7 +422,7 @@ class HistoricalPriceService:
                     if days > 90:
                         params["interval"] = "daily"
 
-                    async with session.get(url, params=params, timeout=30) as response:
+                    async with session.get(url, params=params) as response:
                         if response.status == 200:
                             data = await response.json()
                             prices = data.get("prices", [])
@@ -439,10 +448,17 @@ class HistoricalPriceService:
                             return history
                         elif response.status == 404:
                             logger.warning(
-                                f"CoinGecko coin ID not found for {symbol}, trying alternative"
+                                f"CoinGecko coin ID '{coin_id}' not found for {symbol}, attempting auto-resolution"
                             )
-                            # Try alternative fetch method
-                            return await self._fetch_alternative(symbol, days)
+                            # Try to auto-resolve the symbol
+                            resolved_coin_id = await self._auto_resolve_coingecko_id(symbol)
+                            if resolved_coin_id and resolved_coin_id != coin_id:
+                                # Retry with resolved coin_id (use alternative fetch to avoid recursion)
+                                logger.info(f"🔄 Retrying with auto-resolved coin_id: {resolved_coin_id}")
+                                return await self._fetch_alternative(symbol, days)
+                            else:
+                                # Fallback to alternative fetch method
+                                return await self._fetch_alternative(symbol, days)
                         elif response.status == 429:
                             # Rate limit - don't create synthesized data
                             error_text = await response.text()
@@ -503,6 +519,209 @@ class HistoricalPriceService:
             f"Using cached fallback data for {symbol}: {len(filtered)} points"
         )
         return filtered
+
+    def _get_cached_coingecko_id(self, symbol: str) -> Optional[str]:
+        """Get cached CoinGecko coin ID from database"""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            sql = normalize_placeholders(
+                "SELECT coin_id FROM coingecko_symbol_mappings WHERE symbol = %s"
+            )
+            cursor.execute(sql, (symbol.upper(),))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return row[0]
+        except Exception as e:
+            logger.debug(f"Error reading cached CoinGecko mapping for {symbol}: {e}")
+        
+        return None
+
+    def _save_coingecko_mapping(
+        self, symbol: str, coin_id: str, resolution_method: str = "api_search", coin_name: Optional[str] = None
+    ) -> None:
+        """Save CoinGecko symbol mapping to database"""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            now = datetime.now(timezone.utc).isoformat()
+            
+            sql = normalize_placeholders(
+                """
+                INSERT INTO coingecko_symbol_mappings (symbol, coin_id, coin_name, resolved_at, last_used, resolution_method, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (symbol) DO UPDATE SET
+                    coin_id = EXCLUDED.coin_id,
+                    coin_name = COALESCE(EXCLUDED.coin_name, coingecko_symbol_mappings.coin_name),
+                    last_used = EXCLUDED.last_used,
+                    resolution_method = EXCLUDED.resolution_method
+                """
+            )
+            cursor.execute(sql, (symbol.upper(), coin_id, coin_name, now, now, resolution_method, now))
+            conn.commit()
+            conn.close()
+            
+            logger.debug(f"Saved CoinGecko mapping: {symbol} -> {coin_id} (method: {resolution_method})")
+        except Exception as e:
+            logger.error(f"Error saving CoinGecko mapping for {symbol}: {e}", exc_info=True)
+
+    def _update_mapping_last_used(self, symbol: str) -> None:
+        """Update last_used timestamp for a mapping"""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            now = datetime.now(timezone.utc).isoformat()
+            
+            sql = normalize_placeholders(
+                "UPDATE coingecko_symbol_mappings SET last_used = %s WHERE symbol = %s"
+            )
+            cursor.execute(sql, (now, symbol.upper()))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Error updating mapping last_used for {symbol}: {e}")
+
+    async def pre_populate_common_symbols(self) -> None:
+        """
+        Pre-populate database with common cryptocurrency symbols for faster first-time access.
+        This runs on startup to ensure common symbols (BTC, ETH, etc.) are cached immediately.
+        """
+        common_symbols = [
+            "BTC", "ETH", "BNB", "SOL", "ADA", "XRP", "DOT", "DOGE", "AVAX", "MATIC",
+            "LINK", "UNI", "LTC", "ATOM", "ETC", "BCH", "XLM", "ALGO", "VET", "FIL",
+            "TRX", "EOS", "AAVE", "GRT", "SAND", "MANA", "AXS", "CHZ", "ENJ", "TON",
+            "FLR", "RENDER", "RNDR", "XMR"
+        ]
+        
+        logger.info(f"🔄 Pre-populating {len(common_symbols)} common symbol mappings...")
+        
+        for symbol in common_symbols:
+            # Check if already cached
+            if self._get_cached_coingecko_id(symbol):
+                continue
+            
+            # Resolve and cache
+            try:
+                coin_id = await self._auto_resolve_coingecko_id(symbol)
+                if coin_id:
+                    logger.debug(f"✅ Pre-populated {symbol} -> {coin_id}")
+                # Small delay to respect rate limits
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"Could not pre-populate {symbol}: {e}")
+                continue
+        
+        logger.info("✅ Common symbol pre-population complete")
+
+    async def _auto_resolve_coingecko_id(self, symbol: str) -> Optional[str]:
+        """
+        Automatically resolve symbol to CoinGecko coin ID using search API.
+        Saves result to database for future use.
+        """
+        try:
+            symbol_upper = symbol.upper()
+            logger.info(f"🔍 Auto-resolving CoinGecko ID for {symbol_upper} using search API")
+            
+            async with self._request_semaphore:
+                # Ensure minimum delay between requests
+                current_time = time.time()
+                time_since_last_request = current_time - self._last_request_time
+                if time_since_last_request < self._min_request_delay:
+                    wait_time = self._min_request_delay - time_since_last_request
+                    await asyncio.sleep(wait_time)
+                
+                self._last_request_time = time.time()
+                
+                async with aiohttp.ClientSession(timeout=CLIENT_TIMEOUT) as session:
+                    # Use CoinGecko search API
+                    url = f"{self.coingecko_url}/search"
+                    params = {"query": symbol_upper}
+                    
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            coins = data.get("coins", [])
+                            
+                            if coins:
+                                # Get the best match (first result, usually most relevant)
+                                best_match = coins[0]
+                                coin_id = best_match.get("id")
+                                coin_name = best_match.get("name")
+                                
+                                if coin_id:
+                                    # Save to database for future use
+                                    self._save_coingecko_mapping(
+                                        symbol_upper, coin_id, "api_search", coin_name
+                                    )
+                                    logger.info(
+                                        f"✅ Auto-resolved {symbol_upper} -> {coin_id} ({coin_name})"
+                                    )
+                                    
+                                    # Optionally trigger AI predictions for newly resolved symbol (non-blocking)
+                                    self._trigger_ai_predictions_async(symbol_upper)
+                                    
+                                    return coin_id
+                                else:
+                                    logger.warning(f"⚠️ CoinGecko search returned match for {symbol_upper} but no coin_id")
+                            else:
+                                logger.warning(f"⚠️ CoinGecko search returned no matches for {symbol_upper}")
+                        elif response.status == 429:
+                            logger.warning(f"⚠️ CoinGecko rate limit hit during auto-resolution for {symbol_upper}")
+                        else:
+                            error_text = await response.text()
+                            logger.error(
+                                f"❌ CoinGecko search API error {response.status} for {symbol_upper}: {error_text[:200]}"
+                            )
+        except Exception as e:
+            logger.error(f"❌ Error auto-resolving CoinGecko ID for {symbol}: {e}", exc_info=True)
+        
+        return None
+
+    def _trigger_ai_predictions_async(self, symbol: str) -> None:
+        """
+        Trigger AI predictions for a newly resolved symbol (non-blocking).
+        This runs in the background and doesn't block chart data fetching.
+        """
+        try:
+            # Check if predictions already exist to avoid unnecessary API calls
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            sql = normalize_placeholders(
+                "SELECT COUNT(*) FROM ai_predictions WHERE symbol = %s AND user_id IS NULL"
+            )
+            cursor.execute(sql, (symbol.upper(),))
+            existing_count = cursor.fetchone()[0]
+            conn.close()
+            
+            if existing_count == 0:
+                # Trigger prediction generation in background (non-blocking)
+                logger.info(f"🤖 Triggering AI predictions for newly resolved symbol: {symbol.upper()}")
+                asyncio.create_task(self._generate_ai_predictions_background(symbol.upper()))
+            else:
+                logger.debug(f"📊 Predictions already exist for {symbol.upper()}, skipping generation")
+        except Exception as e:
+            logger.debug(f"Could not check/trigger AI predictions for {symbol}: {e}")
+
+    async def _generate_ai_predictions_background(self, symbol: str) -> None:
+        """Generate AI predictions in background (non-blocking)"""
+        try:
+            from ..services.ai_advisor_service import ai_advisor_service
+            
+            # Generate global predictions (user_id=None) for the newly resolved symbol
+            predictions = await ai_advisor_service.generate_predictions(
+                user_id=None,  # None = global predictions (stored with user_id = NULL)
+                symbol=symbol,
+                force_regenerate=True,  # Force generation for newly resolved symbol
+            )
+            if predictions:
+                logger.info(f"✅ AI predictions generated for newly resolved symbol: {symbol}")
+            else:
+                logger.debug(f"⚠️ No predictions generated for {symbol} (may be rate-limited)")
+        except Exception as e:
+            logger.debug(f"⚠️ Failed to generate predictions for {symbol}: {e}")
+            # Don't log as error - this is optional and rate limits are expected
 
 
 # Singleton instance

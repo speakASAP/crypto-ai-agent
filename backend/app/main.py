@@ -113,6 +113,11 @@ async def lifespan(app: FastAPI):
     chart_task = asyncio.create_task(background_chart_data_fetcher())
     logger.info("✅ Chart data fetcher task started (hourly updates, sequential with 1s delay)")
 
+    # Pre-populate common symbol mappings for faster first-time access
+    from .services.historical_price_service import historical_price_service
+    asyncio.create_task(historical_price_service.pre_populate_common_symbols())
+    logger.info("✅ Common symbol pre-population task started")
+
     yield
 
     # Shutdown
