@@ -74,7 +74,7 @@ export default function ProfilePage() {
 
   // Load backend health to determine DB type dynamically
   useEffect(() => {
-    apiClient.client.get('/health')
+    apiClient.client.get('/api/health')
       .then(resp => {
         if (resp?.data?.database) setDbType(resp.data.database as string)
       })
