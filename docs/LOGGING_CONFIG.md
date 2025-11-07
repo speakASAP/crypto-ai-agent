@@ -6,6 +6,13 @@
 
 The Crypto AI Agent uses a centralized logging system that provides comprehensive logging across all project modules. Every step of the application is documented in detailed logs.
 
+**Architecture**:
+
+- **Backend**: Uses `backend/app/utils/logger.py` which provides `get_logger()` and standard Python logging methods
+- **Frontend**: Uses `frontend/src/lib/logger.ts` which sends logs to the backend `/api/logging/log` endpoint
+- **Centralized Logger**: `utils/logger.py` provides structured logging functions (available but not currently used in backend)
+- **All logs**: Write to the same centralized log file (`logs/crypto_agent.log`)
+
 ## Configuration
 
 ### Environment Variables
@@ -101,10 +108,34 @@ Components:
 
 ## Usage Examples
 
-### In Agent Code
+### In Backend Code (Current Implementation)
+
+The backend uses a simplified logger that provides `get_logger()` and standard Python logging methods:
 
 ```python
-from utils.logger import get_logger, log_function_entry, log_database_operation
+from ..utils.logger import get_logger
+
+logger = get_logger("backend.app.api.prices")
+
+# Standard logging methods
+logger.info("Fetching prices for symbols")
+logger.error("Error fetching prices", exc_info=True)
+logger.warning("Price not found for symbol")
+logger.debug("Debug information")
+```
+
+**Note**: The backend logger (`backend/app/utils/logger.py`) automatically:
+
+- Writes to the centralized log file (`logs/crypto_agent.log`)
+- Respects `LOG_LEVEL` and `DEBUG` environment variables
+- Uses the same log format as the centralized logger
+
+### In Backend Code (Alternative: Structured Logging)
+
+If you want to use structured logging functions from the centralized logger (`utils/logger.py`):
+
+```python
+from utils.logger import get_logger, log_function_entry, log_database_operation, log_api_call
 
 logger = get_logger("agent")
 
@@ -114,19 +145,31 @@ log_function_entry("process_price", "agent", symbol="BTC", price=45000)
 # Database operation logging
 log_database_operation("insert", "portfolio", "agent", symbol="BTC", amount=1.5)
 
+# API call logging
+log_api_call("Binance", "/api/v3/ticker/price", "agent", status_code=200)
+
 # Performance logging
+from utils.logger import log_performance
 log_performance("price_prediction", 0.123, "agent", symbol="BTC")
 ```
 
-### In UI Dashboard
+### In Frontend Code
 
-```python
-from utils.logger import get_logger, log_user_action
+The frontend uses a TypeScript logger that sends logs to the backend:
 
-logger = get_logger("ui_dashboard")
+```typescript
+import { logger } from '@/lib/logger'
 
-# User action logging
-log_user_action("add_coin", {"symbol": "BTC", "amount": 0.5}, "ui_dashboard")
+// Standard logging (batched and throttled in production)
+logger.info("User action")
+logger.error("Error occurred")
+logger.warn("Warning message")
+logger.debug("Debug info")
+
+// Production optimization:
+// - Errors are sent immediately
+// - Non-critical logs are batched (max 1 request per 5 seconds)
+// - In production, non-critical logs are filtered out
 ```
 
 ## Monitoring and Alerts

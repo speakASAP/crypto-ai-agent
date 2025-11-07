@@ -2,12 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
+import os
 
 from ..utils.logger import get_logger
 
 logger = get_logger("backend.app.api.logging")
 
 router = APIRouter(prefix="/api/logging", tags=["logging"])
+
+# Production mode check - filter non-critical logs in production
+IS_PRODUCTION = os.getenv("NODE_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
 
 
 class LogEntry(BaseModel):
@@ -71,8 +75,23 @@ async def receive_frontend_log(
     Receive and process frontend logs.
     All frontend console messages should be sent here instead of console.
     Authentication is optional - logs from unauthenticated users are still accepted.
+    
+    Production optimization:
+    - In production, non-critical logs (log/info/debug) are filtered out
+    - Only errors and warnings are processed in production
+    - This reduces unnecessary log processing and file I/O
     """
     try:
+        # In production, skip non-critical logs (log/info/debug) unless DEBUG is enabled
+        log_level_lower = log_entry.level.lower()
+        is_critical = log_level_lower in ('error', 'warn', 'warning')
+        is_debug_enabled = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+        
+        # Skip non-critical logs in production
+        if IS_PRODUCTION and not is_critical and not is_debug_enabled:
+            # Return success but don't process the log
+            return {"success": True, "message": "Log filtered (production mode)"}
+        
         user_id = current_user.get("id") if current_user else None
         username = current_user.get("username") if current_user else "anonymous"
         
@@ -85,7 +104,7 @@ async def receive_frontend_log(
             'debug': 'debug'
         }
         
-        python_level = level_mapping.get(log_entry.level.lower(), 'info')
+        python_level = level_mapping.get(log_level_lower, 'info')
         
         # Build log message with context
         log_message = f"[Frontend] {log_entry.message}"
