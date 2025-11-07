@@ -109,9 +109,9 @@ async def lifespan(app: FastAPI):
     prediction_verifier_task = asyncio.create_task(background_prediction_verifier())
     logger.info("✅ Prediction verification task started")
 
-    # Start background chart data fetcher (hourly updates)
+    # Start background chart data fetcher (hourly updates, 1 request per second)
     chart_task = asyncio.create_task(background_chart_data_fetcher())
-    logger.info("✅ Chart data fetcher task started (hourly updates)")
+    logger.info("✅ Chart data fetcher task started (hourly updates, sequential with 1s delay)")
 
     yield
 
