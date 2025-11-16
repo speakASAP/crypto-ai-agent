@@ -8,9 +8,8 @@ class Settings(BaseSettings):
     # Environment
     environment: str = os.getenv("ENVIRONMENT", "development")
     # Database Configuration
-    # Database: use PostgreSQL in production, SQLite in development
+    # Database: PostgreSQL only (required)
     database_url: str | None = None
-    database_file: str = "data/crypto_portfolio.db"
     
     # API Configuration
     secret_key: str = "your-secret-key-here"
@@ -29,6 +28,18 @@ class Settings(BaseSettings):
     currency_api_url: str = "https://api.exchangerate-api.com/v4/latest/USD"
     telegram_api_url: str = "https://api.telegram.org/bot"
     
+    # AI Advisor Configuration
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4")
+    news_api_key: str = os.getenv("NEWS_API_KEY", "")
+    ai_prediction_interval_hours: int = int(os.getenv("AI_PREDICTION_INTERVAL_HOURS", "24"))
+    ai_prediction_batch_size: int = int(os.getenv("AI_PREDICTION_BATCH_SIZE", "1"))
+    openrouter_api_url: str = "https://openrouter.ai/api/v1"
+    news_api_url: str = "https://newsapi.org/v2"
+    
+    # Price Update Configuration
+    price_update_interval_seconds: int = int(os.getenv("PRICE_UPDATE_INTERVAL_SECONDS", "300"))  # 5 minutes
+    
     # Redis (optional, for caching/session)
     redis_url: str | None = None
     telegram_bot_token: str = ""
@@ -45,8 +56,11 @@ class Settings(BaseSettings):
     db_pool_recycle: int = 3600
     db_pool_pre_ping: bool = True
     
+    # Debug Configuration
+    debug: bool = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+    
     # Logging Configuration
-    log_level: str = "INFO"
+    log_level: str = "DEBUG" if debug else "INFO"
     log_file: str = "logs/crypto_agent.log"
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     

@@ -6,6 +6,14 @@
 
 The Crypto AI Agent uses a centralized logging system that provides comprehensive logging across all project modules. Every step of the application is documented in detailed logs.
 
+**Architecture**:
+
+- **Backend**: Uses `backend/app/utils/logger.py` which provides `get_logger()` and standard Python logging methods
+- **Frontend**: Uses `frontend/src/lib/logger.ts` which sends logs to the backend `/api/logging/log` endpoint
+- **Centralized Logger**: `utils/logger.py` provides structured logging functions (available but not currently used in backend)
+- **All logs**: Write to the same centralized log file (`logs/crypto_agent.log`)
+- **External Logging Service**: Logs are also sent to external logging microservice at `http://logging-microservice:3268` (dual logging with local fallback)
+
 ## Configuration
 
 ### Environment Variables
@@ -17,6 +25,51 @@ Add these variables to your `.env` file to configure logging:
 LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FILE=logs/crypto_agent.log    # Path to log file
 LOG_FORMAT="%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log format
+
+# External Logging Service (optional)
+LOGGING_SERVICE_URL=http://logging-microservice:3268  # URL of external logging microservice
+```
+
+### External Logging Service
+
+The application supports dual logging: logs are sent to both local files and an external logging microservice.
+
+**Features**:
+
+- **Dual Logging**: Logs are sent to external service AND written locally as fallback
+- **Non-blocking**: HTTP requests don't block application execution (uses threading)
+- **Fallback**: If logging service is unavailable, falls back to local files only
+- **Metadata**: Includes context, stack traces, module/function/line information in log metadata
+- **Service Identification**: All logs tagged with `crypto-ai-agent` service name
+- **Backward Compatible**: No changes needed in services using the logger
+
+**Configuration**:
+
+- Set `LOGGING_SERVICE_URL` in `.env` to enable external logging
+- If not configured, only local file logging is used
+- External service URL format: `http://logging-microservice:3268`
+
+**Metadata Structure**:
+Logs sent to external service include rich metadata:
+
+```json
+{
+  "level": "error",
+  "message": "Error message",
+  "service": "crypto-ai-agent",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "metadata": {
+    "module": "backend.app.api.prices",
+    "function": "get_prices",
+    "line": 42,
+    "context": "API call",
+    "stack_trace": "...",
+    "user_id": 123,
+    "username": "user1",
+    "url": "/api/prices",
+    "user_agent": "Mozilla/5.0..."
+  }
+}
 ```
 
 ### Log Levels
@@ -87,7 +140,7 @@ In Docker deployments, the backend writes logs to `/app/logs` which is bind-moun
 Each log entry follows this format:
 
 ```text
-2024-01-15 10:30:45,123 - crypto_ai_agent.agent - INFO - INFO in database_initialization - Database initialized successfully - db_path=data/crypto_portfolio.db
+2024-01-15 10:30:45,123 - crypto_ai_agent.agent - INFO - INFO in database_initialization - Database initialized successfully - database_url=postgresql://...
 ```
 
 Components:
@@ -101,10 +154,35 @@ Components:
 
 ## Usage Examples
 
-### In Agent Code
+### In Backend Code (Current Implementation)
+
+The backend uses a simplified logger that provides `get_logger()` and standard Python logging methods:
 
 ```python
-from utils.logger import get_logger, log_function_entry, log_database_operation
+from ..utils.logger import get_logger
+
+logger = get_logger("backend.app.api.prices")
+
+# Standard logging methods
+logger.info("Fetching prices for symbols")
+logger.error("Error fetching prices", exc_info=True)
+logger.warning("Price not found for symbol")
+logger.debug("Debug information")
+```
+
+**Note**: The backend logger (`backend/app/utils/logger.py`) automatically:
+
+- Writes to the centralized log file (`logs/crypto_agent.log`)
+- Respects `LOG_LEVEL` and `DEBUG` environment variables
+- Uses the same log format as the centralized logger
+- Sends logs to external logging service if `LOGGING_SERVICE_URL` is configured (non-blocking)
+
+### In Backend Code (Alternative: Structured Logging)
+
+If you want to use structured logging functions from the centralized logger (`utils/logger.py`):
+
+```python
+from utils.logger import get_logger, log_function_entry, log_database_operation, log_api_call
 
 logger = get_logger("agent")
 
@@ -114,19 +192,31 @@ log_function_entry("process_price", "agent", symbol="BTC", price=45000)
 # Database operation logging
 log_database_operation("insert", "portfolio", "agent", symbol="BTC", amount=1.5)
 
+# API call logging
+log_api_call("Binance", "/api/v3/ticker/price", "agent", status_code=200)
+
 # Performance logging
+from utils.logger import log_performance
 log_performance("price_prediction", 0.123, "agent", symbol="BTC")
 ```
 
-### In UI Dashboard
+### In Frontend Code
 
-```python
-from utils.logger import get_logger, log_user_action
+The frontend uses a TypeScript logger that sends logs to the backend:
 
-logger = get_logger("ui_dashboard")
+```typescript
+import { logger } from '@/lib/logger'
 
-# User action logging
-log_user_action("add_coin", {"symbol": "BTC", "amount": 0.5}, "ui_dashboard")
+// Standard logging (batched and throttled in production)
+logger.info("User action")
+logger.error("Error occurred")
+logger.warn("Warning message")
+logger.debug("Debug info")
+
+// Production optimization:
+// - Errors are sent immediately
+// - Non-critical logs are batched (max 1 request per 5 seconds)
+// - In production, non-critical logs are filtered out
 ```
 
 ## Monitoring and Alerts

@@ -319,7 +319,7 @@ export function middleware(request: NextRequest) {
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 
 # Database
-DATABASE_FILE=data/crypto_portfolio.db
+DATABASE_URL=postgresql://user:password@localhost:5432/crypto_ai_agent
 
 # CORS
 CORS_ORIGINS=http://localhost:3100,https://yourdomain.com
@@ -427,8 +427,8 @@ tail -f logs/backend.log
 # View frontend logs
 tail -f logs/frontend.log
 
-# Check database
-sqlite3 data/crypto_portfolio.db ".tables"
+# Check database (PostgreSQL)
+psql $DATABASE_URL -c "\dt"
 ```
 
 ## Migration Notes

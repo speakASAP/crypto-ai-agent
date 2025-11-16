@@ -6,11 +6,11 @@ import asyncio
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
-import logging
 import psutil
 import os
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.performance_monitor")
 
 class PerformanceMonitor:
     """

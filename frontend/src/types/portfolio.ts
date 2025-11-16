@@ -24,6 +24,7 @@ export interface PortfolioItem {
   pnl_usd?: number
   pnl_percent_usd?: number
   exchange_rate_at_purchase?: number
+  comments?: string
 }
 
 export interface PortfolioCreate {
@@ -35,6 +36,7 @@ export interface PortfolioCreate {
   source?: string
   commission?: number
   total_investment_text?: string
+  comments?: string
 }
 
 export interface PortfolioUpdate {
@@ -46,6 +48,7 @@ export interface PortfolioUpdate {
   source?: string
   commission?: number
   total_investment_text?: string
+  comments?: string
 }
 
 export interface PortfolioSummary {

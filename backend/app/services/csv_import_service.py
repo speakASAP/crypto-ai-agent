@@ -4,15 +4,15 @@ Supports flexible column mapping with template presets
 """
 import csv
 import json
-import logging
 import os
 from typing import Dict, List, Optional, Tuple, Any
 from difflib import SequenceMatcher
 from dateutil import parser as date_parser
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.csv_import_service")
 
 
 class CSVImportService:
@@ -271,7 +271,8 @@ class CSVImportService:
         return None
     
     def _parse_number(self, value_str: str) -> Optional[float]:
-        """Parse number from string, handling commas and currency symbols"""
+        """Parse number from string, handling commas and currency symbols
+        Preserves at least 8 decimal places of precision"""
         if not value_str:
             return None
         
@@ -282,8 +283,13 @@ class CSVImportService:
         parts = value_str.split()
         if parts:
             try:
-                return float(parts[0])
-            except ValueError:
+                # Use Decimal for precision, then convert to float
+                # Decimal preserves full precision during parsing
+                decimal_value = Decimal(parts[0])
+                # Convert to float - Python float has ~15-17 significant digits
+                # This preserves precision for most cryptocurrency amounts
+                return float(decimal_value)
+            except (ValueError, InvalidOperation):
                 pass
         
         return None
@@ -291,6 +297,7 @@ class CSVImportService:
     def _parse_value_with_currency(self, value_str: str, exchange: str) -> Tuple[float, str]:
         """
         Parse value string to extract amount and currency
+        Preserves at least 8 decimal places of precision
         
         Args:
             value_str: Value string like "2,000.00 CZK"
@@ -307,7 +314,9 @@ class CSVImportService:
         
         if len(parts) >= 2:
             try:
-                amount = float(parts[0])
+                # Use Decimal for precision, then convert to float
+                decimal_amount = Decimal(parts[0])
+                amount = float(decimal_amount)
                 currency = parts[-1]  # Last part is usually currency
                 
                 # Map currency using template
@@ -319,15 +328,19 @@ class CSVImportService:
                             break
                 
                 return amount, currency
-            except ValueError:
+            except (ValueError, InvalidOperation):
                 pass
         
         # Fallback: try to parse just the number
         try:
-            amount = float(parts[0])
-            return amount, "USD"
-        except (ValueError, IndexError):
-            return 0.0, "USD"
+            if parts:
+                decimal_amount = Decimal(parts[0])
+                amount = float(decimal_amount)
+                return amount, "USD"
+        except (ValueError, InvalidOperation, IndexError):
+            pass
+        
+        return 0.0, "USD"
     
     def aggregate_transactions(self, transactions: List[Dict]) -> List[Dict]:
         """
@@ -352,7 +365,8 @@ class CSVImportService:
         for symbol, txns in by_symbol.items():
             try:
                 result = self._calculate_weighted_average(symbol, txns)
-                if result:
+                # Include ALL results, even if net_quantity <= 0 (for DELETE operations)
+                if result is not None:
                     aggregated.append(result)
             except Exception as e:
                 logger.error(f"Error aggregating {symbol}: {e}")
@@ -360,41 +374,105 @@ class CSVImportService:
         return aggregated
     
     def _calculate_weighted_average(self, symbol: str, transactions: List[Dict]) -> Optional[Dict]:
-        """Calculate weighted average for a symbol's transactions"""
+        """Calculate weighted average for a symbol's transactions
+        All calculations preserve at least 8 decimal places of precision"""
         buy_txns = [t for t in transactions if t['type'].lower() in ['buy', 'purchase']]
         sell_txns = [t for t in transactions if t['type'].lower() in ['sell', 'sale']]
         
-        if not buy_txns:
-            logger.warning(f"No buy transactions found for {symbol}")
-            return None
+        # Use Decimal for all calculations to preserve precision
+        total_buy_qty = Decimal('0')
+        total_sell_qty = Decimal('0')
         
-        total_buy_qty = sum(t['quantity'] for t in buy_txns)
-        total_sell_qty = sum(t['quantity'] for t in sell_txns)
+        for t in buy_txns:
+            total_buy_qty += Decimal(str(t['quantity']))
+        for t in sell_txns:
+            total_sell_qty += Decimal(str(t['quantity']))
+        
         net_quantity = total_buy_qty - total_sell_qty
+        net_change = float(net_quantity)  # Convert to float for return value (preserves precision)
         
-        if net_quantity <= 0:
-            logger.info(f"Fully sold position for {symbol}, skipping")
-            return None
+        # Handle sell-only transactions (no buys in CSV)
+        is_sell_only = len(buy_txns) == 0 and len(sell_txns) > 0
+        is_buy_only = len(buy_txns) > 0 and len(sell_txns) == 0
+        has_both = len(buy_txns) > 0 and len(sell_txns) > 0
         
-        # Calculate weighted average price from buy transactions
-        weighted_price = sum(t['quantity'] * t['price'] for t in buy_txns) / total_buy_qty
-        total_fees = sum(t.get('fees', 0) for t in transactions)
-        total_value = sum(t.get('value', 0) for t in transactions)
+        # Calculate weighted average price from buy transactions (if any)
+        if len(buy_txns) > 0:
+            # Use Decimal for precision in weighted average calculation
+            total_weighted_value = Decimal('0')
+            for t in buy_txns:
+                qty = Decimal(str(t['quantity']))
+                price = Decimal(str(t['price']))
+                total_weighted_value += qty * price
+            
+            weighted_price = float(total_weighted_value / total_buy_qty) if total_buy_qty > 0 else 0.0
+            
+            total_buy_fees = Decimal('0')
+            total_buy_value = Decimal('0')
+            for t in buy_txns:
+                total_buy_fees += Decimal(str(t.get('fees', 0)))
+                total_buy_value += Decimal(str(t.get('value', 0)))
+            
+            total_buy_investment = float(total_buy_value + total_buy_fees)
+            total_buy_fees = float(total_buy_fees)
+            total_buy_value = float(total_buy_value)
+            earliest_date = min(t['date'] for t in buy_txns)
+        else:
+            # Sell-only: use average sell price for reference (won't be used for purchase price)
+            total_weighted_value = Decimal('0')
+            for t in sell_txns:
+                qty = Decimal(str(t['quantity']))
+                price = Decimal(str(t['price']))
+                total_weighted_value += qty * price
+            
+            weighted_price = float(total_weighted_value / total_sell_qty) if total_sell_qty > 0 else 0.0
+            total_buy_fees = 0.0
+            total_buy_value = 0.0
+            total_buy_investment = 0.0
+            earliest_date = min(t['date'] for t in sell_txns) if sell_txns else transactions[0]['date']
         
-        # Get earliest buy date
-        earliest_date = min(t['date'] for t in buy_txns)
+        # Calculate fees: for sell-only, we track sell fees but they don't affect investment
+        total_sell_fees = Decimal('0')
+        for t in sell_txns:
+            total_sell_fees += Decimal(str(t.get('fees', 0)))
+        total_sell_fees = float(total_sell_fees)
+        
+        # For positions with sells, calculate remaining investment proportionally
+        if total_buy_qty > 0 and total_sell_qty > 0:
+            # Partial sell: calculate remaining investment using Decimal for precision
+            total_buy_investment_decimal = Decimal(str(total_buy_investment))
+            investment_per_coin = float(total_buy_investment_decimal / total_buy_qty) if total_buy_qty > 0 else 0
+            remaining_investment_decimal = Decimal(str(investment_per_coin)) * net_quantity
+            remaining_investment = float(remaining_investment_decimal)
+            
+            value_ratio = float(total_buy_value / total_buy_investment) if total_buy_investment > 0 else 0
+            fees_ratio = float(total_buy_fees / total_buy_investment) if total_buy_investment > 0 else 0
+            total_value = remaining_investment * value_ratio
+            total_fees = remaining_investment * fees_ratio
+        elif total_buy_qty > 0:
+            # Buy-only
+            total_value = total_buy_value
+            total_fees = total_buy_fees
+        else:
+            # Sell-only: no investment to track
+            total_value = 0.0
+            total_fees = total_sell_fees
         
         # Get currency from first transaction
         currency = transactions[0].get('currency', 'USD')
         
         return {
             'symbol': symbol,
-            'quantity': net_quantity,
+            'quantity': float(net_quantity),  # Convert to float but preserve precision
+            'net_change': net_change,  # Positive for buys, negative for sells
             'price': weighted_price,
             'value': total_value,
             'fees': total_fees,
             'date': earliest_date,
             'currency': currency,
-            'transactions_count': len(transactions)
+            'transactions_count': len(transactions),
+            'is_sell_only': is_sell_only,
+            'total_buy_qty': float(total_buy_qty),
+            'total_sell_qty': float(total_sell_qty)
         }
 

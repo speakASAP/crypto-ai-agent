@@ -279,13 +279,14 @@ def get_user_telegram_credentials(user_id: int) -> Optional[dict]:
 #### Dependencies
 
 - FastAPI (already available)
-- SQLite (already available)
+- PostgreSQL (already available)
+- psycopg (already available)
 - aiohttp (already available)
 - Pydantic (already available)
 
 #### Database
 
-- SQLite with new columns (telegram_bot_token, telegram_chat_id)
+- PostgreSQL with new columns (telegram_bot_token, telegram_chat_id)
 - No breaking changes to existing schema
 - Backward compatibility maintained
 

@@ -1,10 +1,11 @@
 'use client'
 
+import { logger } from '@/lib/logger'
 import { useState, useEffect, useRef } from 'react'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { CryptoSymbol } from '@/types'
-import { apiClient } from '@/lib/api'
+import { Input } from './ui/input'
+import { Label } from './ui/label'
+import { CryptoSymbol } from '../types'
+import { apiClient } from '../lib/api'
 
 interface CryptoSearchSelectProps {
   value: string
@@ -65,7 +66,7 @@ export function CryptoSearchSelect({
       const data = await apiClient.getCryptoSymbols(50) // Load top 50 by market cap
       setSymbols(data)
     } catch (error) {
-      console.error('Failed to load crypto symbols:', error)
+      logger.error('Failed to load crypto symbols:', error)
     } finally {
       setLoading(false)
     }
@@ -77,7 +78,7 @@ export function CryptoSearchSelect({
       const data = await apiClient.searchCryptoSymbols(query, 20)
       setSymbols(data)
     } catch (error) {
-      console.error('Failed to search crypto symbols:', error)
+      logger.error('Failed to search crypto symbols:', error)
     } finally {
       setLoading(false)
     }

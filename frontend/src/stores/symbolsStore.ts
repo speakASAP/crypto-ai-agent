@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import { TrackedSymbol, TrackedSymbolCreate, TrackedSymbolUpdate, CryptoSymbol, SymbolPrice } from '@/types'
-import { apiClient } from '@/lib/api'
+import { logger } from '@/lib/logger'
+import { TrackedSymbol, TrackedSymbolCreate, TrackedSymbolUpdate, CryptoSymbol, SymbolPrice } from '../types'
+import { apiClient } from '../lib/api'
 
 interface SymbolsState {
   trackedSymbols: TrackedSymbol[]
@@ -97,7 +98,7 @@ export const useSymbolsStore = create<SymbolsState>()(
           const cryptoSymbols = await apiClient.getCryptoSymbols(limit)
           set({ cryptoSymbols })
         } catch (error: any) {
-          console.error('Failed to fetch crypto symbols:', error)
+          logger.error('Failed to fetch crypto symbols:', error)
         }
       },
 
@@ -113,7 +114,7 @@ export const useSymbolsStore = create<SymbolsState>()(
             symbolPrices: { ...state.symbolPrices, ...priceMap }
           }))
         } catch (error: any) {
-          console.error('Failed to fetch symbol prices:', error)
+          logger.error('Failed to fetch symbol prices:', error)
         }
       },
 

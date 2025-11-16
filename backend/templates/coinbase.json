@@ -1,0 +1,25 @@
+{
+  "exchange": "coinbase",
+  "name": "Coinbase",
+  "required_fields": ["Timestamp", "Transaction Type", "Asset", "Quantity Transacted"],
+  "optional_fields": ["Spot Price Currency", "Subtotal", "Fees and/or Spread"],
+  "column_mapping": {
+    "symbol": ["Asset", "Currency", "Coin"],
+    "type": ["Transaction Type", "Type", "Side"],
+    "quantity": ["Quantity Transacted", "Amount", "Quantity"],
+    "price": ["Spot Price at Transaction", "Price", "Rate"],
+    "value": ["Subtotal", "Total", "Value"],
+    "fees": ["Fees and/or Spread", "Fees", "Commission"],
+    "date": ["Timestamp", "Date", "Time"]
+  },
+  "date_formats": ["%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"],
+  "currency_mapping": {
+    "default": "USD",
+    "patterns": {
+      "USD": ["USD", "$"],
+      "EUR": ["EUR", "€"],
+      "GBP": ["GBP", "£"]
+    }
+  }
+}
+

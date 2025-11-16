@@ -1,4 +1,5 @@
 import { apiClient } from './api'
+import { logger } from './logger'
 
 /**
  * Shared refresh utility that can be used by both UI components and stores
@@ -9,10 +10,10 @@ export const refreshCryptoPrices = async () => {
     // Refresh crypto prices (same as refresh button)
     const cryptoResult = await apiClient.refreshCryptoPrices()
     
-    console.log(`✅ Refreshed ${cryptoResult.symbols_count} crypto prices`)
+    logger.info(`✅ Refreshed ${cryptoResult.symbols_count} crypto prices`)
     return cryptoResult
   } catch (error) {
-    console.error('Failed to refresh crypto prices:', error)
+    logger.error('Failed to refresh crypto prices:', error)
     throw error
   }
 }
@@ -29,10 +30,10 @@ export const refreshAllData = async () => {
       apiClient.refreshCryptoPrices()
     ])
     
-    console.log(`✅ Refreshed ${currencyResult.rates_count} currency rates and ${cryptoResult.symbols_count} crypto prices`)
+    logger.info(`✅ Refreshed ${currencyResult.rates_count} currency rates and ${cryptoResult.symbols_count} crypto prices`)
     return { currencyResult, cryptoResult }
   } catch (error) {
-    console.error('Failed to refresh data:', error)
+    logger.error('Failed to refresh data:', error)
     throw error
   }
 }

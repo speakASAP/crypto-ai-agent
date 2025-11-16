@@ -9,10 +9,12 @@ from ..core.config import settings
 from ..services.currency_service import currency_service
 from ..schemas.portfolio import PortfolioItem, PortfolioCreate, PortfolioUpdate
 from ..utils.db import normalize_placeholders as _normalize_placeholders, execute_insert_and_get_id as _execute_insert_and_get_id
+from ..utils.logger import get_logger
 from .ws import manager  # for potential broadcast references
 
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
+logger = get_logger("backend.app.api.portfolio")
 
 
 def format_total_investment_text(total: float, base_currency: str) -> str:
@@ -44,8 +46,7 @@ def convert_portfolio_item(item: dict, target_currency: str) -> dict:
 async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = ? ORDER BY created_at DESC", is_pg)
+    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = %s ORDER BY created_at DESC")
     cursor.execute(sql, (current_user["id"],))
     rows = cursor.fetchall()
     conn.close()
@@ -78,6 +79,7 @@ async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_
             "pnl_usd": row[22] if len(row) > 22 else None,
             "pnl_percent_usd": row[23] if len(row) > 23 else None,
             "exchange_rate_at_purchase": row[24] if len(row) > 24 else None,
+            "comments": row[25] if len(row) > 25 else None,
         }
         items.append(convert_portfolio_item(item, currency))
     return items
@@ -87,8 +89,7 @@ async def get_portfolio(currency: str = "USD", current_user: dict = Depends(get_
 async def get_portfolio_summary(currency: str = "USD", current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = ?", is_pg)
+    sql = _normalize_placeholders("SELECT * FROM portfolio_items WHERE user_id = %s")
     cursor.execute(sql, (current_user["id"],))
     rows = cursor.fetchall()
     conn.close()
@@ -134,15 +135,23 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
 
     now = datetime.now().isoformat() + "Z"
     exchange_rate = 1.0
     if item.base_currency != "USD":
         exchange_rate = currency_service.get_rate(item.base_currency)
 
+    # CRITICAL: Always calculate price_buy_usd - it's mandatory
     price_buy_usd = item.price_buy / exchange_rate if item.base_currency != "USD" else item.price_buy
     commission_usd = item.commission / exchange_rate if item.base_currency != "USD" else item.commission
+    
+    # CRITICAL: Validate price_buy_usd is valid (zero tolerance)
+    if not price_buy_usd or price_buy_usd <= 0:
+        logger.error(f"❌ Invalid price_buy_usd for {item.symbol}: {price_buy_usd} (currency={item.base_currency}, rate={exchange_rate}, price_buy={item.price_buy})")
+        raise HTTPException(status_code=400, detail=f"Invalid price: price_buy_usd must be greater than 0 (calculated: {price_buy_usd:.8f})")
+
+    if commission_usd is None:
+        commission_usd = 0.0
 
     total_investment = (item.amount * item.price_buy) + item.commission
     formatted_total_investment = item.total_investment_text
@@ -154,20 +163,85 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         (user_id, symbol, amount, price_buy, purchase_date, base_currency, source, commission, 
          total_investment_text, created_at, updated_at, current_price, current_value, pnl, pnl_percent,
          price_buy_usd, commission_usd, current_price_usd, current_value_usd, pnl_usd, pnl_percent_usd,
-         exchange_rate_at_purchase)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         exchange_rate_at_purchase, comments)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     '''
     params = (
         current_user["id"], item.symbol, item.amount, item.price_buy, item.purchase_date, item.base_currency,
         item.source, item.commission, formatted_total_investment, now, now,
         round(item.price_buy, 8), round(item.amount * item.price_buy, 8), 0.0, 0.0,
         round(price_buy_usd, 8), round(commission_usd, 8), round(price_buy_usd, 8),
-        round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate,
+        round(item.amount * price_buy_usd, 8), 0.0, 0.0, exchange_rate, item.comments,
     )
-    sql = _normalize_placeholders(insert_sql, is_pg)
-    item_id = _execute_insert_and_get_id(cursor, sql, params, is_pg)
-    conn.commit()
-    conn.close()
+    sql = _normalize_placeholders(insert_sql)
+    try:
+        item_id = _execute_insert_and_get_id(cursor, sql, params)
+        conn.commit()
+        logger.info(f"✅ Created portfolio item {item.symbol}: amount={item.amount}, price_buy_usd={price_buy_usd:.8f}, currency={item.base_currency}, rate={exchange_rate}")
+    except Exception as db_error:
+        conn.rollback()
+        error_msg = str(db_error)
+        logger.error(f"❌ Database error creating portfolio item {item.symbol}: {error_msg} (price_buy_usd={price_buy_usd}, currency={item.base_currency}, rate={exchange_rate})", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Database error: {error_msg}")
+    finally:
+        conn.close()
+
+    # Immediately fetch prices and generate predictions for the newly added symbol
+    symbol_upper = item.symbol.upper()
+    try:
+        from ..services.price_tasks import fetch_prices_for_symbols
+        logger.info(f"🔄 Fetching prices for newly added symbol: {symbol_upper}")
+        await fetch_prices_for_symbols([symbol_upper])
+        logger.info(f"✅ Price update completed for {symbol_upper}")
+    except Exception as e:
+        logger.error(f"⚠️ Failed to fetch prices for {symbol_upper}: {e}", exc_info=True)
+        # Don't fail the creation if price fetch fails
+    
+    # Immediately fetch chart data for the newly added symbol (non-blocking)
+    try:
+        from ..services.chart_tasks import fetch_chart_data_for_symbols
+        import asyncio
+        logger.info(f"📊 Triggering chart data fetch for newly added symbol: {symbol_upper}")
+        # Trigger background fetch (non-blocking, don't wait for completion)
+        asyncio.create_task(
+            fetch_chart_data_for_symbols([symbol_upper], days=7, skip_cached=False)
+        )
+    except Exception as e:
+        logger.error(f"⚠️ Failed to trigger chart fetch for {symbol_upper}: {e}", exc_info=True)
+        # Don't fail the creation if chart fetch trigger fails
+    
+    # Generate AI predictions for the newly added symbol (if not already exists)
+    try:
+        from ..services.ai_advisor_service import ai_advisor_service
+        from ..utils.db import get_db_connection, normalize_placeholders
+        
+        # Check if predictions already exist for this symbol
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        check_sql = normalize_placeholders(
+            "SELECT COUNT(*) FROM ai_predictions WHERE symbol = %s AND user_id IS NULL"
+        )
+        cursor.execute(check_sql, (symbol_upper,))
+        existing_count = cursor.fetchone()[0]
+        conn.close()
+        
+        if existing_count == 0:
+            logger.info(f"🤖 Generating AI predictions for newly added symbol: {symbol_upper}")
+            # Generate global predictions (user_id=None) for the new symbol
+            predictions = await ai_advisor_service.generate_predictions(
+                user_id=None,  # None = global predictions (stored with user_id = NULL)
+                symbol=symbol_upper,
+                force_regenerate=True,  # Force generation for new symbol
+            )
+            if predictions:
+                logger.info(f"✅ AI predictions generated for {symbol_upper}")
+            else:
+                logger.warning(f"⚠️ No predictions generated for {symbol_upper} (may be rate-limited or symbol not supported)")
+        else:
+            logger.debug(f"📊 Predictions already exist for {symbol_upper}, skipping generation")
+    except Exception as e:
+        logger.error(f"⚠️ Failed to generate predictions for {symbol_upper}: {e}", exc_info=True)
+        # Don't fail the creation if prediction generation fails
 
     return PortfolioItem(
         id=item_id,
@@ -192,6 +266,7 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
         pnl_usd=0.0,
         pnl_percent_usd=0.0,
         exchange_rate_at_purchase=exchange_rate,
+        comments=item.comments,
     )
 
 
@@ -199,8 +274,7 @@ async def create_portfolio_item(item: PortfolioCreate, current_user: dict = Depe
 async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql_sel = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = ? AND user_id = ?", is_pg)
+    sql_sel = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = %s AND user_id = %s")
     cursor.execute(sql_sel, (item_id, current_user["id"]))
     row = cursor.fetchone()
     if not row:
@@ -210,38 +284,41 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
     update_fields = []
     update_values = []
     if item.symbol is not None:
-        update_fields.append("symbol = ?")
+        update_fields.append("symbol = %s")
         update_values.append(item.symbol)
     if item.amount is not None:
-        update_fields.append("amount = ?")
+        update_fields.append("amount = %s")
         update_values.append(item.amount)
     if item.price_buy is not None:
-        update_fields.append("price_buy = ?")
+        update_fields.append("price_buy = %s")
         update_values.append(item.price_buy)
     if item.purchase_date is not None:
-        update_fields.append("purchase_date = ?")
+        update_fields.append("purchase_date = %s")
         update_values.append(item.purchase_date)
     if item.base_currency is not None:
-        update_fields.append("base_currency = ?")
+        update_fields.append("base_currency = %s")
         update_values.append(item.base_currency)
     if item.source is not None:
-        update_fields.append("source = ?")
+        update_fields.append("source = %s")
         update_values.append(item.source)
     if item.commission is not None:
-        update_fields.append("commission = ?")
+        update_fields.append("commission = %s")
         update_values.append(item.commission)
     if item.total_investment_text is not None:
-        update_fields.append("total_investment_text = ?")
+        update_fields.append("total_investment_text = %s")
         update_values.append(item.total_investment_text)
+    if item.comments is not None:
+        update_fields.append("comments = %s")
+        update_values.append(item.comments)
 
     if update_fields:
         # Special-case formatting and USD recalcs
         if "total_investment_text" in [f.split(" = ")[0] for f in update_fields]:
-            total_investment_text_idx = next((i for i, f in enumerate(update_fields) if f.startswith("total_investment_text = ?")), None)
+            total_investment_text_idx = next((i for i, f in enumerate(update_fields) if f.startswith("total_investment_text = %s")), None)
             if total_investment_text_idx is not None:
                 total_investment_text = update_values[total_investment_text_idx]
                 if not total_investment_text or not any(s in total_investment_text for s in ["$", "€", "Kč", "£", "¥"]):
-                    sql_sel_cur = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", is_pg)
+                    sql_sel_cur = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = %s")
                     cursor.execute(sql_sel_cur, (item_id,))
                     current_data = cursor.fetchone()
                     if current_data:
@@ -249,63 +326,83 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
                         total_investment = (amount * price_buy) + commission
                         update_values[total_investment_text_idx] = format_total_investment_text(total_investment, base_currency)
 
-        needs_usd_recalc = any(f in update_fields for f in ["price_buy = ?", "amount = ?", "commission = ?", "base_currency = ?"])
+        needs_usd_recalc = any(f in update_fields for f in ["price_buy = %s", "amount = %s", "commission = %s", "base_currency = %s"])
         if needs_usd_recalc:
-            sql_sel_old = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", is_pg)
+            sql_sel_old = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = %s")
             cursor.execute(sql_sel_old, (item_id,))
             old_data = cursor.fetchone()
-            update_fields.append("updated_at = ?")
+            update_fields.append("updated_at = %s")
             update_values.append(datetime.now().isoformat() + "Z")
             update_values.append(item_id)
             dyn_sql = f"""
                 UPDATE portfolio_items 
                 SET {', '.join(update_fields)}
-                WHERE id = ?
+                WHERE id = %s
             """
-            sql_upd = _normalize_placeholders(dyn_sql, is_pg)
+            sql_upd = _normalize_placeholders(dyn_sql)
             cursor.execute(sql_upd, update_values)
             conn.commit()
 
-            sql_sel_new = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = ?", is_pg)
+            sql_sel_new = _normalize_placeholders("SELECT amount, price_buy, commission, base_currency FROM portfolio_items WHERE id = %s")
             cursor.execute(sql_sel_new, (item_id,))
             new_data = cursor.fetchone()
             if new_data:
                 amount, price_buy, commission, base_currency = new_data
+                # CRITICAL: Always calculate price_buy_usd - it's mandatory
+                if not price_buy or price_buy <= 0:
+                    raise HTTPException(status_code=400, detail="Invalid price: price_buy must be greater than 0")
+                
                 exchange_rate = 1.0 if base_currency == "USD" else currency_service.get_rate(base_currency)
                 price_buy_usd = price_buy / exchange_rate if base_currency != "USD" else price_buy
                 commission_usd = commission / exchange_rate if base_currency != "USD" else commission
+                
+                # CRITICAL: Validate price_buy_usd is valid (zero tolerance)
+                if not price_buy_usd or price_buy_usd <= 0:
+                    logger.error(f"❌ Invalid price_buy_usd for item {item_id}: {price_buy_usd} (currency={base_currency}, rate={exchange_rate}, price_buy={price_buy})")
+                    raise HTTPException(status_code=400, detail=f"Invalid price: calculated price_buy_usd must be greater than 0 (calculated: {price_buy_usd:.8f})")
+                
+                if commission_usd is None:
+                    commission_usd = 0.0
+                
                 upd_sql2 = '''
                     UPDATE portfolio_items 
-                    SET price_buy_usd = ?, commission_usd = ?, exchange_rate_at_purchase = ?,
-                        current_value = ?, current_value_usd = ?, pnl = ?, pnl_percent = ?, pnl_usd = ?, pnl_percent_usd = ?
-                    WHERE id = ?
+                    SET price_buy_usd = %s, commission_usd = %s, exchange_rate_at_purchase = %s,
+                        current_value = %s, current_value_usd = %s, pnl = %s, pnl_percent = %s, pnl_usd = %s, pnl_percent_usd = %s
+                    WHERE id = %s
                 '''
-                upd_sql2 = _normalize_placeholders(upd_sql2, is_pg)
-                cursor.execute(
-                    upd_sql2,
-                    (
-                        round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate,
-                        round(amount * price_buy, 8), round(amount * price_buy_usd, 8),
-                        0.0, 0.0, 0.0, 0.0, item_id,
-                    ),
-                )
-                conn.commit()
+                upd_sql2 = _normalize_placeholders(upd_sql2)
+                try:
+                    cursor.execute(
+                        upd_sql2,
+                        (
+                            round(price_buy_usd, 8), round(commission_usd, 8), exchange_rate,
+                            round(amount * price_buy, 8), round(amount * price_buy_usd, 8),
+                            0.0, 0.0, 0.0, 0.0, item_id,
+                        ),
+                    )
+                    conn.commit()
+                    logger.info(f"✅ Updated portfolio item {item_id}: price_buy_usd={price_buy_usd:.8f}, currency={base_currency}, rate={exchange_rate}")
+                except Exception as db_error:
+                    conn.rollback()
+                    error_msg = str(db_error)
+                    logger.error(f"❌ Database error updating portfolio item {item_id}: {error_msg} (price_buy_usd={price_buy_usd}, currency={base_currency}, rate={exchange_rate})", exc_info=True)
+                    raise HTTPException(status_code=400, detail=f"Database error: {error_msg}")
 
                 try:
-                    from ..main import fetch_prices_for_symbols  # lazy import to avoid cycles
+                    from ..services.price_tasks import fetch_prices_for_symbols  # lazy import to avoid cycles
                     asyncio.create_task(fetch_prices_for_symbols([row[2] if old_data else ""]))
                 except Exception:
                     pass
         else:
-            update_fields.append("updated_at = ?")
+            update_fields.append("updated_at = %s")
             update_values.append(datetime.now().isoformat() + "Z")
             update_values.append(item_id)
             dyn_sql2 = f"""
                 UPDATE portfolio_items 
                 SET {', '.join(update_fields)}
-                WHERE id = ?
+                WHERE id = %s
             """
-            sql_upd2 = _normalize_placeholders(dyn_sql2, is_pg)
+            sql_upd2 = _normalize_placeholders(dyn_sql2)
             cursor.execute(sql_upd2, update_values)
             conn.commit()
 
@@ -313,7 +410,7 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    sql_sel_final = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = ?", is_pg)
+    sql_sel_final = _normalize_placeholders("SELECT * FROM portfolio_items WHERE id = %s")
     cursor.execute(sql_sel_final, (item_id,))
     row = cursor.fetchone()
     conn.close()
@@ -331,6 +428,7 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
         pnl_usd=row[22] if len(row) > 22 else None,
         pnl_percent_usd=row[23] if len(row) > 23 else None,
         exchange_rate_at_purchase=row[24] if len(row) > 24 else None,
+        comments=row[25] if len(row) > 25 else None,
     )
 
 
@@ -338,8 +436,7 @@ async def update_portfolio_item(item_id: int, item: PortfolioUpdate, current_use
 async def delete_portfolio_item(item_id: int, current_user: dict = Depends(get_current_active_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    is_pg = (getattr(settings, "environment", "development").lower() == "production") or bool(getattr(settings, "database_url", None))
-    sql_del = _normalize_placeholders("DELETE FROM portfolio_items WHERE id = ? AND user_id = ?", is_pg)
+    sql_del = _normalize_placeholders("DELETE FROM portfolio_items WHERE id = %s AND user_id = %s")
     cursor.execute(sql_del, (item_id, current_user["id"]))
     deleted = cursor.rowcount
     conn.commit()

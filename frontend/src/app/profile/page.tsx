@@ -1,5 +1,6 @@
 'use client'
 
+import { logger } from '@/lib/logger'
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/stores/authStore'
@@ -8,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { apiClient } from '@/lib/api'
+import { apiClient } from '../../lib/api'
 
 export default function ProfilePage() {
   const [profileData, setProfileData] = useState({
@@ -73,7 +74,7 @@ export default function ProfilePage() {
 
   // Load backend health to determine DB type dynamically
   useEffect(() => {
-    apiClient.client.get('/health')
+    apiClient.client.get('/api/health')
       .then(resp => {
         if (resp?.data?.database) setDbType(resp.data.database as string)
       })
@@ -393,7 +394,7 @@ export default function ProfilePage() {
           accountInfo: result.account_info
         })
       } catch (error) {
-        console.error('Failed to load Binance status:', error)
+        logger.error('Failed to load Binance status:', error)
       }
     }
     
@@ -413,7 +414,7 @@ export default function ProfilePage() {
           accountInfo: result.account_info
         })
       } catch (error) {
-        console.error('Failed to load Bitfinex status:', error)
+        logger.error('Failed to load Bitfinex status:', error)
       }
     }
     
@@ -434,15 +435,15 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Profile Settings</h1>
-              <p className="mt-2 text-gray-600">Manage your account settings and preferences</p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 break-words">Profile Settings</h1>
+              <p className="mt-2 text-sm sm:text-base text-gray-600 break-words">Manage your account settings and preferences</p>
             </div>
             <Button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/dashboard')}
               variant="outline"
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 w-full sm:w-auto"
             >
               ← Return to Dashboard
             </Button>
@@ -451,10 +452,10 @@ export default function ProfilePage() {
 
         <div className="mb-6">
           <div className="border-b border-gray-200">
-            <nav className="-mb-px flex space-x-8">
+            <nav className="-mb-px flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-2">
               <button
                 onClick={() => setActiveTab('profile')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'profile'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -464,7 +465,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('password')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'password'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -474,7 +475,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('telegram')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'telegram'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -484,7 +485,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('binance')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'binance'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -494,7 +495,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('bitfinex')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'bitfinex'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -504,7 +505,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => setActiveTab('system')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`py-2 px-2 sm:px-4 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                   activeTab === 'system'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -583,7 +584,7 @@ export default function ProfilePage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-6 items-start">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                   <div className="space-y-2">
                     <Label htmlFor="defaultAlertPercentageBelow">Default Alert Percentage (Below)</Label>
                     <div className="flex items-center gap-2">
@@ -878,7 +879,17 @@ export default function ProfilePage() {
                   <p><strong>Step 1 - Create API Key:</strong></p>
                   <ol className="list-decimal list-inside ml-4 space-y-1">
                     <li>Log in to your Binance account</li>
-                    <li>Go to Account → API Management</li>
+                    <li>
+                      Go to{' '}
+                      <a
+                        href="https://www.binance.com/en/my/settings/api-management"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline font-medium"
+                      >
+                        Account → API Management
+                      </a>
+                    </li>
                     <li>Click "Create API"</li>
                     <li>Enter a label (e.g., "Crypto AI Agent")</li>
                     <li>Complete 2FA verification</li>
@@ -1024,7 +1035,17 @@ export default function ProfilePage() {
                   <p><strong>Step 1 - Create API Key:</strong></p>
                   <ol className="list-decimal list-inside ml-4 space-y-1">
                     <li>Log in to your Bitfinex account</li>
-                    <li>Go to Account → API Key Management</li>
+                    <li>
+                      Go to{' '}
+                      <a
+                        href="https://setting.bitfinex.com/api#my-keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline font-medium"
+                      >
+                        Account → API Key Management
+                      </a>
+                    </li>
                     <li>Click "Create New Key"</li>
                     <li>Enter a label (e.g., "Crypto AI Agent")</li>
                     <li>Complete 2FA verification</li>
@@ -1156,7 +1177,7 @@ export default function ProfilePage() {
                   <div className="text-sm text-blue-700 space-y-2">
                     <p>Refresh the cryptocurrency symbols database to ensure you have access to the latest cryptocurrencies for creating price alerts.</p>
                     <p className="text-xs text-blue-600">
-                      <strong>Note:</strong> This will fetch the top 500 cryptocurrencies by market cap from CoinGecko API and update the local database.
+                      <strong>Note:</strong> This will fetch the top 750 cryptocurrencies by market cap from CoinGecko API and update the local database.
                     </p>
                   </div>
                 </div>
@@ -1214,10 +1235,9 @@ export default function ProfilePage() {
                 <div className="border-t pt-4">
                   <h4 className="text-sm font-medium text-gray-900 mb-2">System Information</h4>
                   <div className="text-sm text-gray-600 space-y-1">
-                    <p><strong>Database:</strong> {dbType ? (dbType === 'postgres' ? 'PostgreSQL' : 'SQLite') : '...'}</p>
                     <p><strong>API Source:</strong> CoinGecko API</p>
                     <p><strong>Update Frequency:</strong> Manual (on-demand)</p>
-                    <p><strong>Symbols Limit:</strong> 500 cryptocurrencies</p>
+                    <p><strong>Symbols Limit:</strong> 750 cryptocurrencies</p>
                   </div>
                 </div>
               </div>

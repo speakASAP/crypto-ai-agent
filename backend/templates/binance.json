@@ -1,0 +1,25 @@
+{
+  "exchange": "binance",
+  "name": "Binance",
+  "required_fields": ["User_ID", "UTC_Time", "Account", "Operation"],
+  "optional_fields": ["Coin", "Change", "Remark"],
+  "column_mapping": {
+    "symbol": ["Coin", "Asset", "Currency"],
+    "type": ["Operation", "Type", "Side"],
+    "quantity": ["Change", "Amount", "Quantity"],
+    "price": ["Price", "Rate", "Unit Price"],
+    "value": ["Total", "Value", "Subtotal"],
+    "fees": ["Fee", "Fees", "Commission"],
+    "date": ["UTC_Time", "Date", "Timestamp"]
+  },
+  "date_formats": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d"],
+  "currency_mapping": {
+    "default": "USD",
+    "patterns": {
+      "USD": ["USD", "$", "USDT"],
+      "EUR": ["EUR", "€"],
+      "CZK": ["CZK", "Kč"]
+    }
+  }
+}
+

@@ -216,6 +216,7 @@ models/
 !frontend/package-lock.json
 !frontend/jsconfig.json
 !frontend/tsconfig.json
+!backend/templates/*.json
 *.xlsx
 *.xls
 datasets/
@@ -278,6 +279,9 @@ local_settings.py
 *.tiff
 *.svg
 *.ico
+# But allow frontend public assets
+!frontend/public/**
+!frontend/public/**/*
 
 # Documentation build
 docs/_build/
@@ -300,3 +304,6 @@ prod/
 # Staging files
 staging/
 stage/
+
+!frontend/src/lib/
+!frontend/src/lib/.ts
