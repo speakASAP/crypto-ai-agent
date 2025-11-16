@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { devtools, persist, createJSONStorage } from 'zustand/middleware'
-import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PortfolioSummary, Currency } from '@/types'
-import { User } from '@/types/auth'
-import { apiClient } from '@/lib/api'
-import { refreshCryptoPrices } from '@/lib/refreshUtils'
+import { PortfolioItem, PortfolioCreate, PortfolioUpdate, PortfolioSummary, Currency } from '../types'
+import { User } from '../types/auth'
+import { apiClient } from '../lib/api'
+import { refreshCryptoPrices } from '../lib/refreshUtils'
+import { logger } from '../lib/logger'
 
 type ViewMode = 'cards' | 'table'
 type SortBy = 'symbol' | 'investment' | 'platform' | 'pnl' | 'pnl_percent' | 'current_value'
@@ -90,7 +91,7 @@ export const usePortfolioStore = create<PortfolioState>()(
             await get().fetchPortfolio()
             await get().fetchSummary()
           } catch (refreshError) {
-            console.warn('Price refresh failed, but portfolio item was created:', refreshError)
+            logger.warn('Price refresh failed, but portfolio item was created:', refreshError)
             // Still refresh portfolio and summary even if price refresh fails
             await get().fetchPortfolio()
             await get().fetchSummary()
@@ -144,7 +145,7 @@ export const usePortfolioStore = create<PortfolioState>()(
           const summary = await apiClient.getPortfolioSummary(selectedCurrency)
           set({ summary })
         } catch (error: any) {
-          console.error('Failed to fetch portfolio summary:', error)
+          logger.error('Failed to fetch portfolio summary:', error)
         }
       },
 
@@ -155,7 +156,7 @@ export const usePortfolioStore = create<PortfolioState>()(
         try {
           await apiClient.updateProfile({ preferred_currency: currency })
         } catch (error) {
-          console.error('Failed to save currency preference:', error)
+          logger.error('Failed to save currency preference:', error)
         }
         
         // Refresh data with new currency
@@ -184,13 +185,44 @@ export const usePortfolioStore = create<PortfolioState>()(
           if (item.symbol === symbol) {
             // CRITICAL: Always use price_buy_usd for calculations, never use price_buy
             // because price_buy may be in a different currency after conversion
-            if (!item.price_buy_usd) {
-              console.warn(`Item ${item.symbol} missing price_buy_usd, skipping WebSocket update`)
+            let priceBuyUsd = item.price_buy_usd
+            let commissionUsd = item.commission_usd
+            
+            // Calculate price_buy_usd if missing (fallback for legacy items)
+            if (!priceBuyUsd && item.price_buy && item.base_currency) {
+              if (item.base_currency === 'USD') {
+                priceBuyUsd = item.price_buy
+              } else if (exchangeRates && exchangeRates[item.base_currency]) {
+                // Convert from base currency to USD using exchange rate
+                const rate = exchangeRates[item.base_currency]
+                priceBuyUsd = item.price_buy / rate
+                logger.info(`Calculated price_buy_usd for ${item.symbol}: ${item.price_buy} ${item.base_currency} / ${rate} = ${priceBuyUsd}`)
+              } else {
+                logger.warn(`Item ${item.symbol} missing price_buy_usd and cannot calculate (base_currency: ${item.base_currency}, exchangeRates available: ${!!exchangeRates})`)
+                return item
+              }
+            }
+            
+            if (!priceBuyUsd) {
+              logger.warn(`Item ${item.symbol} missing price_buy_usd, skipping WebSocket update`)
               return item
             }
             
-            const priceBuyUsd = item.price_buy_usd
-            const commissionUsd = item.commission_usd || 0
+            // Calculate commission_usd if missing
+            if (commissionUsd === null || commissionUsd === undefined) {
+              if (item.commission) {
+                if (item.base_currency === 'USD') {
+                  commissionUsd = item.commission
+                } else if (exchangeRates && exchangeRates[item.base_currency]) {
+                  const rate = exchangeRates[item.base_currency]
+                  commissionUsd = item.commission / rate
+                } else {
+                  commissionUsd = 0
+                }
+              } else {
+                commissionUsd = 0
+              }
+            }
             
             // Calculate USD values
             const currentValueUsd = item.amount * usdPrice
@@ -317,7 +349,7 @@ export const usePortfolioStore = create<PortfolioState>()(
               portfolio_filters: state.filters
             })
           } catch (error) {
-            console.error('Failed to persist portfolio preferences:', error)
+            logger.error('Failed to persist portfolio preferences:', error)
           }
         }, 500)
         

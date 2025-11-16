@@ -1,13 +1,13 @@
 """
 Service for managing user Bitfinex API credentials
 """
-import logging
 from typing import Optional, Dict, Any
 from ..dependencies.auth import get_db_connection
 from ..utils.encryption import credential_encryption
 from .bitfinex_import_service import BitfinexImportService
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.bitfinex_credential_service")
 
 
 class BitfinexCredentialService:
@@ -16,11 +16,6 @@ class BitfinexCredentialService:
     def __init__(self):
         self.encryption = credential_encryption
 
-    def _is_postgres(self, conn) -> bool:
-        return conn.__class__.__module__.startswith("psycopg")
-
-    def _normalize(self, sql: str, is_pg: bool) -> str:
-        return sql.replace('?', '%s') if is_pg else sql
     
     def save_user_credentials(self, user_id: int, api_key: str, api_secret: str) -> bool:
         """
@@ -41,27 +36,16 @@ class BitfinexCredentialService:
             # Encrypt credentials
             encrypted_credentials = self.encryption.encrypt_bitfinex_credentials(api_key, api_secret)
             
-            is_pg = self._is_postgres(conn)
-            if is_pg:
-                # Perform update-then-insert to avoid needing ON CONFLICT with specific constraint
-                update_sql = self._normalize(
-                    "UPDATE user_api_credentials SET encrypted_credentials = ?, updated_at = NOW() WHERE user_id = ? AND exchange = 'bitfinex'",
-                    True
+            # Perform update-then-insert to avoid needing ON CONFLICT with specific constraint
+            update_sql = (
+                "UPDATE user_api_credentials SET encrypted_credentials = %s, updated_at = NOW() WHERE user_id = %s AND exchange = 'bitfinex'"
+            )
+            cursor.execute(update_sql, (encrypted_credentials, user_id))
+            if cursor.rowcount == 0:
+                insert_sql = (
+                    "INSERT INTO user_api_credentials (user_id, exchange, encrypted_credentials, created_at, updated_at) VALUES (%s, 'bitfinex', %s, NOW(), NOW())"
                 )
-                cursor.execute(update_sql, (encrypted_credentials, user_id))
-                if cursor.rowcount == 0:
-                    insert_sql = self._normalize(
-                        "INSERT INTO user_api_credentials (user_id, exchange, encrypted_credentials, created_at, updated_at) VALUES (?, 'bitfinex', ?, NOW(), NOW())",
-                        True
-                    )
-                    cursor.execute(insert_sql, (user_id, encrypted_credentials))
-            else:
-                # SQLite supports INSERT OR REPLACE
-                cursor.execute('''
-                    INSERT OR REPLACE INTO user_api_credentials 
-                    (user_id, exchange, encrypted_credentials, created_at, updated_at)
-                    VALUES (?, ?, ?, datetime('now'), datetime('now'))
-                ''', (user_id, 'bitfinex', encrypted_credentials))
+                cursor.execute(insert_sql, (user_id, encrypted_credentials))
             
             conn.commit()
             conn.close()
@@ -89,10 +73,8 @@ class BitfinexCredentialService:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            is_pg = self._is_postgres(conn)
-            select_sql = self._normalize(
-                "SELECT encrypted_credentials FROM user_api_credentials WHERE user_id = ? AND exchange = 'bitfinex'",
-                is_pg
+            select_sql = (
+                "SELECT encrypted_credentials FROM user_api_credentials WHERE user_id = %s AND exchange = 'bitfinex'"
             )
             cursor.execute(select_sql, (user_id,))
             
@@ -130,7 +112,7 @@ class BitfinexCredentialService:
             
             cursor.execute('''
                 DELETE FROM user_api_credentials 
-                WHERE user_id = ? AND exchange = 'bitfinex'
+                WHERE user_id = %s AND exchange = 'bitfinex'
             ''', (user_id,))
             
             conn.commit()
@@ -158,10 +140,8 @@ class BitfinexCredentialService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            is_pg = self._is_postgres(conn)
-            sql = self._normalize(
-                "SELECT COUNT(*) FROM user_api_credentials WHERE user_id = ? AND exchange = 'bitfinex'",
-                is_pg,
+            sql = (
+                "SELECT COUNT(*) FROM user_api_credentials WHERE user_id = %s AND exchange = 'bitfinex'"
             )
             cursor.execute(sql, (user_id,))
             count = cursor.fetchone()[0]

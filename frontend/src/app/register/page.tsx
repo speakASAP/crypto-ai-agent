@@ -59,7 +59,7 @@ export default function RegisterPage() {
         password: formData.password,
         full_name: formData.fullName || undefined
       })
-      router.push('/')
+      router.push('/dashboard')
     } catch (error: any) {
       setError(error.message || 'Registration failed')
     }

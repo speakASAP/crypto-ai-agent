@@ -1,0 +1,59 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: crypto-ai-backend-blue
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:${API_PORT:-8100}:${API_PORT:-8100}"
+    # Note: Depends on shared infrastructure (postgres, redis) managed separately
+    # Infrastructure must be running before starting blue/green deployments
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+      - API_PORT=${API_PORT:-8100}
+      - REDIS_URL=${REDIS_URL:-redis://db-server-redis:6379/0}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8100}/docs"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - nginx-network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        DEBUG: ${DEBUG:-false}
+    container_name: crypto-ai-frontend-blue
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3100}:${FRONTEND_PORT:-3100}"
+    depends_on:
+      - backend
+    environment:
+      - PORT=${FRONTEND_PORT:-3100}
+      - NEXT_PUBLIC_DEBUG=${DEBUG:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-L", "http://localhost:${FRONTEND_PORT:-3100}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - nginx-network
+
+  # Note: postgres and redis are now managed by docker-compose.infrastructure.yml
+  # They run as singleton services, shared by both blue and green deployments.
+  # This prevents data corruption and ensures zero data loss.
+  # To start infrastructure: docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastructure up -d
+
+networks:
+  nginx-network:
+    external: true
+

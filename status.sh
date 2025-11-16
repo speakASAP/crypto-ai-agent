@@ -195,13 +195,12 @@ else
     echo
 
     # Check Database
-    echo "Database (SQLite):"
-    if [ -f "$DATA_DIR/crypto_portfolio.db" ]; then
-        print_success "✅ Database file exists"
-        db_size=$(du -h $DATA_DIR/crypto_portfolio.db | cut -f1)
-        echo "  Size: $db_size"
+    echo "Database (PostgreSQL):"
+    if [ -n "$DATABASE_URL" ]; then
+        print_success "✅ DATABASE_URL is configured"
+        echo "  Connection: PostgreSQL"
     else
-        print_warning "⚠️  Database file not found"
+        print_warning "⚠️  DATABASE_URL not configured"
     fi
 
     echo

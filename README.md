@@ -1,8 +1,8 @@
-# 🚀 Crypto AI Agent v2.0 - Next.js + FastAPI + SQLite
+# 🚀 Crypto AI Agent v2.0 - Next.js + FastAPI + PostgreSQL
 
 ## Project Overview
 
-This is the next-generation version of the Crypto AI Agent, successfully migrated from Streamlit to a modern Next.js + FastAPI + SQLite architecture for optimal performance and simplicity.
+This is the next-generation version of the Crypto AI Agent, successfully migrated from Streamlit to a modern Next.js + FastAPI + PostgreSQL architecture for optimal performance and scalability.
 
 ## Architecture
 
@@ -17,17 +17,23 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 ### Backend: FastAPI
 
 - **Framework**: FastAPI with Python 3.12+
-- **Database**: SQLite (file-based, no server required)
+- **Database**: PostgreSQL (production-grade, scalable)
 - **WebSocket**: FastAPI WebSocket support
 - **Real-time**: Live price updates and alerts
-- **Deployment**: Local development or simple server
+- **Deployment**: Local development or production server
 
-### Database: SQLite
+### Database: PostgreSQL
 
-- **Primary DB**: SQLite (built into Python)
-- **File Storage**: `data/crypto_portfolio.db`
-- **Backup**: Simple file copy
-- **Zero Configuration**: No database server needed
+- **Development**: PostgreSQL (local or remote connection)
+  - Connection: Configured via `DATABASE_URL` environment variable
+  - Example: `postgresql://user:password@localhost:5432/crypto_ai_agent`
+  - Setup: Use Docker Compose or local PostgreSQL installation
+- **Production**: PostgreSQL (shared database server)
+  - Database Server: `db-server-postgres:5432`
+  - Database Name: `crypto_ai_agent`
+  - Infrastructure: Managed by centralized `database-server` microservice
+  - Shared by Blue/Green: Both environments use the same shared database instance
+  - Persistent Storage: Data persists across deployments
 
 ## Main Features
 
@@ -42,7 +48,8 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 ### 📊 Portfolio Management
 
 - **Multi-Currency Support**: USD, EUR, CZK, GBP, JPY
-- **Real-time Updates**: Live price tracking via WebSocket
+- **Centralized Price Updates**: Prices are updated every 5 minutes for all cryptocurrencies in a single API call
+- **Real-time Updates**: Live price tracking via WebSocket broadcasts
 - **P&L Tracking**: Automatic profit/loss calculations
 - **Portfolio Summary**: Total value and performance metrics
 - **Binance Import**: Automatically import your Binance portfolio
@@ -57,6 +64,17 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 - **Robust Recovery System**: Historical price checking to catch missed alerts during downtime
 - **Database Reliability**: WAL mode and connection pooling for high availability
 - **Missed Alert Detection**: Automatic recovery on service startup with detailed notifications
+
+### 🤖 AI Advisor
+
+- **Price Predictions**: AI-powered price predictions for 24 hours, 1 week, 1 month, and 1 year
+- **Centralized Predictions**: Predictions are generated once per day per cryptocurrency and shared across all users
+- **Confidence Scores**: Each prediction includes a confidence percentage based on data quality
+- **News Analysis**: Automatic analysis of cryptocurrency news with sentiment scoring
+- **Performance Tracking**: Historical accuracy tracking to compare prediction performance
+- **Model Comparison**: Track which AI models perform best for different cryptocurrencies
+- **Interactive Charts**: Mini price charts on portfolio items, clickable for detailed 1-year view
+- **Detailed Symbol Pages**: Comprehensive analysis pages with full charts, predictions, and news
 
 ## Quick Start
 
@@ -110,6 +128,7 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
    - Navigate to <http://localhost:3100/register>
    - Create your account
    - Login and start managing your portfolio
+   - Configure AI Advisor (see [AI Advisor Documentation](docs/AI_ADVISOR.md))
 
 ## 🚀 Binance Portfolio Import
 
@@ -271,6 +290,18 @@ The system includes the following user-related tables:
 - `user_api_credentials` - Encrypted storage of user API credentials
 - All existing tables now include `user_id` foreign keys
 
+**Centralized Data Tables:**
+
+- `crypto_prices` - Centralized cryptocurrency price storage (updated every 5 minutes)
+  - Stores USD prices for all cryptocurrencies in user portfolios
+  - Single source of truth for price data
+  - Updated via background task, read by all users
+  
+- `ai_predictions` - Global AI predictions (updated once per day per symbol)
+  - `user_id` is nullable for global predictions (shared across all users)
+  - Predictions generated once per day and reused by all users
+  - Reduces AI API calls and rate limit issues
+
 ### 🧪 Testing User Management
 
 1. **Test Registration:**
@@ -413,6 +444,14 @@ crypto-ai-agent/
 - **Database Queries**: < 50ms average (vs 200+ ms)
 - **Cache Hit Rate**: > 90% (vs 0%)
 
+### Centralized Price and Prediction System
+
+- **Price Updates**: Single API call every 5 minutes for all cryptocurrencies (vs per-user calls)
+- **AI Predictions**: Single generation per day per symbol shared across all users (vs per-user generation)
+- **API Efficiency**: Reduced external API calls by 90%+ for multi-user scenarios
+- **Rate Limit Protection**: No API rate limits even with hundreds of users
+- **Database-First**: All user requests read from centralized database tables (no external API calls)
+
 ### Scalability
 
 - **Concurrent Users**: 100+ users (vs 10)
@@ -436,6 +475,313 @@ docker compose up -d --build
 # API Docs: http://localhost:8100/docs
 ```
 
+### Blue/Green Deployment (Production Restart)
+
+The production environment uses blue/green deployment for zero-downtime restarts and updates.
+
+#### Deployment Prerequisites
+
+- Nginx microservice must be running
+- Service must be registered in `/nginx-microservice/service-registry/crypto-ai-agent.json`
+- Shared database server must be running (see [Database Management](#database-management))
+
+#### Restarting the Service
+
+**From the nginx-microservice directory:**
+
+```bash
+ssh statex
+cd nginx-microservice
+./scripts/blue-green/deploy.sh crypto-ai-agent
+```
+
+This will:
+
+1. **Check Infrastructure**: Verify database and Redis are running
+2. **Prepare New Environment**: Build and start the inactive color (blue or green)
+3. **Health Checks**: Verify the new environment is healthy
+4. **Switch Traffic**: Instantly switch traffic to the new environment (< 2 seconds downtime)
+5. **Monitor**: Monitor health for 5 minutes with automatic rollback on failure
+6. **Cleanup**: Remove old environment if deployment is successful
+
+#### Deployment Phases
+
+- **Phase 0**: Infrastructure verification (database/Redis availability)
+- **Phase 1**: Build and start new containers, verify health
+- **Phase 2**: Switch nginx traffic to new environment
+- **Phase 3**: Monitor for 5 minutes (health checks every 30 seconds)
+- **Phase 4**: Cleanup old environment if successful
+
+#### Manual Rollback
+
+If you need to rollback to the previous deployment:
+
+```bash
+cd nginx-microservice
+./scripts/blue-green/rollback.sh crypto-ai-agent
+```
+
+#### Check Deployment Status
+
+```bash
+cat nginx-microservice/state/crypto-ai-agent.json | jq .
+```
+
+**Status Fields:**
+
+- `active_color`: Currently active environment (blue or green)
+- `blue.status`: Status of blue containers
+- `green.status`: Status of green containers
+- `last_deployment`: Last deployment timestamp and success status
+
+#### Database Configuration
+
+**IMPORTANT**: Both blue and green environments connect to the **same shared production database** (`db-server-postgres`) to ensure:
+
+- ✅ Zero data loss during deployments
+- ✅ Consistent data across environments
+- ✅ Customer data always available
+
+Configuration in `docker-compose.blue.yml` and `docker-compose.green.yml`:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://db-server-redis:6379/0
+```
+
+Shared database server must be running:
+
+```bash
+cd database-server
+./scripts/start.sh
+```
+
+#### Verification After Deployment
+
+1. **Test Login**:
+
+   ```bash
+   curl -X POST https://crypto-ai-agent.statex.cz/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"your-email@example.com","password":"your-password"}'
+   ```
+
+2. **Check Health**:
+
+   ```bash
+   curl https://crypto-ai-agent.statex.cz/api/health
+   ```
+
+3. **Verify Portfolio**: Login and confirm portfolio items are accessible
+
+#### Deployment Troubleshooting
+
+##### Issue: "Infrastructure not found"
+
+- Ensure database-server is running: `cd database-server && ./scripts/status.sh`
+- Start database-server if needed: `cd database-server && ./scripts/start.sh`
+- Verify containers are healthy: Check `db-server-postgres` and `db-server-redis` are running
+
+##### Issue: "Health check failed"
+
+- Deployment automatically rolls back on health check failure
+- Check logs: `docker logs crypto-ai-backend-green`
+- Check deployment logs: `tail -f nginx-microservice/logs/blue-green/deploy.log`
+
+##### Issue: "Login fails after deployment"
+
+- Verify database-server is running: `cd database-server && ./scripts/status.sh`
+- Verify database connection: Check `DATABASE_URL` in container
+- Verify database has customer data: Check user count in database
+- Ensure backend connects to `db-server-postgres` (shared database with customer data)
+- Start database-server if needed: `cd database-server && ./scripts/start.sh`
+
+For detailed troubleshooting, see [Blue/Green Deployment Guide](docs/BLUE_GREEN_DEPLOYMENT_GUIDE.md).
+
+### Database Management
+
+The production environment uses a **shared database server** (`database-server`) that provides centralized PostgreSQL and Redis infrastructure. This ensures data persistence, zero-downtime deployments, and centralized management across all services.
+
+#### Database Architecture
+
+**Production Setup:**
+
+- **PostgreSQL**: `db-server-postgres:5432` (shared database server)
+- **Redis**: `db-server-redis:6379` (shared cache)
+- **Database Name**: `crypto_ai_agent`
+- **Infrastructure**: Managed by the centralized `database-server` microservice
+- **Connection**: Both blue and green environments use the same shared database instance
+
+#### Database Connection
+
+Both `docker-compose.blue.yml` and `docker-compose.green.yml` are configured to connect to the shared database server:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://db-server-redis:6379/0
+```
+
+**Important Points:**
+
+- ✅ Both environments use the **same shared database** (zero data loss during deployments)
+- ✅ Database hostname is `db-server-postgres` (Docker network hostname)
+- ✅ Infrastructure is managed centrally by `database-server` microservice
+- ✅ Database is **never stopped** during blue/green deployments
+- ✅ Customer data is **always available** in both blue and green environments
+
+#### Infrastructure Management
+
+The shared database server is managed separately from crypto-ai-agent. To manage it:
+
+**Check Database Server Status:**
+
+```bash
+cd database-server
+./scripts/status.sh
+```
+
+**Start Database Server** (if not running):
+
+```bash
+cd database-server
+./scripts/start.sh
+```
+
+**Stop Database Server** (⚠️ Use with caution - affects all services using it):
+
+```bash
+cd database-server
+./scripts/stop.sh
+```
+
+**View Database Server Logs:**
+
+```bash
+cd database-server
+docker compose logs -f
+```
+
+#### Database Backups
+
+**Manual Backup** (using database-server scripts):
+
+```bash
+cd database-server
+./scripts/backup-database.sh crypto-ai-agent
+```
+
+**Backup All Databases:**
+
+```bash
+cd database-server
+./scripts/backup-all-databases.sh
+```
+
+**Automated Backups:**
+
+```bash
+cd database-server
+./scripts/setup-backup-cron.sh
+```
+
+This sets up daily backups at 2:00 AM.
+
+**Manual Backup** (using docker exec directly):
+
+```bash
+docker exec db-server-postgres pg_dump -U crypto crypto_ai_agent > backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
+**Restore from Backup:**
+
+```bash
+cat backup_file.sql | docker exec -i db-server-postgres psql -U crypto crypto_ai_agent
+```
+
+#### Verify Database Connection
+
+**From Backend Container:**
+
+```bash
+docker exec crypto-ai-backend-green env | grep DATABASE_URL
+```
+
+**Test Database Connection:**
+
+```bash
+docker exec crypto-ai-backend-green python -c "
+import os, psycopg
+url = os.getenv('DATABASE_URL', '').replace('+psycopg', '')
+conn = psycopg.connect(url)
+cur = conn.cursor()
+cur.execute('SELECT COUNT(*) FROM users')
+print('Users:', cur.fetchone()[0])
+cur.execute('SELECT COUNT(*) FROM portfolio_items')
+print('Portfolio Items:', cur.fetchone()[0])
+"
+```
+
+**List All Databases:**
+
+```bash
+cd database-server
+./scripts/list-databases.sh
+```
+
+Or directly:
+
+```bash
+docker exec db-server-postgres psql -U crypto -c "\l"
+```
+
+#### Database Safety Features
+
+**Never Create Tables if Database Has Data:**
+
+- The application verifies database connection before creating tables
+- If database already has customer data, table creation is **skipped**
+- This protects thousands of customer accounts from accidental deletion
+
+**Automatic Retry Logic:**
+
+- Database connections use exponential backoff retry logic
+- Startup: 5 retries with 2s initial delay (max 30s)
+- Runtime: 3 retries with 0.5s initial delay (max 2s)
+- Health checks verify database connectivity before deployment
+
+**Connection Resilience:**
+
+- All database operations use retry logic
+- Transient connection failures are automatically retried
+- Health endpoints verify database connectivity and data presence
+
+#### Database Schema
+
+The database includes the following tables:
+
+- `users` - User accounts and profiles
+- `portfolio_items` - Cryptocurrency portfolio holdings
+- `price_alerts` - Price alert configurations
+- `alert_history` - Alert trigger history
+- `symbols` - Supported cryptocurrency symbols
+- `user_api_credentials` - Encrypted user API credentials
+- `password_reset_tokens` - Password reset tokens
+- And other supporting tables
+
+#### Database Migration Notes
+
+- Database uses shared infrastructure (`db-server-postgres`) from `database-server` microservice
+- Infrastructure is managed centrally by the `database-server` service
+- All customer data is stored in the shared production database
+- **Never migrate from local to production** - production is source of truth
+- Blue/green deployments share the same database instance
+- Data persistence is guaranteed across deployments
+- Database server must be running before blue/green deployments
+
+For more details, see [Database Migration Guide](docs/DATABASE_MIGRATION_COMPLETE.md) and [Production Database Setup](docs/PRODUCTION_DATABASE_SETUP.md).
+
 ## Environment Variables
 
 Use `.env` (not committed) and refer to `.env.example` for keys. Important:
@@ -445,6 +791,9 @@ Use `.env` (not committed) and refer to `.env.example` for keys. Important:
 - `BINANCE_API_URL`: Binance API endpoint
 - `JWT_SECRET`: JWT signing secret
 - `CORS_ORIGINS`: Allowed CORS origins
+- `PRICE_UPDATE_INTERVAL_SECONDS`: Price update interval in seconds (default: 300 = 5 minutes)
+- `AI_PREDICTION_INTERVAL_HOURS`: AI prediction generation interval in hours (default: 24 = once per day)
+- `AI_PREDICTION_BATCH_SIZE`: Number of symbols to process in batch for AI predictions (default: 1)
 
 ## Telegram Notifications Setup
 

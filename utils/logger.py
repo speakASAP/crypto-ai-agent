@@ -13,6 +13,16 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import external logging handler
+try:
+    from .logging_handler import ExternalLoggingHandler, SERVICE_NAME
+except ImportError:
+    try:
+        from utils.logging_handler import ExternalLoggingHandler, SERVICE_NAME
+    except ImportError:
+        ExternalLoggingHandler = None
+        SERVICE_NAME = "crypto-ai-agent"
+
 class CentralLogger:
     """
     Centralized logging system for the entire crypto AI agent project.
@@ -35,8 +45,16 @@ class CentralLogger:
     
     def _setup_logging(self):
         """Setup comprehensive logging configuration"""
+        # Check DEBUG flag from environment
+        debug = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+        
         # Get configuration from environment variables with proper defaults
-        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        # Use DEBUG level if DEBUG=true, otherwise use LOG_LEVEL or default to INFO
+        if debug:
+            log_level = "DEBUG"
+        else:
+            log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        
         log_file = os.getenv("LOG_FILE", "logs/crypto_agent.log")
         log_format = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         
@@ -45,27 +63,44 @@ class CentralLogger:
         if log_dir and not os.path.exists(log_dir):
             os.makedirs(log_dir, exist_ok=True)
         
+        # Create handlers - always log to file, only to console if DEBUG is enabled
+        handlers = [logging.FileHandler(log_file, encoding='utf-8')]
+        
+        # Add external logging handler if URL is configured
+        logging_service_url = os.getenv("LOGGING_SERVICE_URL")
+        if logging_service_url and ExternalLoggingHandler:
+            external_handler = ExternalLoggingHandler(service_name=SERVICE_NAME, service_url=logging_service_url)
+            external_handler.setLevel(getattr(logging, log_level))
+            handlers.append(external_handler)
+        
+        # Only add console handler if DEBUG is enabled
+        if debug:
+            handlers.append(logging.StreamHandler())
+        
         # Configure logging
         logging.basicConfig(
             level=getattr(logging, log_level),
             format=log_format,
-            handlers=[
-                logging.FileHandler(log_file, encoding='utf-8'),
-                logging.StreamHandler()  # Also log to console
-            ],
+            handlers=handlers,
             force=True  # Override any existing configuration
         )
         
         # Create logger instance
         self._logger = logging.getLogger("crypto_ai_agent")
         
-        # Log startup information
+        # Log startup information (only to file, or console if DEBUG)
         self._logger.info("=" * 80)
         self._logger.info("CENTRAL LOGGING SYSTEM INITIALIZED")
         self._logger.info("=" * 80)
+        self._logger.info(f"Debug Mode: {debug}")
         self._logger.info(f"Log Level: {log_level}")
         self._logger.info(f"Log File: {log_file}")
+        self._logger.info(f"Console Output: {debug}")
         self._logger.info(f"Log Format: {log_format}")
+        if logging_service_url:
+            self._logger.info(f"External Logging Service: {logging_service_url}")
+        else:
+            self._logger.info("External Logging Service: Not configured (local logging only)")
         self._logger.info(f"Initialization Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     @property
@@ -224,3 +259,4 @@ def log_performance_timing(operation_name: str, module_name: str):
                 raise
         return wrapper
     return decorator
+    

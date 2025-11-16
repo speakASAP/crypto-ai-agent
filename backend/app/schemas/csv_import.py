@@ -10,6 +10,10 @@ class CSVUploadResponse(BaseModel):
     total_rows: int = 0
     aggregated_items: List[Dict[str, Any]] = []
     errors: List[str] = []
+    # Portfolio impact analysis
+    items_to_add: List[Dict[str, Any]] = []
+    items_to_update: List[Dict[str, Any]] = []
+    items_to_delete: List[Dict[str, Any]] = []
 
 
 class CSVExecuteRequest(BaseModel):

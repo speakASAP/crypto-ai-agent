@@ -1,22 +1,21 @@
-import aiohttp
-import asyncio
 import json
-import logging
-import ssl
 import hmac
 import hashlib
 import time
 import requests
-import warnings
 import urllib3
-from typing import Dict, List, Optional
+import csv
+import os
+from typing import Dict, List, Tuple
 from datetime import datetime
 from ..services.currency_service import currency_service
+from ..services.multi_exchange_price_service import MultiExchangePriceService
+from ..utils.logger import get_logger
 
 # Suppress SSL warnings for Bitfinex API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.bitfinex_import_service")
 
 
 class BitfinexImportService:
@@ -24,6 +23,9 @@ class BitfinexImportService:
         self.api_url = "https://api.bitfinex.com"
         self.api_key = api_key
         self.api_secret = api_secret
+        self.price_service = MultiExchangePriceService()
+        self._btc_price_cache = None
+        self._eth_price_cache = None
         
         # Validate credentials
         if not self.api_key or not self.api_secret:
@@ -69,15 +71,11 @@ class BitfinexImportService:
             }
             
             # Debug logging
-            print(f"[DEBUG] Bitfinex request - Nonce: {nonce}, Path: {path}")
-            print(f"[DEBUG] Signature Payload: {signature_payload}")
-            print(f"[DEBUG] Raw Body: {raw_body}")
-            print(f"[DEBUG] API Key: {self.api_key}")
-            print(f"[DEBUG] Signature: {signature[:50]}...")
-            logger.info(f"Bitfinex request - Nonce: {nonce}, Path: {path}")
-            logger.info(f"Signature Payload: {signature_payload}")
-            logger.info(f"Raw Body: {raw_body}")
-            logger.info(f"Signature: {signature[:20]}...")
+            logger.debug(f"Bitfinex request - Nonce: {nonce}, Path: {path}")
+            logger.debug(f"Signature Payload: {signature_payload}")
+            logger.debug(f"Raw Body: {raw_body}")
+            logger.debug(f"API Key: {self.api_key[:20]}...")
+            logger.debug(f"Signature: {signature[:50]}...")
             
             url = f"{self.api_url}{path}"
             
@@ -182,6 +180,24 @@ class BitfinexImportService:
             logger.error(f"❌ Error getting Bitfinex wallets: {e}")
             return []
 
+    async def get_all_trades(self) -> List[Dict]:
+        """Try to get all trades at once (if endpoint supports it)"""
+        try:
+            logger.info("Attempting to fetch all trades at once")
+            # Try the endpoint without symbol parameter
+            result = self._make_authenticated_request("/v2/auth/r/trades/hist")
+            
+            if isinstance(result, list):
+                logger.info(f"✅ Retrieved {len(result)} total trades from all symbols")
+                return result
+            else:
+                logger.warning("Unexpected response format for all trades")
+                return []
+        except Exception as e:
+            # This endpoint might not exist, which is fine
+            logger.debug(f"All-trades endpoint not available (expected): {e}")
+            return []
+
     async def get_trades(self, symbol: str, limit: int = 250) -> List[Dict]:
         """Get trading history for a specific symbol"""
         try:
@@ -196,99 +212,459 @@ class BitfinexImportService:
             logger.warning(f"⚠️ Error getting trade history for {symbol}: {e}")
             return []
 
-    async def calculate_portfolio_from_wallets(self, wallets: List[Dict]) -> List[Dict]:
-        """Calculate portfolio items from Bitfinex wallets"""
+    def _normalize_pair(self, pair: str) -> str:
+        """Normalize trading pair format for matching (e.g., 'BTCUSD', 'tBTCUSD' -> 'tBTCUSD')"""
+        if not pair:
+            return pair
+        # Remove 't' prefix if present, then add it back for consistency
+        pair_clean = pair[1:] if pair.startswith('t') else pair
+        return f"t{pair_clean}"
+
+    def _extract_quote_currency(self, pair: str) -> str:
+        """Extract quote currency from trading pair (e.g., 'tBTCUSD' -> 'USD')"""
+        # Remove 't' prefix if present
+        if pair.startswith('t'):
+            pair = pair[1:]
+        
+        # Common quote currencies (ordered by priority/commonness - UST is critical for Bitfinex)
+        quote_currencies = ['USD', 'USDT', 'UST', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'BNB', 'USDC', 'DAI']
+        
+        for quote in quote_currencies:
+            if pair.endswith(quote):
+                return quote
+        
+        # Fallback: try to detect by length (most pairs are BASE+QUOTE, 3+3 chars)
+        if len(pair) >= 6:
+            # Try common patterns
+            for quote in quote_currencies:
+                if quote in pair[-len(quote):]:
+                    return quote
+        
+        # Default fallback
+        return 'USD'
+
+    async def _get_crypto_price_usd(self, symbol: str) -> float:
+        """Get current USD price for a crypto symbol (with caching)"""
+        # Use cache if available
+        if symbol == 'BTC' and self._btc_price_cache:
+            return self._btc_price_cache
+        if symbol == 'ETH' and self._eth_price_cache:
+            return self._eth_price_cache
+        
+        try:
+            prices = await self.price_service.get_current_prices([symbol])
+            if symbol in prices:
+                price = prices[symbol]
+                # Cache the price
+                if symbol == 'BTC':
+                    self._btc_price_cache = price
+                elif symbol == 'ETH':
+                    self._eth_price_cache = price
+                return price
+        except Exception as e:
+            logger.debug(f"Could not fetch {symbol} price: {e}")
+        
+        # Fallback prices if fetch fails
+        fallback_prices = {
+            'BTC': 50000.0,
+            'ETH': 3000.0
+        }
+        return fallback_prices.get(symbol, 1.0)
+
+    def _convert_price_to_usd(self, price: float, quote_currency: str, trade_time: int = None) -> float:
+        """Convert price from quote currency to USD (synchronous version for use in loops)
+        
+        Note: For BTC/ETH quotes, this uses cached prices or fallback values.
+        For async version with live price fetching, use _convert_price_to_usd_async.
+        
+        Args:
+            price: The execution price from the trade (in quote currency)
+            quote_currency: The quote currency of the trading pair (e.g., 'BTC', 'USD', 'EUR')
+            trade_time: Optional timestamp of the trade for historical rate lookup
+        
+        Returns:
+            Price converted to USD
+        """
+        if quote_currency in ['USD', 'USDT', 'UST', 'USDC']:
+            return price
+        
+        # Ensure currency service is initialized
+        currency_service.ensure_rates_initialized()
+        
+        try:
+            # For crypto quote currencies (BTC, ETH), we need to multiply by their USD rates
+            # Example: tETHBTC with price 0.05 means 1 ETH = 0.05 BTC
+            # To get USD price: 0.05 * (BTC/USD rate) = ETH price in USD
+            if quote_currency == 'BTC':
+                # Use cached price or fallback
+                btc_price_usd = self._btc_price_cache if self._btc_price_cache else 50000.0
+                logger.debug(f"Converting BTC-quoted price to USD using BTC price: {btc_price_usd}")
+                return price * btc_price_usd
+            elif quote_currency == 'ETH':
+                # Use cached price or fallback
+                eth_price_usd = self._eth_price_cache if self._eth_price_cache else 3000.0
+                logger.debug(f"Converting ETH-quoted price to USD using ETH price: {eth_price_usd}")
+                return price * eth_price_usd
+            else:
+                # For fiat currencies (EUR, GBP, JPY, etc.), use currency service conversion
+                return currency_service.convert_amount(price, quote_currency, 'USD')
+        except Exception as e:
+            logger.warning(f"Error converting {price} {quote_currency} to USD: {e}, using price as-is")
+            return price
+
+    async def calculate_portfolio_from_wallets(self, wallets: List[Dict], all_trades_data: List = None) -> Tuple[List[Dict], List]:
+        """Calculate portfolio items from Bitfinex wallets
+        Returns: (portfolio_items, all_trades_collected)
+        """
         portfolio_items = []
+        all_trades_collected = []
+        
+        # Pre-fetch BTC and ETH prices for better conversion accuracy
+        try:
+            logger.info("Fetching BTC and ETH prices for price conversion")
+            btc_price = await self._get_crypto_price_usd('BTC')
+            eth_price = await self._get_crypto_price_usd('ETH')
+            logger.info(f"BTC price: ${btc_price:.2f}, ETH price: ${eth_price:.2f}")
+        except Exception as e:
+            logger.warning(f"Could not fetch crypto prices, will use fallbacks: {e}")
+        
+        # First, try to get all trades at once (more efficient)
+        all_trades_map = {}
+        if all_trades_data is None:
+            try:
+                all_trades_data = await self.get_all_trades()
+            except Exception as e:
+                logger.debug(f"Could not use all-trades endpoint, will fetch per-symbol: {e}")
+                all_trades_data = []
+        
+        if all_trades_data:
+            all_trades_collected.extend(all_trades_data)
+            logger.info(f"Processing {len(all_trades_data)} trades from all-trades endpoint")
+            for trade in all_trades_data:
+                if len(trade) >= 2:
+                    # Normalize pair format for consistent matching
+                    pair_raw = trade[1] if isinstance(trade[1], str) else str(trade[1])
+                    pair = self._normalize_pair(pair_raw)
+                    if pair not in all_trades_map:
+                        all_trades_map[pair] = []
+                    all_trades_map[pair].append(trade)
+            logger.info(f"✅ Built trades map with {len(all_trades_map)} unique pairs: {list(all_trades_map.keys())[:10]}")
+        
+        # Common quote currencies to try (expanded list - UST is critical for Bitfinex)
+        common_quote_currencies = ['USD', 'USDT', 'UST', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH', 'USDC', 'DAI']
         
         for wallet in wallets:
             currency = wallet['currency']
             total_amount = wallet['balance']
             
             # Skip stablecoins as they're not crypto investments
-            if currency in ['USD', 'USDT', 'EUR', 'GBP', 'JPY']:
+            if currency in ['USD', 'USDT', 'EUR', 'GBP', 'JPY', 'USDC', 'DAI']:
                 continue
             
-            # Get trading history to calculate average buy price
-            trading_pairs = [f"t{currency}USD", f"t{currency}USDT", f"t{currency}BTC", f"t{currency}ETH"]
             buy_trades = []
+            
+            # Build list of trading pairs to check
+            trading_pairs = []
+            for quote in common_quote_currencies:
+                trading_pairs.append(f"t{currency}{quote}")
             
             logger.info(f"🔍 Looking for trades for {currency} in pairs: {trading_pairs}")
             
+            # Process trades from all-trades endpoint if available
             for pair in trading_pairs:
-                try:
-                    trades = await self.get_trades(pair, 250)
-                    logger.info(f"Found {len(trades)} total trades for {pair}")
-                    
-                    for trade in trades:
-                        # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker]
-                        # We need to determine if this was a buy
-                        if len(trade) >= 6:
-                            exec_amount = trade[4]
-                            exec_price = trade[5]
+                # Try both exact match and normalized match
+                normalized_pair = self._normalize_pair(pair)
+                trades_to_process = []
+                
+                if pair in all_trades_map:
+                    trades_to_process = all_trades_map[pair]
+                    logger.info(f"Found {len(trades_to_process)} trades for {pair} (exact match) from all-trades")
+                elif normalized_pair in all_trades_map:
+                    trades_to_process = all_trades_map[normalized_pair]
+                    logger.info(f"Found {len(trades_to_process)} trades for {pair} (normalized: {normalized_pair}) from all-trades")
+                
+                for trade in trades_to_process:
+                    # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker, fee, fee_currency]
+                    # exec_amount: positive = buy (you receive base currency), negative = sell (you give base currency)
+                    if len(trade) >= 6:
+                        try:
+                            exec_amount = float(trade[4]) if trade[4] is not None else 0
+                            exec_price = float(trade[5]) if trade[5] is not None else 0
+                            mts_create = int(trade[2]) if len(trade) > 2 and trade[2] is not None else 0
+                            order_type = trade[6] if len(trade) > 6 else None
                             
-                            # Positive amount typically means buy
-                            if exec_amount > 0:
+                            logger.debug(f"Trade for {currency}/{pair}: exec_amount={exec_amount}, exec_price={exec_price}, mts_create={mts_create}, order_type={order_type}, trade={trade[:7]}")
+                            
+                            # Positive amount means buy (you receive the base currency)
+                            # Check both exec_amount > 0 and valid price
+                            if exec_amount > 0 and exec_price > 0 and mts_create > 0:
+                                quote_currency = self._extract_quote_currency(normalized_pair)
+                                price_usd = self._convert_price_to_usd(exec_price, quote_currency, mts_create)
+                                
                                 buy_trades.append({
-                                    'pair': pair,
+                                    'pair': normalized_pair,
                                     'amount': abs(exec_amount),
                                     'price': exec_price,
-                                    'time': trade[2]
+                                    'price_usd': price_usd,
+                                    'quote_currency': quote_currency,
+                                    'time': mts_create
                                 })
-                except Exception as e:
-                    logger.warning(f"Error processing trades for {pair}: {e}")
-                    continue
+                                logger.info(f"✅ Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd:.2f}, time={mts_create} ({datetime.fromtimestamp(mts_create/1000).isoformat()})")
+                            elif exec_amount != 0:
+                                logger.debug(f"Skipping trade (not a buy): {currency} exec_amount={exec_amount}, price={exec_price}")
+                        except (ValueError, TypeError, IndexError) as e:
+                            logger.warning(f"Error parsing trade for {pair}: {e}, trade data: {trade}")
+                            continue
+            
+            # If no trades found from all-trades endpoint, try fetching per symbol
+            if not buy_trades:
+                logger.info(f"No trades found in all-trades map, trying per-symbol fetch for {currency}")
+                for pair in trading_pairs:
+                    try:
+                        trades = await self.get_trades(pair, 250)
+                        if trades:
+                            all_trades_collected.extend(trades)
+                        logger.info(f"Found {len(trades)} total trades for {pair}")
+                        
+                        for trade in trades:
+                            # Trade format: [id, pair, mts_create, order_id, exec_amount, exec_price, order_type, order_price, maker, fee, fee_currency]
+                            # exec_amount: positive = buy (you receive base currency), negative = sell (you give base currency)
+                            if len(trade) >= 6:
+                                try:
+                                    exec_amount = float(trade[4]) if trade[4] is not None else 0
+                                    exec_price = float(trade[5]) if trade[5] is not None else 0
+                                    mts_create = int(trade[2]) if len(trade) > 2 and trade[2] is not None else 0
+                                    order_type = trade[6] if len(trade) > 6 else None
+                                    
+                                    logger.debug(f"Trade for {currency}/{pair}: exec_amount={exec_amount}, exec_price={exec_price}, mts_create={mts_create}, order_type={order_type}, trade={trade[:7]}")
+                                    
+                                    # Positive amount means buy (you receive the base currency)
+                                    # Check both exec_amount > 0 and valid price and timestamp
+                                    if exec_amount > 0 and exec_price > 0 and mts_create > 0:
+                                        quote_currency = self._extract_quote_currency(pair)
+                                        price_usd = self._convert_price_to_usd(exec_price, quote_currency, mts_create)
+                                        
+                                        buy_trades.append({
+                                            'pair': pair,
+                                            'amount': abs(exec_amount),
+                                            'price': exec_price,
+                                            'price_usd': price_usd,
+                                            'quote_currency': quote_currency,
+                                            'time': mts_create
+                                        })
+                                        logger.info(f"✅ Added buy trade: {currency} amount={exec_amount}, price={exec_price}, price_usd={price_usd:.2f}, time={mts_create} ({datetime.fromtimestamp(mts_create/1000).isoformat()})")
+                                    elif exec_amount != 0:
+                                        logger.debug(f"Skipping trade (not a buy): {currency} exec_amount={exec_amount}, price={exec_price}")
+                                except (ValueError, TypeError, IndexError) as e:
+                                    logger.warning(f"Error parsing trade for {pair}: {e}, trade data: {trade}")
+                                    continue
+                    except Exception as e:
+                        logger.warning(f"Error processing trades for {pair}: {e}")
+                        continue
             
             logger.info(f"Total buy trades found for {currency}: {len(buy_trades)}")
             
             if buy_trades:
                 # Sort trades by time to get earliest
-                buy_trades.sort(key=lambda x: x['time'])
+                buy_trades.sort(key=lambda x: x['time'] if x['time'] > 0 else float('inf'))
                 
-                # Calculate weighted average buy price
+                # Calculate weighted average buy price in USD
                 total_qty = sum(trade['amount'] for trade in buy_trades)
-                total_cost = sum(trade['amount'] * trade['price'] for trade in buy_trades)
+                total_cost_usd = sum(trade['amount'] * trade['price_usd'] for trade in buy_trades)
                 
                 if total_qty > 0:
-                    avg_buy_price = total_cost / total_qty
+                    avg_buy_price_usd = total_cost_usd / total_qty
                     
                     # Scale to current balance
                     scaled_amount = total_amount
                     
                     # Get the EARLIEST trade date for purchase date
                     earliest_trade = buy_trades[0]
-                    trade_date = datetime.fromtimestamp(earliest_trade['time'] / 1000).isoformat() + "Z"
+                    if earliest_trade['time'] > 0:
+                        # Bitfinex timestamps are in milliseconds
+                        # Convert to UTC datetime and format for PostgreSQL (ISO format without Z)
+                        trade_dt = datetime.utcfromtimestamp(earliest_trade['time'] / 1000)
+                        trade_date = trade_dt.isoformat()
+                    else:
+                        # Fallback to current date if timestamp is invalid
+                        trade_date = datetime.utcnow().isoformat()
+                        logger.warning(f"Invalid timestamp for {currency}, using current date")
                     
-                    # Convert to USD (assuming price is already in USD)
-                    price_buy_usd = avg_buy_price
+                    logger.info(f"✅ Calculated portfolio item for {currency}: amount={scaled_amount}, price_buy={avg_buy_price_usd:.2f}, purchase_date={trade_date}")
                     
                     portfolio_items.append({
                         'symbol': currency,
                         'amount': scaled_amount,
+                        'price_buy': avg_buy_price_usd,
+                        'purchase_date': trade_date,
+                        'base_currency': 'USD',
+                        'source': 'Bitfinex',
+                        'commission': 0.0,
+                        'total_investment_text': f"${scaled_amount * avg_buy_price_usd:.2f}"
+                    })
+                else:
+                    # Total quantity is 0 but we still have the asset - use fallback price
+                    logger.warning(f"⚠️ Total quantity is 0 for {currency}, using fallback price")
+                    # Use fallback price - will be tracked as issue in API layer
+                    price_buy_usd = 9999999.0
+                    trade_date = datetime.utcnow().isoformat()
+                    portfolio_items.append({
+                        'symbol': currency,
+                        'amount': total_amount,
                         'price_buy': price_buy_usd,
                         'purchase_date': trade_date,
                         'base_currency': 'USD',
                         'source': 'Bitfinex',
                         'commission': 0.0,
-                        'total_investment_text': f"${scaled_amount * price_buy_usd:.2f}"
+                        'total_investment_text': f"${total_amount * price_buy_usd:.2f}",
+                        '_needs_price_fallback': True  # Flag for API layer to track as issue
                     })
             else:
-                # If no trading history, create a placeholder entry
+                # If no trading history, use fallback price - NEVER skip
+                logger.warning(f"⚠️ No buy trades found for {currency}, using fallback price (will be tracked as issue)")
+                # Try to get current market price as fallback
+                try:
+                    price_service = MultiExchangePriceService()
+                    current_prices = await price_service.get_current_prices([currency])
+                    if currency in current_prices and current_prices[currency] > 0:
+                        price_buy_usd = current_prices[currency]
+                        logger.info(f"✅ Using current market price ${price_buy_usd:.2f} as fallback for {currency}")
+                    else:
+                        price_buy_usd = 9999999.0
+                        logger.warning(f"⚠️ Could not fetch market price for {currency}, using fallback 9999999")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error fetching market price for {currency}: {e}, using fallback 9999999")
+                    price_buy_usd = 9999999.0
+                
+                trade_date = datetime.utcnow().isoformat()
                 portfolio_items.append({
                     'symbol': currency,
                     'amount': total_amount,
-                    'price_buy': 0.0,
-                    'purchase_date': datetime.now().isoformat() + "Z",
+                    'price_buy': price_buy_usd,
+                    'purchase_date': trade_date,
                     'base_currency': 'USD',
                     'source': 'Bitfinex',
                     'commission': 0.0,
-                    'total_investment_text': "Unknown"
+                    'total_investment_text': f"${total_amount * price_buy_usd:.2f}",
+                    '_needs_price_fallback': True  # Flag for API layer to track as issue
                 })
         
         logger.info(f"✅ Calculated {len(portfolio_items)} portfolio items from Bitfinex wallets")
-        return portfolio_items
+        logger.info(f"📊 Collected {len(all_trades_collected)} total trades for analysis")
+        return portfolio_items, all_trades_collected
+
+    def _save_import_data_to_csv(self, user_id: int, wallets: List[Dict], all_trades: List, 
+                                 portfolio_items: List[Dict], account_info: Dict = None) -> str:
+        """Save full Bitfinex import data to CSV file for analysis"""
+        try:
+            # Create logs directory if it doesn't exist
+            logs_dir = "/app/logs"
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_filename = f"{logs_dir}/bitfinex_import_{user_id}_{timestamp}.csv"
+            
+            with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header
+                writer.writerow(['=== BITFINEX IMPORT DATA ==='])
+                writer.writerow(['Timestamp', timestamp])
+                writer.writerow(['User ID', user_id])
+                writer.writerow([''])
+                
+                # Write account info
+                writer.writerow(['=== ACCOUNT INFO ==='])
+                if account_info:
+                    for key, value in account_info.items():
+                        writer.writerow([key, value])
+                else:
+                    writer.writerow(['No account info'])
+                writer.writerow([''])
+                
+                # Write wallets
+                writer.writerow(['=== WALLETS ==='])
+                writer.writerow(['Type', 'Currency', 'Balance', 'Unsettled Interest', 'Balance Available'])
+                for wallet in wallets:
+                    writer.writerow([
+                        wallet.get('type', ''),
+                        wallet.get('currency', ''),
+                        wallet.get('balance', 0),
+                        wallet.get('unsettled_interest', 0),
+                        wallet.get('balance_available', 0)
+                    ])
+                writer.writerow([''])
+                
+                # Write all trades (raw)
+                writer.writerow(['=== ALL TRADES (RAW) ==='])
+                if all_trades:
+                    # Write header based on trade structure
+                    writer.writerow(['Trade Index', 'Trade Data (JSON)'])
+                    for idx, trade in enumerate(all_trades):
+                        writer.writerow([idx, json.dumps(trade)])
+                else:
+                    writer.writerow(['No trades found'])
+                writer.writerow([''])
+                
+                # Write parsed trades details
+                writer.writerow(['=== PARSED TRADES DETAILS ==='])
+                writer.writerow(['ID', 'Pair', 'MTS Create', 'Order ID', 'Exec Amount', 'Exec Price', 
+                                'Order Type', 'Order Price', 'Maker', 'Fee', 'Fee Currency'])
+                for trade in all_trades:
+                    if isinstance(trade, list) and len(trade) >= 6:
+                        writer.writerow([
+                            trade[0] if len(trade) > 0 else '',
+                            trade[1] if len(trade) > 1 else '',
+                            trade[2] if len(trade) > 2 else '',
+                            trade[3] if len(trade) > 3 else '',
+                            trade[4] if len(trade) > 4 else '',
+                            trade[5] if len(trade) > 5 else '',
+                            trade[6] if len(trade) > 6 else '',
+                            trade[7] if len(trade) > 7 else '',
+                            trade[8] if len(trade) > 8 else '',
+                            trade[9] if len(trade) > 9 else '',
+                            trade[10] if len(trade) > 10 else ''
+                        ])
+                writer.writerow([''])
+                
+                # Write portfolio items
+                writer.writerow(['=== PORTFOLIO ITEMS ==='])
+                if portfolio_items:
+                    writer.writerow(['Symbol', 'Amount', 'Price Buy', 'Purchase Date', 'Base Currency', 
+                                    'Source', 'Commission', 'Total Investment Text'])
+                    for item in portfolio_items:
+                        writer.writerow([
+                            item.get('symbol', ''),
+                            item.get('amount', 0),
+                            item.get('price_buy', 0),
+                            item.get('purchase_date', ''),
+                            item.get('base_currency', ''),
+                            item.get('source', ''),
+                            item.get('commission', 0),
+                            item.get('total_investment_text', '')
+                        ])
+                else:
+                    writer.writerow(['No portfolio items'])
+                writer.writerow([''])
+                
+                # Write summary
+                writer.writerow(['=== SUMMARY ==='])
+                writer.writerow(['Total Wallets', len(wallets)])
+                writer.writerow(['Total Trades', len(all_trades)])
+                writer.writerow(['Total Portfolio Items', len(portfolio_items)])
+                writer.writerow(['Items with Price Buy > 0', sum(1 for item in portfolio_items if item.get('price_buy', 0) > 0)])
+                writer.writerow(['Items with Valid Purchase Date', sum(1 for item in portfolio_items if item.get('purchase_date') and item.get('purchase_date') != datetime.now().isoformat() + "Z")])
+            
+            logger.info(f"💾 Saved Bitfinex import data to {csv_filename}")
+            return csv_filename
+            
+        except Exception as e:
+            logger.error(f"❌ Error saving import data to CSV: {e}")
+            return ""
 
     async def import_portfolio(self, user_id: int) -> Dict:
         """Import complete portfolio from Bitfinex"""
+        all_trades_data = []
         try:
             logger.info(f"🚀 Starting Bitfinex portfolio import for user {user_id}")
             
@@ -310,21 +686,45 @@ class BitfinexImportService:
                     'items_imported': 0
                 }
             
-            # Calculate portfolio items
-            portfolio_items = await self.calculate_portfolio_from_wallets(wallets)
+            # Calculate portfolio items (this will also collect all trades)
+            portfolio_items, all_trades_collected = await self.calculate_portfolio_from_wallets(wallets)
             
             logger.info(f"✅ Bitfinex import completed: {len(portfolio_items)} items ready for import")
+            
+            # Save full import data to CSV for analysis
+            csv_file = self._save_import_data_to_csv(
+                user_id, 
+                wallets, 
+                all_trades_collected, 
+                portfolio_items, 
+                connection_test.get('account_info', {})
+            )
+            
+            if csv_file:
+                logger.info(f"📄 Full import data saved to: {csv_file}")
             
             return {
                 'success': True,
                 'message': f"Successfully prepared {len(portfolio_items)} portfolio items for import",
                 'items_imported': len(portfolio_items),
                 'portfolio_items': portfolio_items,
-                'account_info': connection_test.get('account_info', {})
+                'account_info': connection_test.get('account_info', {}),
+                'debug_csv': csv_file if csv_file else None
             }
             
         except Exception as e:
             logger.error(f"❌ Bitfinex portfolio import failed: {e}")
+            # Still try to save what we have
+            try:
+                csv_file = self._save_import_data_to_csv(
+                    user_id,
+                    wallets if 'wallets' in locals() else [],
+                    all_trades_collected if 'all_trades_collected' in locals() else [],
+                    portfolio_items if 'portfolio_items' in locals() else [],
+                    {}
+                )
+            except:
+                pass
             return {
                 'success': False,
                 'message': f"Import failed: {str(e)}",

@@ -8,9 +8,9 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from typing import Dict, Any
-import logging
+from .logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.utils.encryption")
 
 class CredentialEncryption:
     """Handles encryption and decryption of user API credentials"""

@@ -27,6 +27,7 @@ class PortfolioItem(BaseModel):
     pnl_usd: Optional[float] = None
     pnl_percent_usd: Optional[float] = None
     exchange_rate_at_purchase: Optional[float] = None
+    comments: Optional[str] = None
 
     class Config:
         json_encoders = {
@@ -43,6 +44,7 @@ class PortfolioCreate(BaseModel):
     source: Optional[str] = None
     commission: float = 0.0
     total_investment_text: Optional[str] = None
+    comments: Optional[str] = None
 
     class Config:
         json_encoders = {
@@ -59,6 +61,7 @@ class PortfolioUpdate(BaseModel):
     source: Optional[str] = None
     commission: Optional[float] = None
     total_investment_text: Optional[str] = None
+    comments: Optional[str] = None
 
     class Config:
         json_encoders = {

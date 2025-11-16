@@ -20,7 +20,7 @@
 ```bash
 ./stop.sh                 # development
 ./stop.sh --env production # production (docker compose down)
-```
+```text
  
 ### Restart
 
@@ -119,4 +119,4 @@ For production, use the scripts (docker compose under the hood):
 ```bash
 ./start.sh --env production
 ./status.sh --env production --logs 100
-```
+```text

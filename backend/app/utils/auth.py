@@ -3,16 +3,15 @@ from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from ..core.config import settings
+from .logger import get_logger
 import secrets
-import bcrypt
 
-# Password hashing context with explicit bcrypt configuration
+logger = get_logger("backend.app.utils.auth")
+
+# Password hashing context using pbkdf2_sha256 (no 72-byte limit, no bcrypt init issues), with bcrypt_sha256 and bcrypt for legacy hashes
 pwd_context = CryptContext(
-    schemes=["bcrypt"],
+    schemes=["pbkdf2_sha256", "bcrypt_sha256", "bcrypt"],
     deprecated="auto",
-    bcrypt__rounds=12,
-    bcrypt__min_rounds=4,
-    bcrypt__max_rounds=31
 )
 
 # JWT configuration
@@ -22,23 +21,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = settings.jwt_refresh_token_expire_days
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash using bcrypt"""
-    # Truncate password to 72 bytes (bcrypt limit)
-    if len(plain_password.encode('utf-8')) > 72:
-        plain_password = plain_password[:72]
-    
-    # Use direct bcrypt verification for compatibility with existing hashes
+    """Verify a password using passlib context (supports pbkdf2_sha256, bcrypt_sha256, and bcrypt)."""
     try:
-        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
-        print(f"Password verification failed: {e}")
+        logger.error(f"Password verification failed: {e}, hash preview: {hashed_password[:20] if hashed_password else 'None'}...")
         return False
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt"""
-    # Truncate password to 72 bytes (bcrypt limit)
-    if len(password.encode('utf-8')) > 72:
-        password = password[:72]
+    """Hash a password using pbkdf2_sha256 (no 72-byte limit)."""
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

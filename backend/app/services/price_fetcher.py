@@ -3,20 +3,20 @@ Background Price Fetcher Service
 Automatically fetches crypto prices and currency rates
 """
 import asyncio
-import logging
 from typing import List, Dict
 from ..services.price_service import PriceService
 from ..services.multi_exchange_price_service import multi_exchange_price_service
 from ..services.currency_service import currency_service
 from ..api.ws import manager
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("backend.app.services.price_fetcher")
 
 class PriceFetcherService:
     def __init__(self, price_service: PriceService):
         self.price_service = price_service
         self.is_running = False
-        self.fetch_interval = 60  # seconds
+        self.fetch_interval = 120  # seconds (2 minutes)
         self.tracked_symbols = set()
         
     async def start(self):

@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, AlertHistory } from '@/types'
-import { apiClient } from '@/lib/api'
+import { PriceAlert, PriceAlertCreate, PriceAlertUpdate, AlertHistory } from '../types'
+import { apiClient } from '../lib/api'
+import { logger } from '../lib/logger'
 
 interface AlertsState {
   alerts: PriceAlert[]
@@ -29,14 +30,41 @@ export const useAlertsStore = create<AlertsState>()(
 
       fetchAlerts: async (activeOnly = true) => {
         set({ loading: true, error: null })
-        try {
-          const alerts = await apiClient.getAlerts(activeOnly)
-          set({ alerts, loading: false })
-        } catch (error: any) {
-          set({ 
-            error: error.message || 'Failed to fetch alerts', 
-            loading: false 
-          })
+        
+        const maxRetries = 3
+        const initialDelay = 2000 // 2 seconds
+        
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            const alerts = await apiClient.getAlerts(activeOnly)
+            set({ alerts, loading: false })
+            return // Success - exit retry loop
+          } catch (error: any) {
+            const status = error?.response?.status || error?.status
+            
+            // Handle 503 Service Unavailable with retry
+            if (status === 503 && attempt < maxRetries) {
+              const delay = initialDelay * Math.pow(2, attempt) // 2s, 4s, 8s
+              logger.debug(`Service Unavailable (503) for alerts, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`)
+              
+              // Wait before retrying
+              await new Promise(resolve => setTimeout(resolve, delay))
+              continue // Retry
+            } else {
+              // Non-503 error or max retries exceeded
+              // Don't set error state for 503 errors (service unavailable is temporary)
+              if (status !== 503) {
+                set({ 
+                  error: error.message || 'Failed to fetch alerts', 
+                  loading: false 
+                })
+              } else {
+                // Max retries exceeded for 503, but don't show error to user
+                set({ loading: false })
+              }
+              return // Exit retry loop
+            }
+          }
         }
       },
 
@@ -93,7 +121,7 @@ export const useAlertsStore = create<AlertsState>()(
           const history = await apiClient.getAlertHistory(limit)
           set({ history })
         } catch (error: any) {
-          console.error('Failed to fetch alert history:', error)
+          logger.error('Failed to fetch alert history:', error)
         }
       },
 

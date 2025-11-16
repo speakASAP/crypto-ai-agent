@@ -1,5 +1,6 @@
 'use client'
 
+import { logger } from '@/lib/logger'
 import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,7 +33,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
     base_currency: selectedCurrency,
     source: '',
     commission: '0',
-    total_investment_text: ''
+    total_investment_text: '',
+    comments: ''
   })
 
   // Helper function to parse total investment text
@@ -114,8 +116,10 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
       // Convert ISO datetime to date format for date input
       const formatDateForInput = (isoDate: string | undefined): string => {
         if (!isoDate) return ''
-        // Extract just the date portion (yyyy-MM-dd) from ISO string
-        return isoDate.split('T')[0]
+        // Handle both ISO format (with T) and space-separated format
+        // Extract just the date portion (yyyy-MM-dd) from datetime string
+        const datePart = isoDate.split('T')[0].split(' ')[0]
+        return datePart
       }
 
       setFormData({
@@ -126,7 +130,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         base_currency: item.base_currency as 'USD' | 'EUR' | 'CZK',
         source: item.source || '',
         commission: item.commission ? item.commission.toFixed(8) : '0.00000000',
-        total_investment_text: item.total_investment_text || ''
+        total_investment_text: item.total_investment_text || '',
+        comments: item.comments || ''
       })
     } else {
       // Set today's date as default for new items
@@ -139,7 +144,8 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
         base_currency: selectedCurrency,
         source: '',
         commission: '0',
-        total_investment_text: ''
+        total_investment_text: '',
+        comments: ''
       })
     }
   }, [item, selectedCurrency, isOpen])
@@ -169,7 +175,7 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
       await onSave(data)
       onClose()
     } catch (error) {
-      console.error('Error saving portfolio item:', error)
+      logger.error('Error saving portfolio item:', error)
     } finally {
       setLoading(false)
     }
@@ -258,6 +264,16 @@ export function PortfolioModal({ isOpen, onClose, onSave, item, selectedCurrency
                     placeholder="Binance, Coinbase, etc."
                   />
                 </div>
+              </div>
+              {/* Comments Field */}
+              <div className="space-y-2">
+                <Label htmlFor="comments">Comments</Label>
+                <Input
+                  id="comments"
+                  value={formData.comments}
+                  onChange={(e) => handleChange('comments', e.target.value)}
+                  placeholder="Add any comments or notes..."
+                />
               </div>
             </div>
 

@@ -1,30 +1,15 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
-import sqlite3
-import os
-from urllib.parse import urlparse
-import psycopg
 from ..core.config import settings
+from ..utils.db import connect_with_retry
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 def get_db_connection():
-    """Get database connection using Postgres when DATABASE_URL is set (or in production), otherwise SQLite."""
-    use_postgres = settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))
-    if use_postgres:
-        # Use psycopg for Postgres; strip +psycopg suffix if present
-        pg_url = settings.database_url.replace("+psycopg", "") if settings.database_url and "+psycopg" in settings.database_url else settings.database_url
-        conn = psycopg.connect(pg_url)
-        return conn
-    # Resolve database path relative to project root (SQLite fallback)
-    current_file = os.path.abspath(__file__)
-    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
-    project_root = os.path.dirname(backend_dir)
-    db_path = os.path.join(project_root, settings.database_file)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Get PostgreSQL database connection with retry logic."""
+    # Use retry logic for runtime connections (max 3 retries, faster backoff)
+    return connect_with_retry(max_retries=3, initial_delay=0.5, max_delay=2.0, is_startup=False)
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     """Dependency to get current authenticated user from JWT token"""
@@ -49,25 +34,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        use_postgres = settings.environment.lower() == "production" or bool(getattr(settings, "database_url", None))
-        if use_postgres:
-            cur.execute(
-                "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = %s",
-                (user_id,)
-            )
-            row = cur.fetchone()
-            if row:
-                columns = [desc[0] for desc in cur.description]
-                user = {columns[i]: row[i] for i in range(len(columns))}
-            else:
-                user = None
+        cur.execute(
+            "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = %s",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        if row:
+            columns = [desc[0] for desc in cur.description]
+            user = {columns[i]: row[i] for i in range(len(columns))}
         else:
-            cur.execute(
-                "SELECT id, email, username, full_name, preferred_currency, is_active, created_at, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = ?",
-                (user_id,)
-            )
-            row = cur.fetchone()
-            user = dict(row) if row else None
+            user = None
     finally:
         conn.close()
 
