@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
 import os
+import httpx
+import asyncio
 
 from ..utils.logger import get_logger
 
@@ -12,6 +14,9 @@ router = APIRouter(prefix="/api/logging", tags=["logging"])
 
 # Production mode check - filter non-critical logs in production
 IS_PRODUCTION = os.getenv("NODE_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
+
+# Service name for external logging
+SERVICE_NAME = "crypto-ai-agent"
 
 
 class LogEntry(BaseModel):
@@ -64,6 +69,86 @@ async def get_optional_user(authorization: Optional[str] = Header(None)) -> Opti
         return None
     
     return None
+
+
+async def _send_to_external_service(
+    level: str,
+    message: str,
+    context: Optional[str] = None,
+    user_id: Optional[int] = None,
+    username: Optional[str] = None,
+    url: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Send log to external logging service.
+    Fire-and-forget approach - doesn't block and silently fails if service is unavailable.
+
+    Args:
+        level: Log level (debug, info, warn, error)
+        message: Log message
+        context: Context/module name
+        user_id: User ID if available
+        username: Username if available
+        url: URL if available
+        user_agent: User agent if available
+        metadata: Additional metadata
+    """
+    logging_service_url = os.getenv("LOGGING_SERVICE_URL")
+    if not logging_service_url:
+        return
+
+    try:
+        # Map frontend log levels to microservice levels
+        level_mapping = {
+            'log': 'info',
+            'error': 'error',
+            'warn': 'warn',
+            'warning': 'warn',
+            'info': 'info',
+            'debug': 'debug',
+        }
+        microservice_level = level_mapping.get(level.lower(), 'info')
+
+        # Build metadata dictionary
+        log_metadata: Dict[str, Any] = {}
+        if context:
+            log_metadata["context"] = context
+        if user_id:
+            log_metadata["user_id"] = user_id
+        if username:
+            log_metadata["username"] = username
+        if url:
+            log_metadata["url"] = url
+        if user_agent:
+            log_metadata["user_agent"] = user_agent
+        if metadata:
+            log_metadata.update(metadata)
+
+        # Create JSON payload
+        payload = {
+            "level": microservice_level,
+            "message": message,
+            "service": SERVICE_NAME,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "metadata": log_metadata,
+        }
+
+        # Send HTTP POST request (fire-and-forget, don't await)
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            try:
+                await client.post(
+                    f"{logging_service_url}/api/logs",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+            except Exception:
+                # Silently fail - already in outer try-except
+                pass
+    except Exception:
+        # Silently fail - don't log errors about logging service (avoid infinite loops)
+        pass
 
 
 @router.post("/log")
@@ -128,10 +213,28 @@ async def receive_frontend_log(
         log_func = getattr(logger, python_level)
         log_func(log_message)
         
+        # Send to external service (fire-and-forget, non-blocking)
+        try:
+            # Create task for fire-and-forget (don't await)
+            asyncio.create_task(
+                _send_to_external_service(
+                    level=log_entry.level,
+                    message=log_entry.message,
+                    context=log_entry.context,
+                    user_id=user_id,
+                    username=username,
+                    url=log_entry.url,
+                    user_agent=log_entry.user_agent,
+                    metadata=log_entry.metadata,
+                )
+            )
+        except Exception:
+            # Silently fail - don't log errors about logging service
+            pass
+        
         return {"success": True, "message": "Log received"}
         
     except Exception as e:
         # Don't fail the request if logging fails - just log the error
         logger.error(f"Error processing frontend log: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
-

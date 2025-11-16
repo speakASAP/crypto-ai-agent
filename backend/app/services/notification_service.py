@@ -17,11 +17,15 @@ except Exception:  # pragma: no cover
 
 logger = get_logger("backend.app.services.notification_service")
 
+# Notification microservice URL
+NOTIFICATION_SERVICE_URL = os.getenv("NOTIFICATION_SERVICE_URL", "https://notifications.statex.cz")
+
 # Initialize price service for alert checking
 price_service = PriceService()
 
 
 async def send_telegram_notification(message: str) -> bool:
+    """Send Telegram notification via notification-microservice using global credentials"""
     try:
         telegram_token = os.getenv('TELEGRAM_TOKEN') or settings.telegram_bot_token
         telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID') or settings.telegram_chat_id
@@ -30,23 +34,8 @@ async def send_telegram_notification(message: str) -> bool:
             logger.warning("Telegram credentials not found in environment variables or settings")
             return False
 
-        url = f"{settings.telegram_api_url}{telegram_token}/sendMessage"
-        data = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
-
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(url, json=data) as response:
-                if response.status == 200:
-                    logger.info(f"Telegram notification sent successfully: {message[:50]}...")
-                    return True
-                else:
-                    response_text = await response.text()
-                    logger.error(f"Failed to send Telegram notification: {response.status} - {response_text}")
-                    return False
+        # Call notification-microservice
+        return await send_telegram_notification_with_credentials(message, telegram_token, telegram_chat_id)
     except Exception as e:
         logger.error(f"Error sending Telegram notification: {e}")
         return False
@@ -72,9 +61,22 @@ def get_user_telegram_credentials(user_id: int) -> Optional[dict]:
 
 
 async def send_telegram_notification_with_credentials(message: str, bot_token: str, chat_id: str) -> bool:
+    """Send Telegram notification via notification-microservice with user-specific credentials"""
     try:
-        url = f"{settings.telegram_api_url}{bot_token}/sendMessage"
-        data = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+        # Prepare request payload for notification-microservice
+        payload = {
+            "channel": "telegram",
+            "type": "custom",
+            "recipient": chat_id,
+            "chatId": chat_id,
+            "message": message,
+            "botToken": bot_token,  # Pass user-specific bot token
+            "parseMode": "HTML"
+        }
+
+        # Call notification-microservice
+        notification_url = f"{NOTIFICATION_SERVICE_URL}/notifications/send"
+        logger.info(f"Sending Telegram notification via microservice to {chat_id}")
 
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
@@ -82,13 +84,19 @@ async def send_telegram_notification_with_credentials(message: str, bot_token: s
 
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(url, json=data) as response:
+            async with session.post(notification_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
-                    logger.info(f"Telegram notification sent successfully: {message[:50]}...")
-                    return True
+                    result = await response.json()
+                    if result.get("success"):
+                        logger.info(f"Telegram notification sent successfully: {message[:50]}...")
+                        return True
+                    else:
+                        error_msg = result.get("error", {}).get("message", "Unknown error")
+                        logger.error(f"Notification service error: {error_msg}")
+                        return False
                 else:
                     response_text = await response.text()
-                    logger.error(f"Failed to send Telegram notification: {response.status} - {response_text}")
+                    logger.error(f"Notification service returned {response.status}: {response_text}")
                     return False
     except Exception as e:
         logger.error(f"Error sending Telegram notification: {e}")

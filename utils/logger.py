@@ -13,6 +13,16 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import external logging handler
+try:
+    from .logging_handler import ExternalLoggingHandler, SERVICE_NAME
+except ImportError:
+    try:
+        from utils.logging_handler import ExternalLoggingHandler, SERVICE_NAME
+    except ImportError:
+        ExternalLoggingHandler = None
+        SERVICE_NAME = "crypto-ai-agent"
+
 class CentralLogger:
     """
     Centralized logging system for the entire crypto AI agent project.
@@ -56,6 +66,13 @@ class CentralLogger:
         # Create handlers - always log to file, only to console if DEBUG is enabled
         handlers = [logging.FileHandler(log_file, encoding='utf-8')]
         
+        # Add external logging handler if URL is configured
+        logging_service_url = os.getenv("LOGGING_SERVICE_URL")
+        if logging_service_url and ExternalLoggingHandler:
+            external_handler = ExternalLoggingHandler(service_name=SERVICE_NAME, service_url=logging_service_url)
+            external_handler.setLevel(getattr(logging, log_level))
+            handlers.append(external_handler)
+        
         # Only add console handler if DEBUG is enabled
         if debug:
             handlers.append(logging.StreamHandler())
@@ -80,6 +97,10 @@ class CentralLogger:
         self._logger.info(f"Log File: {log_file}")
         self._logger.info(f"Console Output: {debug}")
         self._logger.info(f"Log Format: {log_format}")
+        if logging_service_url:
+            self._logger.info(f"External Logging Service: {logging_service_url}")
+        else:
+            self._logger.info("External Logging Service: Not configured (local logging only)")
         self._logger.info(f"Initialization Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     @property
@@ -238,3 +259,4 @@ def log_performance_timing(operation_name: str, module_name: str):
                 raise
         return wrapper
     return decorator
+    
