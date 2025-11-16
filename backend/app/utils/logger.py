@@ -6,6 +6,20 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import external logging handler
+try:
+    from utils.logging_handler import ExternalLoggingHandler, SERVICE_NAME
+except ImportError:
+    try:
+        import sys
+        from pathlib import Path
+        # Add parent directory to path to import from utils
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+        from utils.logging_handler import ExternalLoggingHandler, SERVICE_NAME
+    except ImportError:
+        ExternalLoggingHandler = None
+        SERVICE_NAME = "crypto-ai-agent"
+
 # Check if logging is already configured
 _logging_configured = False
 _file_handler = None
@@ -54,6 +68,18 @@ def get_logger(name: str) -> logging.Logger:
         root_logger.addHandler(file_handler)
         root_logger.setLevel(file_handler.level)
     
+    # Add external logging handler if URL is configured and handler doesn't already exist
+    logging_service_url = os.getenv("LOGGING_SERVICE_URL")
+    if logging_service_url and ExternalLoggingHandler:
+        # Check if external handler already exists
+        has_external = any(
+            isinstance(h, ExternalLoggingHandler) for h in root_logger.handlers
+        )
+        if not has_external:
+            external_handler = ExternalLoggingHandler(service_name=SERVICE_NAME, service_url=logging_service_url)
+            external_handler.setLevel(file_handler.level)
+            root_logger.addHandler(external_handler)
+    
     if not _logging_configured:
         # Check DEBUG flag from environment
         debug = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
@@ -80,5 +106,3 @@ def get_logger(name: str) -> logging.Logger:
         logger.info(f"Logger initialized - Debug: {debug}, Level: {logging.getLevelName(log_level)}, File: {file_handler.baseFilename}")
     
     return logger
-
-

@@ -12,6 +12,7 @@ The Crypto AI Agent uses a centralized logging system that provides comprehensiv
 - **Frontend**: Uses `frontend/src/lib/logger.ts` which sends logs to the backend `/api/logging/log` endpoint
 - **Centralized Logger**: `utils/logger.py` provides structured logging functions (available but not currently used in backend)
 - **All logs**: Write to the same centralized log file (`logs/crypto_agent.log`)
+- **External Logging Service**: Logs are also sent to external logging microservice at `http://logging-microservice:3268` (dual logging with local fallback)
 
 ## Configuration
 
@@ -24,6 +25,51 @@ Add these variables to your `.env` file to configure logging:
 LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FILE=logs/crypto_agent.log    # Path to log file
 LOG_FORMAT="%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log format
+
+# External Logging Service (optional)
+LOGGING_SERVICE_URL=http://logging-microservice:3268  # URL of external logging microservice
+```
+
+### External Logging Service
+
+The application supports dual logging: logs are sent to both local files and an external logging microservice.
+
+**Features**:
+
+- **Dual Logging**: Logs are sent to external service AND written locally as fallback
+- **Non-blocking**: HTTP requests don't block application execution (uses threading)
+- **Fallback**: If logging service is unavailable, falls back to local files only
+- **Metadata**: Includes context, stack traces, module/function/line information in log metadata
+- **Service Identification**: All logs tagged with `crypto-ai-agent` service name
+- **Backward Compatible**: No changes needed in services using the logger
+
+**Configuration**:
+
+- Set `LOGGING_SERVICE_URL` in `.env` to enable external logging
+- If not configured, only local file logging is used
+- External service URL format: `http://logging-microservice:3268`
+
+**Metadata Structure**:
+Logs sent to external service include rich metadata:
+
+```json
+{
+  "level": "error",
+  "message": "Error message",
+  "service": "crypto-ai-agent",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "metadata": {
+    "module": "backend.app.api.prices",
+    "function": "get_prices",
+    "line": 42,
+    "context": "API call",
+    "stack_trace": "...",
+    "user_id": 123,
+    "username": "user1",
+    "url": "/api/prices",
+    "user_agent": "Mozilla/5.0..."
+  }
+}
 ```
 
 ### Log Levels
@@ -129,6 +175,7 @@ logger.debug("Debug information")
 - Writes to the centralized log file (`logs/crypto_agent.log`)
 - Respects `LOG_LEVEL` and `DEBUG` environment variables
 - Uses the same log format as the centralized logger
+- Sends logs to external logging service if `LOGGING_SERVICE_URL` is configured (non-blocking)
 
 ### In Backend Code (Alternative: Structured Logging)
 
