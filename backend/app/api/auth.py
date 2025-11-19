@@ -4,14 +4,8 @@ from typing import List, Optional
 import asyncio
 
 from ..dependencies.auth import get_current_active_user, get_db_connection
-from ..utils.auth import (
-    verify_password,
-    get_password_hash,
-    create_access_token,
-    create_refresh_token,
-    generate_reset_token,
-)
 from ..core.config import settings
+from ..services.auth_service import auth_service
 from ..schemas.auth import (
     UserCreate,
     UserLogin,
@@ -48,197 +42,201 @@ from ..utils.db import (
 
 @router.post("/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    sql_check = _normalize_placeholders("SELECT id FROM users WHERE email = %s OR username = %s")
-    cursor.execute(sql_check, (user_data.email, user_data.username))
-    if cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail="Email or username already registered")
-
-    # Hash password with clear error handling
+    # Use auth-microservice for registration
     try:
-        hashed_password = get_password_hash(user_data.password)
-    except Exception as e:
-        logger.error(f"Error hashing password for {user_data.email}: {e}", exc_info=True)
+        auth_result = await auth_service.register(
+            email=user_data.email,
+            password=user_data.password,
+            username=user_data.username,
+            full_name=user_data.full_name,
+        )
+        
+        # Store additional user profile data in local database
+        # (preferred_currency, telegram settings, etc. are specific to crypto-ai-agent)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat() + "Z"
+        
+        # Check if user already exists in local DB (shouldn't happen, but handle gracefully)
+        sql_check = _normalize_placeholders("SELECT id FROM users WHERE id = %s")
+        cursor.execute(sql_check, (auth_result["user"]["id"],))
+        if not cursor.fetchone():
+            # Insert user profile data into local database
+            insert_sql = _normalize_placeholders('''
+                INSERT INTO users (id, email, username, full_name, preferred_currency, is_active, is_verified, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''')
+            cursor.execute(
+                insert_sql,
+                (
+                    auth_result["user"]["id"],
+                    auth_result["user"]["email"],
+                    auth_result["user"].get("username", user_data.username),
+                    auth_result["user"].get("full_name", user_data.full_name),
+                    'USD',  # Default currency
+                    auth_result["user"].get("is_active", True),
+                    auth_result["user"].get("is_verified", False),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        
         conn.close()
-        raise HTTPException(status_code=400, detail="Invalid password")
-    now = datetime.now().isoformat() + "Z"
-    insert_sql = '''
-        INSERT INTO users (email, username, hashed_password, full_name, is_active, is_verified, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    '''
-    sql_insert = _normalize_placeholders(insert_sql)
-    user_id = _execute_insert_and_get_id(
-        cursor,
-        sql_insert,
-        (user_data.email, user_data.username, hashed_password, user_data.full_name, True, False, now, now),
-    )
-    conn.commit()
-    conn.close()
 
-    access_token = create_access_token(data={"sub": str(user_id)})
-    refresh_token = create_refresh_token(data={"sub": str(user_id)})
+        user_response = UserResponse(
+            id=auth_result["user"]["id"],
+            email=auth_result["user"]["email"],
+            username=auth_result["user"].get("username", user_data.username),
+            full_name=auth_result["user"].get("full_name", user_data.full_name),
+            preferred_currency='USD',
+            is_active=auth_result["user"].get("is_active", True),
+            created_at=auth_result["user"].get("created_at", now),
+        )
 
-    user_response = UserResponse(
-        id=user_id,
-        email=user_data.email,
-        username=user_data.username,
-        full_name=user_data.full_name,
-        preferred_currency='USD',
-        is_active=True,
-        created_at=now,
-    )
+        # Trigger crypto symbols refresh in the background after successful registration
+        try:
+            from ..api.prices import _refresh_crypto_symbols_helper
+            asyncio.create_task(_refresh_crypto_symbols_helper())
+            logger.info(f"Started background crypto symbols refresh for new user {user_response.id} ({user_data.email})")
+        except Exception as e:
+            logger.error(f"Failed to start background crypto symbols refresh for user {user_response.id}: {e}", exc_info=True)
 
-    # Trigger crypto symbols refresh in the background after successful registration
-    # This ensures new users can immediately add cryptocurrencies to their portfolio
-    try:
-        from ..api.prices import _refresh_crypto_symbols_helper
-        asyncio.create_task(_refresh_crypto_symbols_helper())
-        logger.info(f"Started background crypto symbols refresh for new user {user_id} ({user_data.email})")
+        return TokenResponse(
+            access_token=auth_result["access_token"],
+            refresh_token=auth_result["refresh_token"],
+            user=user_response,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        # Log error but don't fail registration if refresh fails
-        logger.error(f"Failed to start background crypto symbols refresh for user {user_id}: {e}", exc_info=True)
-
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=user_response,
-    )
+        logger.error(f"Registration failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Registration failed")
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(user_data: UserLogin):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    sql = _normalize_placeholders(
-        "SELECT id, email, username, hashed_password, full_name, preferred_currency, is_active, created_at FROM users WHERE email = %s"
-    )
-    cursor.execute(sql, (user_data.email,))
-    user = cursor.fetchone()
-    
-    # Enhanced logging for debugging
-    if not user:
-        logger.error(f"LOGIN FAILED - User not found for email: {user_data.email}")
-        conn.close()
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Log hash format for debugging (first 20 chars only for security)
-    hash_preview = user[3][:20] + "..." if len(user[3]) > 20 else user[3]
-    logger.info(f"LOGIN ATTEMPT - User {user[0]} ({user_data.email}), hash preview: {hash_preview}")
-    
-    password_valid = verify_password(user_data.password, user[3])
-    logger.info(f"LOGIN PASSWORD CHECK - User {user[0]}, verification result: {password_valid}")
-    
-    if not password_valid:
-        logger.error(f"LOGIN FAILED - Password verification failed for user {user[0]} ({user_data.email})")
-        conn.close()
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    logger.info(f"Successful login for user {user[0]} ({user_data.email})")
-
-    access_token = create_access_token(data={"sub": str(user[0])})
-    refresh_token = create_refresh_token(data={"sub": str(user[0])})
-
-    # Convert datetime to ISO format string if needed
-    created_at = user[7]
-    if isinstance(created_at, datetime):
-        created_at = created_at.isoformat() + "Z"
-    elif created_at is not None:
-        created_at = str(created_at)
-
-    user_response = UserResponse(
-        id=user[0],
-        email=user[1],
-        username=user[2],
-        full_name=user[4],
-        preferred_currency=user[5],
-        is_active=bool(user[6]),
-        created_at=created_at,
-    )
-    conn.close()
-
-    # Trigger chart data fetching for user's portfolio symbols (non-blocking)
+    # Use auth-microservice for login
     try:
-        # Get user's portfolio symbols
-        portfolio_conn = get_db_connection()
-        portfolio_cursor = portfolio_conn.cursor()
-        portfolio_sql = _normalize_placeholders(
-            "SELECT DISTINCT symbol FROM portfolio_items WHERE user_id = %s AND symbol IS NOT NULL"
+        auth_result = await auth_service.login(
+            email=user_data.email,
+            password=user_data.password,
         )
-        portfolio_cursor.execute(portfolio_sql, (user[0],))
-        portfolio_rows = portfolio_cursor.fetchall()
-        portfolio_conn.close()
         
-        if portfolio_rows:
-            symbols = [row[0] for row in portfolio_rows if row[0]]
-            if symbols:
-                from ..services.chart_tasks import fetch_chart_data_for_symbols
-                logger.info(f"📊 Triggering chart data fetch on login for {len(symbols)} symbols: {symbols}")
-                # Trigger background fetch (non-blocking, don't wait for completion)
-                asyncio.create_task(
-                    fetch_chart_data_for_symbols(symbols, days=7, skip_cached=False)
-                )
-    except Exception as e:
-        logger.error(f"⚠️ Failed to trigger chart fetch on login: {e}", exc_info=True)
-        # Don't fail login if chart fetch trigger fails
+        # Get additional user profile data from local database
+        # (preferred_currency, telegram settings, etc. are specific to crypto-ai-agent)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        sql = _normalize_placeholders(
+            "SELECT id, preferred_currency, telegram_bot_token, telegram_chat_id, default_alert_percentage_above, default_alert_percentage_below FROM users WHERE id = %s"
+        )
+        cursor.execute(sql, (auth_result["user"]["id"],))
+        local_user = cursor.fetchone()
+        conn.close()
+        
+        # Use local DB data if available, otherwise use defaults
+        preferred_currency = local_user[1] if local_user and local_user[1] else 'USD'
+        
+        user_response = UserResponse(
+            id=auth_result["user"]["id"],
+            email=auth_result["user"]["email"],
+            username=auth_result["user"].get("username", user_data.email.split("@")[0]),
+            full_name=auth_result["user"].get("full_name"),
+            preferred_currency=preferred_currency,
+            is_active=auth_result["user"].get("is_active", True),
+            created_at=auth_result["user"].get("created_at"),
+        )
+        
+        logger.info(f"Successful login for user {user_response.id} ({user_data.email})")
 
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=user_response)
+        # Trigger chart data fetching for user's portfolio symbols (non-blocking)
+        try:
+            # Get user's portfolio symbols
+            portfolio_conn = get_db_connection()
+            portfolio_cursor = portfolio_conn.cursor()
+            portfolio_sql = _normalize_placeholders(
+                "SELECT DISTINCT symbol FROM portfolio_items WHERE user_id = %s AND symbol IS NOT NULL"
+            )
+            portfolio_cursor.execute(portfolio_sql, (user_response.id,))
+            portfolio_rows = portfolio_cursor.fetchall()
+            portfolio_conn.close()
+            
+            if portfolio_rows:
+                symbols = [row[0] for row in portfolio_rows if row[0]]
+                if symbols:
+                    from ..services.chart_tasks import fetch_chart_data_for_symbols
+                    logger.info(f"📊 Triggering chart data fetch on login for {len(symbols)} symbols: {symbols}")
+                    # Trigger background fetch (non-blocking, don't wait for completion)
+                    asyncio.create_task(
+                        fetch_chart_data_for_symbols(symbols, days=7, skip_cached=False)
+                    )
+        except Exception as e:
+            logger.error(f"⚠️ Failed to trigger chart fetch on login: {e}", exc_info=True)
+            # Don't fail login if chart fetch trigger fails
+
+        return TokenResponse(
+            access_token=auth_result["access_token"],
+            refresh_token=auth_result["refresh_token"],
+            user=user_response,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Login failed")
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(refresh_token: Optional[str] = None, current_user: dict = None):
     # Accept refresh_token from query or body; do NOT require current access token
-    from fastapi import Request
-    from fastapi import Depends
-    from ..utils.auth import decode_token
+    from fastapi import Request, Body
     token = refresh_token
     if not token:
         # Try to read from request body if sent as JSON { refresh_token }
         try:
-            from fastapi import Body
             token = Body(None)
         except Exception:
             token = None
     if not token:
         # Try to read from query param handled by FastAPI already; if still missing
         raise HTTPException(status_code=401, detail="Missing refresh_token")
-    payload = decode_token(token) if isinstance(token, str) else None
-    if not payload or payload.get("type") != "refresh" or not payload.get("sub"):
+    
+    # Use auth-microservice for token refresh
+    try:
+        auth_result = await auth_service.refresh_token(token)
+        
+        # Get additional user profile data from local database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        sql = _normalize_placeholders(
+            "SELECT id, preferred_currency FROM users WHERE id = %s"
+        )
+        cursor.execute(sql, (auth_result["user"]["id"],))
+        local_user = cursor.fetchone()
+        conn.close()
+        
+        preferred_currency = local_user[1] if local_user and local_user[1] else 'USD'
+        
+        user_response = UserResponse(
+            id=auth_result["user"]["id"],
+            email=auth_result["user"]["email"],
+            username=auth_result["user"].get("username", auth_result["user"]["email"].split("@")[0]),
+            full_name=auth_result["user"].get("full_name"),
+            preferred_currency=preferred_currency,
+            is_active=auth_result["user"].get("is_active", True),
+            created_at=auth_result["user"].get("created_at"),
+        )
+
+        return TokenResponse(
+            access_token=auth_result["access_token"],
+            refresh_token=auth_result["refresh_token"],
+            user=user_response,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token refresh failed: {e}", exc_info=True)
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-
-    user_id = int(payload["sub"]) if str(payload.get("sub")).isdigit() else None
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid refresh token subject")
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    sql = _normalize_placeholders(
-        "SELECT id, email, username, full_name, preferred_currency, is_active, created_at FROM users WHERE id = %s"
-    )
-    cursor.execute(sql, (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    new_access_token = create_access_token(data={"sub": str(user[0])})
-    new_refresh_token = create_refresh_token(data={"sub": str(user[0])})
-
-    # Convert datetime to ISO format string if needed
-    created_at = user[6]
-    if isinstance(created_at, datetime):
-        created_at = created_at.isoformat() + "Z"
-    elif created_at is not None:
-        created_at = str(created_at)
-
-    user_response = UserResponse(
-        id=user[0], email=user[1], username=user[2], full_name=user[3],
-        preferred_currency=user[4], is_active=bool(user[5]), created_at=created_at,
-    )
-    return TokenResponse(access_token=new_access_token, refresh_token=new_refresh_token, user=user_response)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -339,22 +337,24 @@ async def update_profile(update_data: UserProfileUpdate, current_user: dict = De
 
 
 @router.post("/change-password")
-async def change_password(password_change: PasswordChange, current_user: dict = Depends(get_current_active_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    sql = _normalize_placeholders("SELECT hashed_password FROM users WHERE id = %s")
-    cursor.execute(sql, (current_user["id"],))
-    user = cursor.fetchone()
-    if not user or not verify_password(password_change.current_password, user[0]):
-        conn.close()
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-
-    new_hashed_password = get_password_hash(password_change.new_password)
-    sql = _normalize_placeholders("UPDATE users SET hashed_password = %s, updated_at = %s WHERE id = %s")
-    cursor.execute(sql, (new_hashed_password, datetime.now().isoformat() + "Z", current_user["id"]))
-    conn.commit()
-    conn.close()
-    return {"message": "Password changed successfully"}
+async def change_password(
+    password_change: PasswordChange,
+    current_user: dict = Depends(get_current_active_user),
+    token: str = Depends(oauth2_scheme),
+):
+    """Change password using auth-microservice"""
+    try:
+        result = await auth_service.change_password(
+            current_password=password_change.current_password,
+            new_password=password_change.new_password,
+            access_token=token,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Password change failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Password change failed")
 
 
 @router.post("/test-telegram")
@@ -375,55 +375,28 @@ async def test_telegram_connection(current_user: dict = Depends(get_current_acti
 
 @router.post("/password-reset-request")
 async def request_password_reset(request: PasswordResetRequest):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    sql = _normalize_placeholders("SELECT id FROM users WHERE email = %s")
-    cursor.execute(sql, (request.email,))
-    user = cursor.fetchone()
-    if user:
-        reset_token = generate_reset_token()
-        expires_at = (datetime.now() + timedelta(hours=1)).isoformat() + "Z"
-        now = datetime.now().isoformat() + "Z"
-        insert_sql = '''
-            INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at)
-            VALUES (%s, %s, %s, %s, %s)
-        '''
-        sql = _normalize_placeholders(insert_sql)
-        cursor.execute(sql, (user[0], reset_token, expires_at, False, now))
-        conn.commit()
-        logger.info(f"Password reset token for {request.email}: {reset_token}")
-        logger.info(f"Token expires at: {expires_at}")
-    conn.close()
-    return {"message": "If the email exists, a password reset token has been generated. Check the server logs for the token."}
+    """Request password reset using auth-microservice"""
+    try:
+        result = await auth_service.request_password_reset(request.email)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Password reset request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Password reset request failed")
 
 
 @router.post("/password-reset-confirm")
 async def confirm_password_reset(confirm: PasswordResetConfirm):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    select_sql = '''
-        SELECT user_id, expires_at, used FROM password_reset_tokens 
-        WHERE token = %s AND used = FALSE
-    '''
-    sql = _normalize_placeholders(select_sql)
-    cursor.execute(sql, (confirm.token,))
-    token_data = cursor.fetchone()
-    if not token_data:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
-    user_id, expires_at, used = token_data
-    if datetime.now() > datetime.fromisoformat(expires_at.replace('Z', '+00:00')):
-        conn.close()
-        raise HTTPException(status_code=400, detail="Reset token has expired")
-
-    new_hashed_password = get_password_hash(confirm.new_password)
-    sql1 = _normalize_placeholders("UPDATE users SET hashed_password = %s, updated_at = %s WHERE id = %s")
-    cursor.execute(sql1, (new_hashed_password, datetime.now().isoformat() + "Z", user_id))
-    sql2 = _normalize_placeholders("UPDATE password_reset_tokens SET used = TRUE WHERE token = %s")
-    cursor.execute(sql2, (confirm.token,))
-    conn.commit()
-    conn.close()
-    return {"message": "Password reset successfully"}
+    """Confirm password reset using auth-microservice"""
+    try:
+        result = await auth_service.confirm_password_reset(confirm.token, confirm.new_password)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Password reset confirmation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Password reset confirmation failed")
 
 
 @router.delete("/delete-account")

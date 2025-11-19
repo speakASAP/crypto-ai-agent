@@ -35,21 +35,21 @@ async def get_optional_user(authorization: Optional[str] = Header(None)) -> Opti
         return None
     
     try:
-        from ..dependencies.auth import get_current_user
         token = authorization.replace("Bearer ", "")
-        # We need to manually decode since get_current_user expects Depends
-        from ..utils.auth import decode_token
+        # Validate token via auth-microservice
+        from ..services.auth_service import auth_service
         from ..utils.db import connect_with_retry
         
-        payload = decode_token(token)
-        if payload is None:
+        # Use auth-microservice to validate token
+        auth_user = await auth_service.validate_token(token)
+        if not auth_user:
             return None
         
-        user_id_str: str = payload.get("sub")
-        if user_id_str is None:
+        user_id = auth_user.get("id")
+        if not user_id:
             return None
         
-        user_id: int = int(user_id_str)
+        # Get additional user profile data from local database
         conn = connect_with_retry(max_retries=1, initial_delay=0.1, max_delay=0.5, is_startup=False)
         try:
             cur = conn.cursor()
