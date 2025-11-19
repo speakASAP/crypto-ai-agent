@@ -80,12 +80,13 @@ def init_postgres_database():
         cur = conn.cursor()
 
         # Create users table
+        # Note: id is TEXT (UUID) to match auth-microservice user IDs
+        # Authentication is handled by external auth-microservice
         cur.execute('''
             CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
+            id TEXT PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
             username TEXT UNIQUE NOT NULL,
-            hashed_password TEXT NOT NULL,
             full_name TEXT,
             preferred_currency TEXT DEFAULT 'USD',
             is_active BOOLEAN DEFAULT TRUE,
@@ -98,35 +99,15 @@ def init_postgres_database():
             default_alert_percentage_below REAL DEFAULT 0.10
         )
         ''')
-
-        # Create password reset tokens table
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS password_reset_tokens (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                token TEXT UNIQUE NOT NULL,
-                expires_at TIMESTAMP NOT NULL,
-                used BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        # Create user sessions table
-        cur.execute('''
-        CREATE TABLE IF NOT EXISTS user_sessions (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            token TEXT UNIQUE NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+        
+        # Note: password_reset_tokens and user_sessions tables removed
+        # These are now handled by external auth-microservice
 
         # Create portfolio_items table
         cur.execute('''
         CREATE TABLE IF NOT EXISTS portfolio_items (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
             symbol TEXT NOT NULL,
             amount REAL NOT NULL,
             price_buy REAL NOT NULL,
@@ -163,7 +144,7 @@ def init_postgres_database():
         cur.execute('''
         CREATE TABLE IF NOT EXISTS alerts (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
             symbol TEXT NOT NULL,
             threshold_price REAL NOT NULL,
             alert_type TEXT NOT NULL,
@@ -188,7 +169,7 @@ def init_postgres_database():
         cur.execute('''
         CREATE TABLE IF NOT EXISTS tracked_symbols (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
             symbol TEXT NOT NULL,
             name TEXT NOT NULL,
             active BOOLEAN DEFAULT TRUE,
@@ -202,7 +183,7 @@ def init_postgres_database():
         CREATE TABLE IF NOT EXISTS alert_history (
             id SERIAL PRIMARY KEY,
             alert_id INTEGER REFERENCES alerts(id),
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
             triggered_price REAL NOT NULL,
             triggered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             was_missed BOOLEAN DEFAULT FALSE,
@@ -224,7 +205,7 @@ def init_postgres_database():
         cur.execute('''
         CREATE TABLE IF NOT EXISTS import_history (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
             source TEXT NOT NULL,
             import_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             items_imported INTEGER NOT NULL,
@@ -262,7 +243,7 @@ def init_postgres_database():
         cur.execute('''
         CREATE TABLE IF NOT EXISTS user_api_credentials (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
             exchange TEXT NOT NULL,
             encrypted_credentials TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -275,7 +256,7 @@ def init_postgres_database():
         cur.execute('''
         CREATE TABLE IF NOT EXISTS csv_import_mappings (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
             exchange TEXT NOT NULL,
             column_mapping TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -289,7 +270,7 @@ def init_postgres_database():
         cur.execute('''
         CREATE TABLE IF NOT EXISTS ai_predictions (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id),
+            user_id TEXT REFERENCES users(id),
             symbol TEXT NOT NULL,
             prediction_type TEXT NOT NULL,
             predicted_price REAL NOT NULL,
@@ -620,7 +601,7 @@ def ensure_ai_advisor_tables():
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS ai_predictions (
                     id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id),
+                    user_id TEXT REFERENCES users(id),
                     symbol TEXT NOT NULL,
                     prediction_type TEXT NOT NULL,
                     predicted_price REAL NOT NULL,

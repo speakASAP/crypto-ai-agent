@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 import asyncio
 
-from ..dependencies.auth import get_current_active_user, get_db_connection
+from ..dependencies.auth import get_current_active_user, get_db_connection, oauth2_scheme
 from ..core.config import settings
 from ..services.auth_service import auth_service
 from ..schemas.auth import (
@@ -405,13 +405,16 @@ async def delete_account(confirmation: AccountDeletionConfirm, current_user: dic
     cursor = conn.cursor()
     user_id = current_user["id"]
     try:
+        # Delete user data from local database
+        # Note: password_reset_tokens and user_sessions are handled by auth-microservice
         for stmt in [
             "DELETE FROM alert_history WHERE user_id = %s",
             "DELETE FROM alerts WHERE user_id = %s",
             "DELETE FROM tracked_symbols WHERE user_id = %s",
             "DELETE FROM portfolio_items WHERE user_id = %s",
-            "DELETE FROM password_reset_tokens WHERE user_id = %s",
-            "DELETE FROM user_sessions WHERE user_id = %s",
+            "DELETE FROM user_api_credentials WHERE user_id = %s",
+            "DELETE FROM csv_import_mappings WHERE user_id = %s",
+            "DELETE FROM import_history WHERE user_id = %s",
             "DELETE FROM users WHERE id = %s",
         ]:
             cursor.execute(_normalize_placeholders(stmt), (user_id,))
