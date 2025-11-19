@@ -1,3 +1,13 @@
+# ⚠️ WARNING: This file is for LOCAL DEVELOPMENT ONLY
+# ⚠️ For production, use docker-compose.blue.yml and docker-compose.green.yml
+# ⚠️ Production uses external database-server microservice (db-server-postgres, db-server-redis)
+#
+# To use external database in development:
+# 1. Ensure database-server is running: cd ../database-server && ./scripts/start.sh
+# 2. Set DATABASE_URL=postgresql+psycopg://user:pass@db-server-postgres:5432/crypto_ai_agent
+# 3. Set REDIS_URL=redis://db-server-redis:6379/0
+# 4. Set LOGGING_SERVICE_URL=http://logging-microservice:3268
+
 services:
   backend:
     build:
@@ -7,15 +17,19 @@ services:
       - .env
     ports:
       - "127.0.0.1:${API_PORT:-8100}:${API_PORT:-8100}"
-    depends_on:
-      - postgres
-      - redis
+    # Note: For production, remove depends_on and use external database-server
+    # depends_on:
+    #   - postgres
+    #   - redis
     volumes:
       - ./logs:/app/logs
     environment:
-      - DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@postgres:5432/crypto_ai_agent
+      # Use external database-server if available, otherwise fallback to local
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}}
       - API_PORT=${API_PORT:-8100}
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=${REDIS_URL:-redis://db-server-redis:6379/0}
+      - LOGGING_SERVICE_URL=${LOGGING_SERVICE_URL:-http://logging-microservice:3268}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://auth-microservice:3370}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8100}/docs"]
       interval: 30s
@@ -49,6 +63,9 @@ services:
       - default
       - nginx-network
 
+  # ⚠️ NOTE: These services are for LOCAL DEVELOPMENT ONLY
+  # ⚠️ Production uses external database-server microservice
+  # ⚠️ To use external database, comment out these services and ensure database-server is running
   postgres:
     image: postgres:15
     container_name: crypto-ai-postgres
@@ -61,6 +78,8 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - default
 
   redis:
     image: redis:7
@@ -71,6 +90,8 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
+    networks:
+      - default
 
 volumes:
   pgdata:
