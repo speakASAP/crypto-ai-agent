@@ -1,9 +1,6 @@
 # Environment variables and sensitive data
-.env
-.env.local
-.env.production
-.env.staging
-*.env
+.env*
+!.env.example
 
 # API keys and secrets
 config.json
