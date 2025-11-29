@@ -23,7 +23,6 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - default
       - nginx-network
 
   frontend:
@@ -47,7 +46,6 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - default
       - nginx-network
 
   # Note: postgres and redis are now managed by docker-compose.infrastructure.yml
