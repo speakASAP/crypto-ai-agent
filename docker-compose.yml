@@ -22,7 +22,7 @@ services:
     #   - postgres
     #   - redis
     volumes:
-      - ./logs:/app/logs
+      - /srv/storagebox/statex/docker-volumes/crypto-ai-agent/logs:/app/logs
     environment:
       # Use external database-server if available, otherwise fallback to local
       - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}}
