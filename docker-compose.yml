@@ -1,12 +1,15 @@
-# ⚠️ WARNING: This file is for LOCAL DEVELOPMENT ONLY
-# ⚠️ For production, use docker-compose.blue.yml and docker-compose.green.yml
-# ⚠️ Production uses external database-server microservice (db-server-postgres, db-server-redis)
+# Crypto AI Agent - Uses Shared Database Server
+# This service uses the shared database-server microservice (db-server-postgres, db-server-redis)
+# like all other applications in the ecosystem.
 #
-# To use external database in development:
+# Prerequisites:
 # 1. Ensure database-server is running: cd ../database-server && ./scripts/start.sh
-# 2. Set DATABASE_URL=postgresql+psycopg://user:pass@db-server-postgres:5432/crypto_ai_agent
-# 3. Set REDIS_URL=redis://db-server-redis:6379/0
-# 4. Set LOGGING_SERVICE_URL=http://logging-microservice:3268
+# 2. Ensure database 'crypto_ai_agent' exists in db-server-postgres
+# 3. Ensure nginx-network exists: docker network create nginx-network (if not exists)
+#
+# For production deployments, use:
+# - docker-compose.blue.yml (blue deployment)
+# - docker-compose.green.yml (green deployment)
 
 services:
   backend:
@@ -17,15 +20,11 @@ services:
       - .env
     ports:
       - "127.0.0.1:${API_PORT:-8100}:${API_PORT:-8100}"
-    # Note: For production, remove depends_on and use external database-server
-    # depends_on:
-    #   - postgres
-    #   - redis
     volumes:
       - /srv/storagebox/statex/docker-volumes/crypto-ai-agent/logs:/app/logs
     environment:
-      # Use external database-server if available, otherwise fallback to local
-      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}}
+      # Uses shared database-server via nginx-network
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://${DB_USER:-dbadmin}:${DB_PASSWORD}@db-server-postgres:5432/${DB_NAME:-crypto_ai_agent}}
       - API_PORT=${API_PORT:-8100}
       - REDIS_URL=${REDIS_URL:-redis://db-server-redis:6379/0}
       - LOGGING_SERVICE_URL=${LOGGING_SERVICE_URL:-http://logging-microservice:3268}
@@ -36,7 +35,6 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - default
       - nginx-network
 
   frontend:
@@ -60,42 +58,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - default
       - nginx-network
-
-  # ⚠️ NOTE: These services are for LOCAL DEVELOPMENT ONLY
-  # ⚠️ Production uses external database-server microservice
-  # ⚠️ To use external database, comment out these services and ensure database-server is running
-  postgres:
-    image: postgres:15
-    container_name: crypto-ai-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-crypto_ai_agent}
-      POSTGRES_USER: ${POSTGRES_USER:-crypto}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_pass}
-    ports:
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    networks:
-      - default
-
-  redis:
-    image: redis:7
-    container_name: crypto-ai-redis
-    restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redisdata:/data
-    networks:
-      - default
-
-volumes:
-  pgdata:
-  redisdata:
 
 networks:
   nginx-network:

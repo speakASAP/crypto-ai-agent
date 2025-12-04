@@ -24,16 +24,15 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 
 ### Database: PostgreSQL
 
-- **Development**: PostgreSQL (local or remote connection)
-  - Connection: Configured via `DATABASE_URL` environment variable
-  - Example: `postgresql://user:password@localhost:5432/crypto_ai_agent`
-  - Setup: Use Docker Compose or local PostgreSQL installation
-- **Production**: PostgreSQL (shared database server)
-  - Database Server: `db-server-postgres:5432`
+- **All Environments** (Development & Production): Uses shared database server
+  - Database Server: `db-server-postgres:5432` (via nginx-network)
   - Database Name: `crypto_ai_agent`
   - Infrastructure: Managed by centralized `database-server` microservice
+  - Connection: Configured via `DATABASE_URL` environment variable
+  - Example: `postgresql://dbadmin:password@db-server-postgres:5432/crypto_ai_agent`
   - Shared by Blue/Green: Both environments use the same shared database instance
   - Persistent Storage: Data persists across deployments
+  - **Note**: Local Postgres/Redis containers have been removed. All applications now use the shared database infrastructure to eliminate port conflicts and ensure consistency.
 
 ## Main Features
 
@@ -253,6 +252,7 @@ The Crypto AI Agent now features a complete multi-user authentication system tha
 All API endpoints now require authentication. Authentication operations are handled by the centralized `auth-microservice`:
 
 **Authentication Endpoints** (delegated to auth-microservice):
+
 - `POST /api/auth/register` - User registration (via auth-microservice)
 - `POST /api/auth/login` - User login (via auth-microservice)
 - `POST /api/auth/refresh` - Refresh access token (via auth-microservice)
@@ -261,6 +261,7 @@ All API endpoints now require authentication. Authentication operations are hand
 - `POST /api/auth/password-reset-confirm` - Confirm password reset (via auth-microservice)
 
 **User Profile Endpoints** (application-specific data):
+
 - `GET /api/auth/me` - Get current user info (combines auth-microservice user + local profile data)
 - `PUT /api/auth/profile` - Update user profile (local data: preferred_currency, telegram settings, etc.)
 
