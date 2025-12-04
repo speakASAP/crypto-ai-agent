@@ -44,8 +44,8 @@ The blue/green deployment scripts automatically detect and use shared infrastruc
 
 **Connection Details:**
 
-- PostgreSQL: `db-server-postgres:5432`
-- Redis: `db-server-redis:6379`
+- PostgreSQL: `db-server-postgres:${DB_SERVER_PORT:-5432}` (configured in `database-server/.env`)
+- Redis: `db-server-redis:${REDIS_SERVER_PORT:-6379}` (configured in `database-server/.env`)
 
 ### Option 2: Service-Specific Infrastructure
 
@@ -58,8 +58,8 @@ docker compose -f docker-compose.infrastructure.yml -p crypto_ai_agent_infrastru
 
 **Connection Details:**
 
-- PostgreSQL: `crypto-ai-postgres:5432`
-- Redis: `crypto-ai-redis:6379`
+- PostgreSQL: `crypto-ai-postgres:${POSTGRES_PORT_GREEN:-5433}` (configured in `crypto-ai-agent/.env`)
+- Redis: `crypto-ai-redis:${REDIS_PORT_GREEN:-6380}` (configured in `crypto-ai-agent/.env`)
 
 ## Deployment Workflow
 

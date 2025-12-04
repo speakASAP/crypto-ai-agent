@@ -48,13 +48,13 @@ class ServiceConnectionTester:
             'frontend': {
                 'container_name': 'crypto-ai-frontend',
                 'network': 'nginx-network',
-                'ports': {'3100': 3100},
-                'internal_url': 'http://crypto-ai-frontend:3100'
+                'ports': {os.getenv('FRONTEND_PORT', '3100'): os.getenv('FRONTEND_PORT', '3100')},
+                'internal_url': f"http://crypto-ai-frontend:{os.getenv('FRONTEND_PORT', '3100')}"
             },
             'postgres': {
                 'container_name': 'crypto-ai-postgres',
                 'network': 'nginx-network',
-                'ports': {'5432': 5432}
+                'ports': {os.getenv('DB_SERVER_PORT', '5432'): os.getenv('DB_SERVER_PORT', '5432')}
             }
         }
         
@@ -247,8 +247,8 @@ class ServiceConnectionTester:
         logger.info("-" * 60)
         
         test_urls = [
-            ('Internal', 'http://crypto-ai-frontend:3100'),
-            ('External', 'http://localhost:3100'),
+            ('Internal', f"http://crypto-ai-frontend:{os.getenv('FRONTEND_PORT', '3100')}"),
+            ('External', f"http://localhost:{os.getenv('FRONTEND_PORT', '3100')}"),
             ('Via Nginx', 'https://crypto-ai-agent.statex.cz'),
         ]
         
@@ -369,8 +369,8 @@ class ServiceConnectionTester:
         
         # Test DNS resolution from backend to other services
         dns_tests = [
-            ('crypto-ai-frontend', '3100'),
-            ('crypto-ai-postgres', '5432'),
+            ('crypto-ai-frontend', os.getenv('FRONTEND_PORT', '3100')),
+            ('crypto-ai-postgres', os.getenv('DB_SERVER_PORT', '5432')),
             ('crypto-ai-backend', '8100'),
         ]
         

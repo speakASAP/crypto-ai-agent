@@ -411,7 +411,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8100',
+      baseURL: process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.API_PORT || '3102'}`,
       timeout: 10000,
     })
 
@@ -833,8 +833,8 @@ JWT_SECRET=your-super-secure-jwt-secret-key
 CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
 
 # Database configuration
-DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@postgres:5432/crypto_ai_agent
-REDIS_URL=redis://redis:6379/0
+DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@postgres:${DB_SERVER_PORT:-5432}/crypto_ai_agent  # DB_SERVER_PORT from database-server/.env
+REDIS_URL=redis://redis:${REDIS_SERVER_PORT:-6379}/0  # REDIS_SERVER_PORT from database-server/.env
 
 # PostgreSQL connection
 POSTGRES_DB=crypto_ai_agent
@@ -842,8 +842,8 @@ POSTGRES_USER=crypto
 POSTGRES_PASSWORD=crypto_pass
 
 # API configuration
-API_PORT=8100
-FRONTEND_PORT=3100
+API_PORT=3102  # Container port (Host port: 3102 for Blue, 3103 for Green)
+FRONTEND_PORT=3100  # Container port (Host port: 3100 for Blue, 3101 for Green)
 ```
 
 ### Docker Compose Deployment
@@ -857,15 +857,15 @@ services:
     container_name: crypto-ai-backend
     env_file: .env
     ports:
-      - "127.0.0.1:${API_PORT:-8100}:8100"
+      - "127.0.0.1:${API_PORT:-3102}:${API_PORT:-3102}"  # Port configured in crypto-ai-agent/.env
     depends_on:
       - postgres
       - redis
     volumes:
       - ./logs:/app/logs
     environment:
-      - DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@postgres:5432/crypto_ai_agent
-      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@postgres:${DB_SERVER_PORT:-5432}/crypto_ai_agent  # DB_SERVER_PORT from database-server/.env
+      - REDIS_URL=redis://redis:${REDIS_SERVER_PORT:-6379}/0  # REDIS_SERVER_PORT from database-server/.env
 
   postgres:
     image: postgres:15
@@ -947,7 +947,7 @@ docker compose exec -T postgres psql -U crypto crypto_ai_agent < backup.sql
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8100}/docs"]
+  test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-3102}/docs"]  # API_PORT configured in crypto-ai-agent/.env
   interval: 30s
   timeout: 5s
   retries: 5
@@ -981,6 +981,6 @@ healthcheck:
 ### CORS
 
 - Confirmed `CORSMiddleware` is initialized immediately after `app = FastAPI(...)` with:
-  - `allow_origins` from `CORS_ORIGINS` env (e.g., `http://localhost:3100`)
+  - `allow_origins` from `CORS_ORIGINS` env (e.g., `http://localhost:${FRONTEND_PORT:-3100}` for frontend, `http://localhost:${API_PORT:-3102}` for backend) - ports configured in crypto-ai-agent/.env
   - `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`
 - Note: If any endpoint still shows CORS in browser, it usually indicates an upstream 5xx response. After SQL fixes, portfolio and alerts are functional via API; the UI should reflect success upon refresh.

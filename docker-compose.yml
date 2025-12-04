@@ -19,18 +19,18 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${API_PORT:-8100}:${API_PORT:-8100}"
+      - "127.0.0.1:${API_PORT:-3102}:${API_PORT:-3102}"
     volumes:
       - /srv/storagebox/statex/docker-volumes/crypto-ai-agent/logs:/app/logs
     environment:
       # Uses shared database-server via nginx-network
       - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://${DB_USER:-dbadmin}:${DB_PASSWORD}@db-server-postgres:5432/${DB_NAME:-crypto_ai_agent}}
-      - API_PORT=${API_PORT:-8100}
+      - API_PORT=${API_PORT:-3102}
       - REDIS_URL=${REDIS_URL:-redis://db-server-redis:6379/0}
-      - LOGGING_SERVICE_URL=${LOGGING_SERVICE_URL:-http://logging-microservice:3268}
-      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://auth-microservice:3370}
+      - LOGGING_SERVICE_URL=${LOGGING_SERVICE_URL:-http://logging-microservice:${LOGGING_SERVICE_PORT:-3367}}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://auth-microservice:${AUTH_SERVICE_PORT:-3370}}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8100}/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-3102}/docs"]
       interval: 30s
       timeout: 5s
       retries: 5

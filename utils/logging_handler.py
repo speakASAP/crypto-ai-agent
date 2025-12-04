@@ -32,7 +32,7 @@ class ExternalLoggingHandler(logging.Handler):
 
         Args:
             service_name: Name of the service sending logs (default: crypto-ai-agent)
-            service_url: URL of the logging microservice (e.g., http://logging-microservice:3268/api/logs)
+            service_url: URL of the logging microservice (e.g., http://logging-microservice:${PORT:-3367}/api/logs, port configured in logging-microservice/.env)
         """
         super().__init__()
         self.service_name = service_name

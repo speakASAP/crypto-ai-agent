@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 360
     jwt_refresh_token_expire_days: int = 7
-    cors_origins: str = "http://localhost:3100,https://yourdomain.com"
+    cors_origins: str = os.getenv("CORS_ORIGINS", f"http://localhost:{os.getenv('FRONTEND_PORT', '3100')},https://yourdomain.com")
     api_host: str = "0.0.0.0"
-    api_port: int = 8100
+    api_port: int = int(os.getenv("API_PORT", "3102"))
     
     # External APIs
     binance_api_url: str = "https://api.binance.com/api/v3"
@@ -68,8 +68,8 @@ class Settings(BaseSettings):
     frontend_refresh_interval: int = 60000
     
     # Script Configuration
-    backend_port: int = 8100
-    frontend_port: int = 3100
+    backend_port: int = int(os.getenv("API_PORT", "3102"))
+    frontend_port: int = int(os.getenv("FRONTEND_PORT", "3100"))
     log_dir: str = "logs"
     data_dir: str = "data"
     

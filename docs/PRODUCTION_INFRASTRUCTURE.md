@@ -25,8 +25,8 @@ All services are located in `/home/statex/`:
 
 **Production uses the shared `database-server` microservice:**
 
-- **PostgreSQL**: `db-server-postgres:5432` (from database-server)
-- **Redis**: `db-server-redis:6379` (from database-server)
+- **PostgreSQL**: `db-server-postgres:${DB_SERVER_PORT:-5432}` (from database-server, port configured in `database-server/.env`)
+- **Redis**: `db-server-redis:${REDIS_SERVER_PORT:-6379}` (from database-server, port configured in `database-server/.env`)
 - **Network**: All services on `nginx-network`
 
 **Blue/Green Deployment Configuration:**
@@ -35,8 +35,8 @@ Both `docker-compose.blue.yml` and `docker-compose.green.yml` are correctly conf
 
 ```yaml
 environment:
-  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
-  - REDIS_URL=redis://db-server-redis:6379/0
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:${DB_SERVER_PORT:-5432}/${POSTGRES_DB:-crypto_ai_agent}  # DB_SERVER_PORT from database-server/.env
+  - REDIS_URL=redis://db-server-redis:${REDIS_SERVER_PORT:-6379}/0  # REDIS_SERVER_PORT from database-server/.env
 ```
 
 ### Files NOT Used in Production
@@ -90,7 +90,7 @@ This script:
 
 ```bash
 docker exec crypto-ai-backend-blue env | grep DATABASE_URL
-# Should show: db-server-postgres:5432
+# Should show: db-server-postgres:${DB_SERVER_PORT:-5432}  # DB_SERVER_PORT from database-server/.env
 ```
 
 **2. Verify database-server is running:**
@@ -149,7 +149,7 @@ from app.utils.db import connect_with_retry
 conn = connect_with_retry()
 print('✅ Connected to:', conn.info.host, conn.info.port)
 "
-# Should show: db-server-postgres:5432
+# Should show: db-server-postgres:${DB_SERVER_PORT:-5432}  # DB_SERVER_PORT from database-server/.env
 ```
 
 ## Summary

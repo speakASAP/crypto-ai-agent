@@ -92,7 +92,7 @@ crypto-ai-agent/
 docker-compose up --build
 
 # Access the application
-# Frontend: http://localhost:3100
+# Frontend: http://localhost:${FRONTEND_PORT:-3100}  # FRONTEND_PORT configured in crypto-ai-agent/.env
 # Backend API: http://localhost:8100
 # API Docs: http://localhost:8100/docs
 # Performance Dashboard: http://localhost:8100/api/v2/performance/summary

@@ -59,9 +59,9 @@
 
 ### API Documentation
 
-- **Backend API**: <http://localhost:8100/docs>
-- **Frontend**: <http://localhost:3100>
-- **WebSocket**: ws://localhost:8100/ws
+- **Backend API**: <http://localhost:${API_PORT:-3102}/docs> (Blue, configured in `crypto-ai-agent/.env`) or <http://localhost:${API_PORT_GREEN:-3103}/docs> (Green)
+- **Frontend**: <http://localhost:${FRONTEND_PORT:-3100}> (Blue, configured in `crypto-ai-agent/.env`) or <http://localhost:${FRONTEND_PORT_GREEN:-3101}> (Green)
+- **WebSocket**: ws://localhost:${API_PORT:-3102}/ws (Blue) or ws://localhost:${API_PORT_GREEN:-3103}/ws (Green)
 
 ## 🆕 Recent Updates
 
