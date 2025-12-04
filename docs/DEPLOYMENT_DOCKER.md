@@ -4,8 +4,8 @@
 
 - Single host using docker-compose
 - External Nginx reverse proxy handles TLS and routing to:
-  - Frontend: <http://127.0.0.1:3100>
-  - Backend API + WebSocket: <http://127.0.0.1:8100> (including `/ws`)
+  - Frontend: <http://127.0.0.1:${FRONTEND_PORT:-3100}> (configured in `crypto-ai-agent/.env`)
+  - Backend API + WebSocket: <http://127.0.0.1:${API_PORT:-3102}> (including `/ws`, port configured in `crypto-ai-agent/.env`)
 - Persistent volumes for Postgres/Redis, bind-mount `./logs` for backend logs
 
 ## Prerequisites
@@ -34,15 +34,15 @@ echo "ENVIRONMENT=production" >> .env
 
 ```bash
 # Backend
-curl -f http://127.0.0.1:8100/docs
+curl -f http://127.0.0.1:${API_PORT:-3102}/docs  # API_PORT configured in crypto-ai-agent/.env
 # Frontend
-curl -f http://127.0.0.1:3100
+curl -f http://127.0.0.1:${FRONTEND_PORT:-3100}  # FRONTEND_PORT configured in crypto-ai-agent/.env
 ```
 
 1. Configure external Nginx
 
-- Point `app.example.com` to 127.0.0.1:3100
-- Point `api.example.com` to 127.0.0.1:8100
+- Point `app.example.com` to 127.0.0.1:${FRONTEND_PORT:-3100}
+- Point `api.example.com` to 127.0.0.1:${API_PORT:-3102}  # API_PORT configured in crypto-ai-agent/.env
 - Enable WebSocket proxying for `/ws`
 
 ## Nginx snippets
@@ -80,7 +80,7 @@ server {
     server_name app.example.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3100;
+        proxy_pass http://127.0.0.1:${FRONTEND_PORT:-3100};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -99,8 +99,8 @@ server {
 Set in `.env` or in server environment:
 
 - Backend
-  - `DATABASE_URL=postgresql+psycopg://USER:PASS@localhost:5432/DB`
-  - `REDIS_URL=redis://localhost:6379/0`
+  - `DATABASE_URL=postgresql+psycopg://USER:PASS@localhost:${DB_SERVER_PORT:-5432}/DB` (configured in `database-server/.env`)
+  - `REDIS_URL=redis://localhost:${REDIS_SERVER_PORT:-6379}/0` (configured in `database-server/.env`)
   - `JWT_SECRET` (long random string)
   - `CORS_ORIGINS=https://app.example.com`
   - `LOG_LEVEL=INFO`
@@ -272,8 +272,8 @@ The deployment uses:
 
 The system checks:
 
-- **Backend**: `http://crypto-ai-backend-{color}:8100/health`
-- **Frontend**: `http://crypto-ai-frontend-{color}:3100/`
+- **Backend**: `http://crypto-ai-backend-{color}:${API_PORT:-3102}/health` (configured in `crypto-ai-agent/.env`)
+- **Frontend**: `http://crypto-ai-frontend-{color}:${FRONTEND_PORT:-3100}/` (configured in `crypto-ai-agent/.env`)
 
 ### Monitoring
 

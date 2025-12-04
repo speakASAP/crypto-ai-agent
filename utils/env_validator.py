@@ -102,7 +102,7 @@ class EnvironmentValidator:
                 "type": int,
                 "min_value": 1000,
                 "max_value": 65535,
-                "default": 8501,
+                "default": 3104,
                 "description": "Port for UI dashboard"
             },
             "UI_HOST": {

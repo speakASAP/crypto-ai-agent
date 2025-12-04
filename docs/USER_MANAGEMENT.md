@@ -319,10 +319,10 @@ export function middleware(request: NextRequest) {
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/crypto_ai_agent
+DATABASE_URL=postgresql://user:password@localhost:${DB_SERVER_PORT:-5432}/crypto_ai_agent  # DB_SERVER_PORT from database-server/.env
 
 # CORS
-CORS_ORIGINS=http://localhost:3100,https://yourdomain.com
+CORS_ORIGINS=http://localhost:${FRONTEND_PORT:-3100},https://yourdomain.com  # FRONTEND_PORT configured in crypto-ai-agent/.env
 ```
 
 ### Backend Configuration
@@ -347,7 +347,7 @@ class Settings(BaseSettings):
    ./start.sh
    
    # Navigate to registration
-   open http://localhost:3100/register
+   open http://localhost:${FRONTEND_PORT:-3100}/register  # FRONTEND_PORT configured in crypto-ai-agent/.env
    
    # Test with different users
    # Verify data isolation

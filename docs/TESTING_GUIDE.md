@@ -70,7 +70,7 @@ docker run --rm --network nginx-network alpine/curl:latest \
 
 ```bash
 docker run --rm --network nginx-network alpine/curl:latest \
-  curl -s -o /dev/null -w "%{http_code}" http://crypto-ai-frontend-green:3100/
+  curl -s -o /dev/null -w "%{http_code}" http://crypto-ai-frontend-green:${FRONTEND_PORT:-3100}/
 ```
 
 **Expected Result:**
@@ -137,8 +137,8 @@ cat nginx/conf.d/crypto-ai-agent.statex.cz.conf | grep -A 2 "upstream crypto-ai-
 
 ```nginx
 upstream crypto-ai-frontend {
-    server crypto-ai-frontend-blue:3100 weight=0 backup;
-    server crypto-ai-frontend-green:3100 weight=100;
+    server crypto-ai-frontend-blue:${FRONTEND_PORT:-3100} weight=0 backup;  # Port configured in crypto-ai-agent/.env
+    server crypto-ai-frontend-green:${FRONTEND_PORT:-3100} weight=100;  # Port configured in crypto-ai-agent/.env
 }
 ```
 
@@ -267,8 +267,8 @@ cat nginx/conf.d/crypto-ai-agent.statex.cz.conf | grep -A 2 "upstream crypto-ai-
 
 ```nginx
 upstream crypto-ai-frontend {
-    server crypto-ai-frontend-blue:3100 weight=100;
-    server crypto-ai-frontend-green:3100 weight=0 backup;
+    server crypto-ai-frontend-blue:${FRONTEND_PORT:-3100} weight=100;  # Port configured in crypto-ai-agent/.env
+    server crypto-ai-frontend-green:${FRONTEND_PORT:-3100} weight=0 backup;  # Port configured in crypto-ai-agent/.env
 }
 ```
 

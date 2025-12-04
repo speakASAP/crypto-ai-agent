@@ -72,7 +72,7 @@ done
 
 # Use environment variables from .env file
 # Align with docker-compose.yml naming convention
-API_PORT=${API_PORT:-${BACKEND_PORT:-8100}}
+API_PORT=${API_PORT:-${BACKEND_PORT:-3102}}
 FRONTEND_PORT=${FRONTEND_PORT:-3100}
 LOG_DIR=${LOG_DIR:-logs}
 DATA_DIR=${DATA_DIR:-data}

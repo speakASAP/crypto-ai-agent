@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set default values if not provided
-BACKEND_PORT=${BACKEND_PORT:-8100}
+BACKEND_PORT=${BACKEND_PORT:-${API_PORT:-3102}}
 FRONTEND_PORT=${FRONTEND_PORT:-3100}
 LOG_DIR=${LOG_DIR:-logs}
 DATA_DIR=${DATA_DIR:-data}

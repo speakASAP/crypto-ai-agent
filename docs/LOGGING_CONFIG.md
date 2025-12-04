@@ -12,7 +12,7 @@ The Crypto AI Agent uses a centralized logging system that provides comprehensiv
 - **Frontend**: Uses `frontend/src/lib/logger.ts` which sends logs to the backend `/api/logging/log` endpoint
 - **Centralized Logger**: `utils/logger.py` provides structured logging functions (available but not currently used in backend)
 - **All logs**: Write to the same centralized log file (`logs/crypto_agent.log`)
-- **External Logging Service**: Logs are also sent to external logging microservice at `http://logging-microservice:3268` (dual logging with local fallback)
+- **External Logging Service**: Logs are also sent to external logging microservice at `http://logging-microservice:${PORT:-3367}` (configured in `logging-microservice/.env`, dual logging with local fallback)
 
 ## Configuration
 
@@ -27,7 +27,7 @@ LOG_FILE=logs/crypto_agent.log    # Path to log file
 LOG_FORMAT="%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log format
 
 # External Logging Service (optional)
-LOGGING_SERVICE_URL=http://logging-microservice:3268  # URL of external logging microservice
+LOGGING_SERVICE_URL=http://logging-microservice:${PORT:-3367}  # URL of external logging microservice (port configured in logging-microservice/.env)
 ```
 
 ### External Logging Service
@@ -47,7 +47,7 @@ The application supports dual logging: logs are sent to both local files and an 
 
 - Set `LOGGING_SERVICE_URL` in `.env` to enable external logging
 - If not configured, only local file logging is used
-- External service URL format: `http://logging-microservice:3268`
+- External service URL format: `http://logging-microservice:${PORT:-3367}` (port configured in `logging-microservice/.env`)
 
 **Metadata Structure**:
 Logs sent to external service include rich metadata:
@@ -326,12 +326,6 @@ This will log:
 - Ship logs to Elasticsearch
 - Create dashboards in Kibana
 - Set up alerts for critical events
-
-### Prometheus + Grafana
-
-- Export log metrics to Prometheus
-- Create monitoring dashboards
-- Set up alerting rules
 
 ### Cloud Logging (AWS CloudWatch, Google Cloud Logging)
 

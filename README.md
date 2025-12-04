@@ -110,7 +110,8 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 
    ```bash
    cd backend
-   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8100
+   # Port configured in crypto-ai-agent/.env: API_PORT (default: 3102)
+   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port ${API_PORT:-3102}
    ```
 
 5. **Start the frontend (in a new terminal):**
@@ -120,13 +121,13 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
    npm run dev
    ```
 
-6. **Access the application:**
-   - Frontend: <http://localhost:3100>
-   - Backend API: <http://localhost:8100>
-   - API Docs: <http://localhost:8100/docs>
+6. **Access the application** (ports configured in `crypto-ai-agent/.env`):
+   - Frontend: <http://localhost:${FRONTEND_PORT:-3100}>
+   - Backend API: <http://localhost:${API_PORT:-3102}>
+   - API Docs: <http://localhost:${API_PORT:-3102}/docs>
 
 7. **First Time Setup:**
-   - Navigate to <http://localhost:3100/register>
+   - Navigate to <http://localhost:${FRONTEND_PORT:-3100}/register>
    - Create your account
    - Login and start managing your portfolio
    - Configure AI Advisor (see [AI Advisor Documentation](docs/AI_ADVISOR.md))
@@ -200,13 +201,13 @@ The Crypto AI Agent now features a complete multi-user authentication system tha
    ./start.sh
    ```
 
-2. **Register a new account:**
-   - Navigate to <http://localhost:3100/register>
+2. **Register a new account** (ports configured in `crypto-ai-agent/.env`):
+   - Navigate to <http://localhost:${FRONTEND_PORT:-3100}/register>
    - Fill in your email, username, and password
    - Click "Register" to create your account
 
 3. **Login to your account:**
-   - Navigate to <http://localhost:3100/login>
+   - Navigate to <http://localhost:${FRONTEND_PORT:-3100}/login>
    - Enter your credentials
    - You'll be redirected to your personal dashboard
 
@@ -384,6 +385,25 @@ The system includes the following local tables:
 - **Fresh Start**: Users need to re-register and recreate their portfolios
 - **Backup**: Original data was backed up before migration
 
+## 🔌 Port Configuration
+
+**Port Range**: 31xx (crypto-ai-agent application)
+
+All services use the same host and container ports for consistency:
+
+| Service | Host Port (Blue) | Host Port (Green) | Container Port | Description |
+|---------|------------------|-------------------|----------------|-------------|
+| **Frontend** | 3100 | 3101 | 3100 | Next.js frontend application |
+| **Backend API** | 3102 | 3103 | 3102 | FastAPI backend service |
+| **UI Port** | 3104 | 3104 | 3104 | Additional UI interface (Streamlit) |
+
+**Note**:
+
+- Green deployment uses different host ports but same container ports as blue deployment
+- All ports are exposed on `127.0.0.1` only (localhost) for security
+- External access is provided via nginx-microservice reverse proxy
+- Uses shared database-server (db-server-postgres:5432, db-server-redis:6379) via nginx-network
+
 ### Local Development
 
 #### Backend Development
@@ -391,7 +411,7 @@ The system includes the following local tables:
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 3102
 ```
 
 #### Frontend Development
@@ -498,10 +518,10 @@ See `docs/DEPLOYMENT_DOCKER.md` for docker-compose deployment with external Ngin
 # Build and start
 docker compose up -d --build
 
-# Access
-# Frontend: http://localhost:3100
-# Backend API: http://localhost:8100
-# API Docs: http://localhost:8100/docs
+# Access (ports configured in crypto-ai-agent/.env)
+# Frontend: http://localhost:${FRONTEND_PORT:-3100}
+# Backend API: http://localhost:${API_PORT:-3102}
+# API Docs: http://localhost:${API_PORT:-3102}/docs
 ```
 
 ### Blue/Green Deployment (Production Restart)
@@ -577,7 +597,7 @@ Configuration in `docker-compose.blue.yml` and `docker-compose.green.yml`:
 environment:
   - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
   - REDIS_URL=redis://db-server-redis:6379/0
-  - LOGGING_SERVICE_URL=http://logging-microservice:3268
+  - LOGGING_SERVICE_URL=http://logging-microservice:3367
 ```
 
 Shared database server must be running:
@@ -818,12 +838,12 @@ Use `.env` (not committed) and refer to `.env.example` for keys. Important:
 
 - `DATABASE_URL`: PostgreSQL connection string
   - Production: `postgresql+psycopg://user:pass@db-server-postgres:5432/crypto_ai_agent`
-  - Development: `postgresql+psycopg://crypto:crypto_pass@postgres:5432/crypto_ai_agent`
+  - Development: `postgresql+psycopg://crypto:crypto_pass@db-server-postgres:5432/crypto_ai_agent`
 - `REDIS_URL`: Redis connection string
   - Production: `redis://db-server-redis:6379/0`
-  - Development: `redis://redis:6379/0`
+  - Development: `redis://db-server-redis:6379/0`
 - `LOGGING_SERVICE_URL`: External logging microservice URL (optional)
-  - Production/Docker: `http://logging-microservice:3268`
+  - Production/Docker: `http://logging-microservice:3367`
   - External Access: `https://logging.statex.cz`
   - If not set, only local file logging is used
 - `AUTH_SERVICE_URL`: Auth microservice URL (REQUIRED)

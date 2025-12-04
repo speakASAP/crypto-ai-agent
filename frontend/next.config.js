@@ -3,8 +3,8 @@ const path = require('path')
 
 const nextConfig = {
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8100',
-    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8100/ws',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.API_PORT || '3102'}`,
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:${process.env.API_PORT || '3102'}/ws`,
     // Pass DEBUG flag to frontend (only NEXT_PUBLIC_* vars are available in browser)
     NEXT_PUBLIC_DEBUG: process.env.DEBUG || process.env.NEXT_PUBLIC_DEBUG || 'false',
   },
@@ -15,7 +15,7 @@ const nextConfig = {
     return config
   },
   async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8100'
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.API_PORT || '3102'}`
     return [
       {
         source: '/api/:path*',

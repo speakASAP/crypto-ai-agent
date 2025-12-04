@@ -27,7 +27,7 @@ Production backend **MUST** use these settings:
 ```bash
 # In production .env file or docker-compose environment
 ENVIRONMENT=production
-DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@postgres:${DB_SERVER_PORT:-5432}/${POSTGRES_DB:-crypto_ai_agent}  # DB_SERVER_PORT from database-server/.env
 ```
 
 **Important points:**
@@ -45,7 +45,7 @@ Production backend container configuration:
 services:
   backend:
     environment:
-      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@postgres:${DB_SERVER_PORT:-5432}/${POSTGRES_DB:-crypto_ai_agent}  # DB_SERVER_PORT from database-server/.env
       - ENVIRONMENT=production
     networks:
       - default
@@ -164,7 +164,7 @@ curl https://crypto-ai-agent.statex.cz/api/health
 
 ```bash
 # Update DATABASE_URL in .env or docker-compose
-DATABASE_URL=postgresql+psycopg://user:pass@postgres:5432/db
+DATABASE_URL=postgresql+psycopg://user:pass@postgres:${DB_SERVER_PORT:-5432}/db  # DB_SERVER_PORT from database-server/.env
 # NOT: @localhost:5432/db
 ```
 

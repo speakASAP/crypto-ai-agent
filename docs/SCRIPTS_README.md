@@ -9,7 +9,7 @@ This directory contains scripts to easily manage the Crypto AI Agent application
 Starts the entire application stack:
 
 - **Backend (FastAPI)** on port 8100
-- **Frontend (Next.js)** on port 3100
+- **Frontend (Next.js)** on port ${FRONTEND_PORT:-3100} (configured in `crypto-ai-agent/.env`)
 - **Database (PostgreSQL)** connection verification
 - **Dependencies** installation
 
@@ -43,7 +43,7 @@ Stops all running services and cleans up processes.
 
 - Stops backend (FastAPI) service
 - Stops frontend (Next.js) service
-- Kills any processes on ports 3100 and 8100
+- Kills any processes on ports ${FRONTEND_PORT:-3100} and ${API_PORT:-3102} (configured in `crypto-ai-agent/.env`)
 - Cleans up process files
 - Optionally cleans up log files
 
@@ -92,7 +92,7 @@ Checks the status of all services and provides detailed information.
 
 Once started, you can access:
 
-- **Frontend**: <http://localhost:3100>
+- **Frontend**: <http://localhost:${FRONTEND_PORT:-3100}> (configured in `crypto-ai-agent/.env`)
 - **Backend API**: <http://localhost:8100>
 - **API Documentation**: <http://localhost:8100/docs>
 
