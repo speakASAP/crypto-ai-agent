@@ -1,3 +1,6 @@
+*backup*
+*bck*
+
 # Environment variables and sensitive data
 .env*
 !.env.example
