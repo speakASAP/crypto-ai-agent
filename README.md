@@ -25,11 +25,11 @@ This is the next-generation version of the Crypto AI Agent, successfully migrate
 ### Database: PostgreSQL
 
 - **All Environments** (Development & Production): Uses shared database server
-  - Database Server: `db-server-postgres:5432` (via nginx-network)
+  - Database Server: `db-server-postgres:${DB_SERVER_PORT:-5432}` (via nginx-network, port configured in database-server/.env)
   - Database Name: `crypto_ai_agent`
   - Infrastructure: Managed by centralized `database-server` microservice
   - Connection: Configured via `DATABASE_URL` environment variable
-  - Example: `postgresql://dbadmin:password@db-server-postgres:5432/crypto_ai_agent`
+  - Example: `postgresql://dbadmin:password@db-server-postgres:${DB_SERVER_PORT:-5432}/crypto_ai_agent`
   - Shared by Blue/Green: Both environments use the same shared database instance
   - Persistent Storage: Data persists across deployments
   - **Note**: Local Postgres/Redis containers have been removed. All applications now use the shared database infrastructure to eliminate port conflicts and ensure consistency.
@@ -293,7 +293,7 @@ TELEGRAM_CHAT_ID=your_chat_id_here
 **Important**:
 
 - `AUTH_SERVICE_URL` is required - points to the centralized auth-microservice
-- For Docker/development, use: `AUTH_SERVICE_URL=http://auth-microservice:3370`
+- For Docker/development, use: `AUTH_SERVICE_URL=http://auth-microservice:${PORT:-3370}` (port configured in auth-microservice/.env)
 - For production, use: `AUTH_SERVICE_URL=https://auth.statex.cz`
 - JWT tokens are generated and validated by auth-microservice (no local JWT_SECRET needed)
 - Binance API credentials are configured per-user in Profile Settings
@@ -402,7 +402,7 @@ All services use the same host and container ports for consistency:
 - Green deployment uses different host ports but same container ports as blue deployment
 - All ports are exposed on `127.0.0.1` only (localhost) for security
 - External access is provided via nginx-microservice reverse proxy
-- Uses shared database-server (db-server-postgres:5432, db-server-redis:6379) via nginx-network
+- Uses shared database-server (db-server-postgres:${DB_SERVER_PORT:-5432}, db-server-redis:${REDIS_SERVER_PORT:-6379}) via nginx-network (ports configured in database-server/.env)
 
 ### Local Development
 
@@ -595,8 +595,9 @@ Configuration in `docker-compose.blue.yml` and `docker-compose.green.yml`:
 
 ```yaml
 environment:
-  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
-  - REDIS_URL=redis://db-server-redis:6379/0
+  # Ports configured in database-server/.env: DB_SERVER_PORT (default: 5432), REDIS_SERVER_PORT (default: 6379)
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:${DB_SERVER_PORT:-5432}/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://db-server-redis:${REDIS_SERVER_PORT:-6379}/0
   - LOGGING_SERVICE_URL=http://logging-microservice:3367
 ```
 
@@ -657,8 +658,8 @@ The production environment uses a **shared database server** (`database-server`)
 
 **Production Setup:**
 
-- **PostgreSQL**: `db-server-postgres:5432` (shared database server)
-- **Redis**: `db-server-redis:6379` (shared cache)
+- **PostgreSQL**: `db-server-postgres:${DB_SERVER_PORT:-5432}` (shared database server, port configured in database-server/.env)
+- **Redis**: `db-server-redis:${REDIS_SERVER_PORT:-6379}` (shared cache, port configured in database-server/.env)
 - **Database Name**: `crypto_ai_agent`
 - **Infrastructure**: Managed by the centralized `database-server` microservice
 - **Connection**: Both blue and green environments use the same shared database instance
@@ -669,8 +670,9 @@ Both `docker-compose.blue.yml` and `docker-compose.green.yml` are configured to 
 
 ```yaml
 environment:
-  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:5432/${POSTGRES_DB:-crypto_ai_agent}
-  - REDIS_URL=redis://db-server-redis:6379/0
+  # Ports configured in database-server/.env: DB_SERVER_PORT (default: 5432), REDIS_SERVER_PORT (default: 6379)
+  - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-crypto}:${POSTGRES_PASSWORD:-crypto_pass}@db-server-postgres:${DB_SERVER_PORT:-5432}/${POSTGRES_DB:-crypto_ai_agent}
+  - REDIS_URL=redis://db-server-redis:${REDIS_SERVER_PORT:-6379}/0
 ```
 
 **Important Points:**
