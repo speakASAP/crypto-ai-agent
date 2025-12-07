@@ -19,9 +19,9 @@ services:
       - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://auth-microservice:${AUTH_SERVICE_PORT:-3370}}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-3102}/api/health"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 2
     networks:
       - nginx-network
 
@@ -42,9 +42,9 @@ services:
       - NEXT_PUBLIC_DEBUG=${DEBUG:-false}
     healthcheck:
       test: ["CMD", "curl", "-f", "-L", "http://localhost:${FRONTEND_PORT:-3100}"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 2
     networks:
       - nginx-network
 
