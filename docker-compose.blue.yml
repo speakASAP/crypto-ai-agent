@@ -22,6 +22,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 2
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+        reservations:
+          memory: 100M
     networks:
       - nginx-network
 
@@ -45,6 +51,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 2
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+        reservations:
+          memory: 100M
     networks:
       - nginx-network
 
