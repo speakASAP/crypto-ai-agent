@@ -26,6 +26,8 @@ RUN mkdir -p /app/logs
 ENV API_PORT=8100
 EXPOSE $API_PORT
 
-CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT}"]
+# Start application with Gunicorn (production-ready ASGI server)
+# Using 2 workers for better concurrency and fault tolerance
+CMD ["sh", "-c", "gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT} --timeout 90 --access-logfile - --error-logfile -"]
 
 
