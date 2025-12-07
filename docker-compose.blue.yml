@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${API_PORT:-3102}:${API_PORT:-3102}"
+      - ${API_PORT:-3102}:${API_PORT:-3102}
     # Note: Depends on shared infrastructure (postgres, redis) managed separately
     # Infrastructure must be running before starting blue/green deployments
     volumes:
@@ -34,7 +34,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3100}:${FRONTEND_PORT:-3100}"
+      - ${FRONTEND_PORT:-3100}:${FRONTEND_PORT:-3100}
     depends_on:
       - backend
     environment:
