@@ -19,7 +19,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${API_PORT:-3102}:${API_PORT:-3102}"
+      - ${API_PORT:-3102}:${API_PORT:-3102}
     volumes:
       - /srv/storagebox/statex/docker-volumes/crypto-ai-agent/logs:/app/logs
     environment:
@@ -46,7 +46,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3100}:${FRONTEND_PORT:-3100}"
+      - ${FRONTEND_PORT:-3100}:${FRONTEND_PORT:-3100}
     depends_on:
       - backend
     environment:
