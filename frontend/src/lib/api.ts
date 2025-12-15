@@ -63,9 +63,9 @@ class ApiClient {
           })
           
           // Skip interceptor if token is already set (for retry after refresh)
-          if (config._skipAuthInterceptor && config.headers?.Authorization) {
+          if ((config as any)._skipAuthInterceptor && config.headers?.Authorization) {
             logger.debug('⏭️ Skipping interceptor - token already set for retry:', config.url)
-            delete config._skipAuthInterceptor // Clean up flag
+            delete (config as any)._skipAuthInterceptor // Clean up flag
             return config
           }
           
@@ -138,7 +138,7 @@ class ApiClient {
             const authState = useAuthStore.getState()
             
             // Prevent infinite loop - if this is a retry after refresh, don't refresh again
-            if (error.config?._skipAuthInterceptor) {
+            if ((error.config as any)?._skipAuthInterceptor) {
               logger.debug('🔄 401 on retry after refresh - token may be invalid, logging out')
               authState.logout()
               return Promise.reject(this.handleError(error))
@@ -221,7 +221,7 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 150))
       
       // Create a new config object with new token - mark it to skip interceptor token addition
-      const retryConfig = {
+      const retryConfig: any = {
         ...originalConfig,
         _skipAuthInterceptor: true, // Flag to skip interceptor token addition
         headers: {
