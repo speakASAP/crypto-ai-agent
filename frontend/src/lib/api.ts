@@ -63,8 +63,12 @@ class ApiClient {
           })
           
           // Add token if available (don't require hydration for immediate use after login)
-          if (authState.accessToken) {
-            config.headers.Authorization = `Bearer ${authState.accessToken}`
+          // Also check if token is being passed directly in config (for retry after refresh)
+          const tokenFromConfig = config.headers?.Authorization?.replace('Bearer ', '')
+          const tokenToUse = tokenFromConfig || authState.accessToken
+          
+          if (tokenToUse) {
+            config.headers.Authorization = `Bearer ${tokenToUse}`
             logger.debug('✅ Added auth header to request:', config.url)
           } else if (authState.isHydrated) {
             logger.debug('❌ No access token available for request:', config.url)
@@ -174,13 +178,29 @@ class ApiClient {
     try {
       logger.debug('🔄 Attempting token refresh...')
       const authState = useAuthStore.getState()
-      await authState.refreshAccessToken()
+      
+      // Call refresh token API directly (bypass interceptor to avoid circular 401)
+      const refreshResponse = await this.client.post('/api/auth/refresh', null, {
+        params: { refresh_token: authState.refreshToken },
+        headers: {} // No auth header for refresh request
+      })
+      
+      const tokenData = refreshResponse.data
+      
+      // Update store directly with new tokens
+      useAuthStore.setState({
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token,
+        user: tokenData.user,
+        isAuthenticated: true,
+      })
+      
       logger.debug('✅ Token refresh successful')
       
       // Wait a bit for store to update
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise(resolve => setTimeout(resolve, 100))
       
-      // Retry the original request with new token
+      // Get fresh token from store
       const newAuthState = useAuthStore.getState()
       if (!newAuthState.accessToken) {
         throw new Error('No access token after refresh')
