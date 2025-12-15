@@ -268,7 +268,7 @@ class AuthService:
                     headers={"Content-Type": "application/json"},
                 )
 
-                if response.status_code == 200:
+                if response.status_code == 200 or response.status_code == 201:
                     data = response.json()
                     user_data = data.get("user", {})
                     return {
@@ -281,6 +281,7 @@ class AuthService:
                             "full_name": f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip() or None,
                             "preferred_currency": "USD",
                             "is_active": user_data.get("isActive", True),
+                            "created_at": user_data.get("createdAt"),
                         }
                     }
                 else:
