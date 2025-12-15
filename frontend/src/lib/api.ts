@@ -64,7 +64,8 @@ class ApiClient {
           
           // Add token if available (don't require hydration for immediate use after login)
           // Also check if token is being passed directly in config (for retry after refresh)
-          const tokenFromConfig = config.headers?.Authorization?.replace('Bearer ', '')
+          const authHeader = config.headers?.Authorization
+          const tokenFromConfig = typeof authHeader === 'string' ? authHeader.replace('Bearer ', '') : null
           const tokenToUse = tokenFromConfig || authState.accessToken
           
           if (tokenToUse) {
