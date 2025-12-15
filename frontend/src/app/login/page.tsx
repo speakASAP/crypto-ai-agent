@@ -85,6 +85,11 @@ export default function LoginPage() {
                     console.log('Email onChange:', e.target.value)
                     setEmail(e.target.value)
                   }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLInputElement
+                    console.log('Email onInput:', target.value)
+                    setEmail(target.value)
+                  }}
                   placeholder="Enter your email"
                   autoComplete="email"
                   required
@@ -101,6 +106,11 @@ export default function LoginPage() {
                   onChange={(e) => {
                     console.log('Password onChange:', e.target.value ? '***' : 'EMPTY')
                     setPassword(e.target.value)
+                  }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLInputElement
+                    console.log('Password onInput:', target.value ? '***' : 'EMPTY')
+                    setPassword(target.value)
                   }}
                   placeholder="Enter your password"
                   autoComplete="current-password"
