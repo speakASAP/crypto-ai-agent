@@ -18,25 +18,34 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (loading) return // Prevent multiple submissions
+    console.log('Form submitted', { email, password, loading })
+    if (loading) {
+      console.log('Already loading, preventing submission')
+      return // Prevent multiple submissions
+    }
     
     setError('')
     
     // Client-side validation
     if (!email || !email.trim()) {
+      console.log('Email validation failed')
       setError('Email is required')
       return
     }
     if (!password || !password.trim()) {
+      console.log('Password validation failed')
       setError('Password is required')
       return
     }
     
+    console.log('Calling login function')
     try {
       await login({ email: email.trim(), password })
+      console.log('Login successful, redirecting')
       // Use window.location.href to ensure full page reload and proper cookie handling
       window.location.href = '/dashboard'
     } catch (error: any) {
+      console.error('Login error:', error)
       // Extract error message from validation errors if present
       let errorMessage = 'Login failed'
       if (error.message) {
