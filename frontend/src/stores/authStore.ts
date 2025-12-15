@@ -78,13 +78,16 @@ export const useAuthStore = create<AuthState>()(
         try {
           const response = await apiClient.login(credentials)
           
-          // Set tokens first
+          // Set tokens first - ensure they're set before making next request
           set({
             accessToken: response.access_token,
             refreshToken: response.refresh_token,
             user: response.user,
             isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
           })
+          
+          // Small delay to ensure store is updated and interceptor can read the token
+          await new Promise(resolve => setTimeout(resolve, 10))
           
           // Fetch complete user profile including telegram settings
           const completeUser = await apiClient.getCurrentUser()
