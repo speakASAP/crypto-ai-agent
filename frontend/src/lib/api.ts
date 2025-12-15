@@ -244,8 +244,8 @@ class ApiClient {
       
       logger.debug('🔄 Retrying request with new token:', retryConfig.url, 'Token:', tokenData.access_token.substring(0, 30) + '...')
       
-      // Retry the request - it will go through interceptor but will use the token we set
-      const retryResponse = await this.client(retryConfig)
+      // Retry the request using request() method - interceptor will preserve the token we set
+      const retryResponse = await this.client.request(retryConfig)
       logger.debug('✅ Retry successful:', retryConfig.url)
       return retryResponse
     } catch (refreshError) {
