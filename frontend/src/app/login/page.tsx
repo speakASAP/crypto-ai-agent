@@ -81,7 +81,10 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    console.log('Email onChange:', e.target.value)
+                    setEmail(e.target.value)
+                  }}
                   placeholder="Enter your email"
                   autoComplete="email"
                   required
@@ -95,7 +98,10 @@ export default function LoginPage() {
                   id="password"
                   type="password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    console.log('Password onChange:', e.target.value ? '***' : 'EMPTY')
+                    setPassword(e.target.value)
+                  }}
                   placeholder="Enter your password"
                   autoComplete="current-password"
                   required
