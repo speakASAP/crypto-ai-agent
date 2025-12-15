@@ -177,20 +177,28 @@ class ApiClient {
       await authState.refreshAccessToken()
       logger.debug('✅ Token refresh successful')
       
+      // Wait a bit for store to update
+      await new Promise(resolve => setTimeout(resolve, 50))
+      
       // Retry the original request with new token
       const newAuthState = useAuthStore.getState()
       if (!newAuthState.accessToken) {
         throw new Error('No access token after refresh')
       }
       
-      // Ensure headers object exists
-      if (!originalConfig.headers) {
-        originalConfig.headers = {}
+      // Create a new config object to avoid mutating the original
+      const retryConfig = {
+        ...originalConfig,
+        headers: {
+          ...originalConfig.headers,
+          Authorization: `Bearer ${newAuthState.accessToken}`
+        }
       }
-      originalConfig.headers.Authorization = `Bearer ${newAuthState.accessToken}`
+      
+      logger.debug('🔄 Retrying request with new token:', retryConfig.url)
       
       // Retry the request
-      return this.client(originalConfig)
+      return this.client(retryConfig)
     } catch (refreshError) {
       logger.debug('🔄 Token refresh failed:', refreshError instanceof Error ? refreshError.message : 'Unknown error')
       // Immediately logout on refresh failure
