@@ -62,6 +62,13 @@ class ApiClient {
             url: config.url
           })
           
+          // Skip interceptor if token is already set (for retry after refresh)
+          if (config._skipAuthInterceptor && config.headers?.Authorization) {
+            logger.debug('⏭️ Skipping interceptor - token already set for retry:', config.url)
+            delete config._skipAuthInterceptor // Clean up flag
+            return config
+          }
+          
           // Add token if available (don't require hydration for immediate use after login)
           // Also check if token is being passed directly in config (for retry after refresh)
           const authHeader = config.headers?.Authorization
@@ -126,9 +133,17 @@ class ApiClient {
         
         // Handle 401 errors (token expired)
         if (error.response?.status === 401) {
-          // Only handle refresh on client side and when hydrated
+          // Only handle refresh on client side
           if (typeof window !== 'undefined') {
             const authState = useAuthStore.getState()
+            
+            // Prevent infinite loop - if this is a retry after refresh, don't refresh again
+            if (error.config?._skipAuthInterceptor) {
+              logger.debug('🔄 401 on retry after refresh - token may be invalid, logging out')
+              authState.logout()
+              return Promise.reject(this.handleError(error))
+            }
+            
             logger.debug('🔄 401 error - auth state:', { 
               hasRefreshToken: !!authState.refreshToken, 
               isAuthenticated: authState.isAuthenticated,
@@ -188,6 +203,10 @@ class ApiClient {
       
       const tokenData = refreshResponse.data
       
+      if (!tokenData.access_token) {
+        throw new Error('No access token in refresh response')
+      }
+      
       // Update store directly with new tokens
       useAuthStore.setState({
         accessToken: tokenData.access_token,
@@ -196,29 +215,24 @@ class ApiClient {
         isAuthenticated: true,
       })
       
-      logger.debug('✅ Token refresh successful')
+      logger.debug('✅ Token refresh successful, new token:', tokenData.access_token.substring(0, 20) + '...')
       
       // Wait a bit for store to update
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise(resolve => setTimeout(resolve, 150))
       
-      // Get fresh token from store
-      const newAuthState = useAuthStore.getState()
-      if (!newAuthState.accessToken) {
-        throw new Error('No access token after refresh')
-      }
-      
-      // Create a new config object to avoid mutating the original
+      // Create a new config object with new token - mark it to skip interceptor token addition
       const retryConfig = {
         ...originalConfig,
+        _skipAuthInterceptor: true, // Flag to skip interceptor token addition
         headers: {
           ...originalConfig.headers,
-          Authorization: `Bearer ${newAuthState.accessToken}`
+          Authorization: `Bearer ${tokenData.access_token}` // Use token directly from response
         }
       }
       
       logger.debug('🔄 Retrying request with new token:', retryConfig.url)
       
-      // Retry the request
+      // Retry the request - it will go through interceptor but will use the token we set
       return this.client(retryConfig)
     } catch (refreshError) {
       logger.debug('🔄 Token refresh failed:', refreshError instanceof Error ? refreshError.message : 'Unknown error')
