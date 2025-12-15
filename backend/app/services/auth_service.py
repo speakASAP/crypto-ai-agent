@@ -141,7 +141,7 @@ class AuthService:
                     headers={"Content-Type": "application/json"},
                 )
 
-                if response.status_code == 200:
+                if response.status_code == 200 or response.status_code == 201:
                     data = response.json()
                     # Map auth-microservice response to expected format
                     user_data = data.get("user", {})
