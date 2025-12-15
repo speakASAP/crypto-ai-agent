@@ -62,14 +62,14 @@ class ApiClient {
             url: config.url
           })
           
-          // Only proceed if store is hydrated
-          if (authState.isHydrated && authState.accessToken) {
+          // Add token if available (don't require hydration for immediate use after login)
+          if (authState.accessToken) {
             config.headers.Authorization = `Bearer ${authState.accessToken}`
             logger.debug('✅ Added auth header to request:', config.url)
           } else if (authState.isHydrated) {
             logger.debug('❌ No access token available for request:', config.url)
           } else {
-            logger.debug('⏳ Auth store not hydrated yet for request:', config.url)
+            logger.debug('⏳ Auth store not hydrated yet, but checking for token:', config.url)
           }
         }
         
@@ -255,8 +255,12 @@ class ApiClient {
     return response.data
   }
 
-  async getCurrentUser(): Promise<User> {
-    const response = await this.client.get('/api/auth/me')
+  async getCurrentUser(accessToken?: string): Promise<User> {
+    const config: any = {}
+    if (accessToken) {
+      config.headers = { Authorization: `Bearer ${accessToken}` }
+    }
+    const response = await this.client.get('/api/auth/me', config)
     return response.data
   }
 

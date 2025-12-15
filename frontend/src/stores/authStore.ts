@@ -86,11 +86,8 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
           })
           
-          // Small delay to ensure store is updated and interceptor can read the token
-          await new Promise(resolve => setTimeout(resolve, 10))
-          
-          // Fetch complete user profile including telegram settings
-          const completeUser = await apiClient.getCurrentUser()
+          // Fetch complete user profile including telegram settings - pass token directly
+          const completeUser = await apiClient.getCurrentUser(response.access_token)
           
           set({
             user: completeUser,
@@ -167,8 +164,8 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: calculateIsAuthenticated(response.access_token, response.user),
           })
           
-          // Fetch complete user profile including telegram settings
-          const completeUser = await apiClient.getCurrentUser()
+          // Fetch complete user profile including telegram settings - pass token directly
+          const completeUser = await apiClient.getCurrentUser(response.access_token)
           
           set({
             user: completeUser,
