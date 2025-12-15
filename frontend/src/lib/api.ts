@@ -194,8 +194,25 @@ class ApiClient {
 
   private handleError(error: any): ApiError {
     if (error.response) {
+      let message = 'An error occurred'
+      const detail = error.response.data?.detail
+      
+      // Handle validation errors (422) - detail is an array
+      if (Array.isArray(detail) && detail.length > 0) {
+        const firstError = detail[0]
+        if (firstError.msg) {
+          message = firstError.msg
+        } else if (typeof firstError === 'string') {
+          message = firstError
+        }
+      } else if (typeof detail === 'string') {
+        message = detail
+      } else if (error.response.data?.message) {
+        message = error.response.data.message
+      }
+      
       return {
-        message: error.response.data?.detail || error.response.data?.message || 'An error occurred',
+        message,
         status: error.response.status,
         details: error.response.data
       }
