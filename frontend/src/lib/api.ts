@@ -63,10 +63,15 @@ class ApiClient {
           })
           
           // Skip interceptor if token is already set (for retry after refresh)
-          if ((config as any)._skipAuthInterceptor && config.headers?.Authorization) {
-            logger.debug('⏭️ Skipping interceptor - token already set for retry:', config.url)
-            delete (config as any)._skipAuthInterceptor // Clean up flag
-            return config
+          if ((config as any)._skipAuthInterceptor) {
+            if (config.headers?.Authorization) {
+              logger.debug('⏭️ Skipping interceptor - token already set for retry:', config.url, 'Token:', (config.headers.Authorization as string).substring(0, 30) + '...')
+              delete (config as any)._skipAuthInterceptor // Clean up flag
+              return config
+            } else {
+              // Flag set but no token - remove flag and continue normally
+              delete (config as any)._skipAuthInterceptor
+            }
           }
           
           // Add token if available (don't require hydration for immediate use after login)
@@ -77,7 +82,7 @@ class ApiClient {
           
           if (tokenToUse) {
             config.headers.Authorization = `Bearer ${tokenToUse}`
-            logger.debug('✅ Added auth header to request:', config.url)
+            logger.debug('✅ Added auth header to request:', config.url, 'Token:', tokenToUse.substring(0, 30) + '...')
           } else if (authState.isHydrated) {
             logger.debug('❌ No access token available for request:', config.url)
           } else {
@@ -215,10 +220,10 @@ class ApiClient {
         isAuthenticated: true,
       })
       
-      logger.debug('✅ Token refresh successful, new token:', tokenData.access_token.substring(0, 20) + '...')
+      logger.debug('✅ Token refresh successful, new token:', tokenData.access_token.substring(0, 30) + '...')
       
       // Wait a bit for store to update
-      await new Promise(resolve => setTimeout(resolve, 150))
+      await new Promise(resolve => setTimeout(resolve, 200))
       
       // Create a new config object with new token - mark it to skip interceptor token addition
       const retryConfig: any = {
@@ -230,10 +235,17 @@ class ApiClient {
         }
       }
       
-      logger.debug('🔄 Retrying request with new token:', retryConfig.url)
+      // Remove any existing Authorization header that might be stale
+      if (retryConfig.headers) {
+        retryConfig.headers.Authorization = `Bearer ${tokenData.access_token}`
+      }
+      
+      logger.debug('🔄 Retrying request with new token:', retryConfig.url, 'Token:', tokenData.access_token.substring(0, 30) + '...')
       
       // Retry the request - it will go through interceptor but will use the token we set
-      return this.client(retryConfig)
+      const retryResponse = await this.client(retryConfig)
+      logger.debug('✅ Retry successful:', retryConfig.url)
+      return retryResponse
     } catch (refreshError) {
       logger.debug('🔄 Token refresh failed:', refreshError instanceof Error ? refreshError.message : 'Unknown error')
       // Immediately logout on refresh failure
@@ -731,3 +743,4 @@ class ApiClient {
 // Create singleton instance
 export const apiClient = new ApiClient()
 export default apiClient
+
