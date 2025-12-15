@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import List, Optional
 import asyncio
 
@@ -187,14 +187,14 @@ async def login(user_data: UserLogin):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(refresh_token: Optional[str] = None, current_user: dict = None):
-    # Accept refresh_token from query or body; do NOT require current access token
-    from fastapi import Request, Body
+async def refresh_token(request: Request, refresh_token: Optional[str] = None):
+    # Accept refresh_token from query param or body JSON; do NOT require current access token
     token = refresh_token
     if not token:
         # Try to read from request body if sent as JSON { refresh_token }
         try:
-            token = Body(None)
+            body = await request.json()
+            token = body.get("refresh_token") or body.get("refreshToken")
         except Exception:
             token = None
     if not token:
