@@ -22,12 +22,33 @@ export default function LoginPage() {
     
     setError('')
     
+    // Client-side validation
+    if (!email || !email.trim()) {
+      setError('Email is required')
+      return
+    }
+    if (!password || !password.trim()) {
+      setError('Password is required')
+      return
+    }
+    
     try {
-      await login({ email, password })
+      await login({ email: email.trim(), password })
       // Use window.location.href to ensure full page reload and proper cookie handling
       window.location.href = '/dashboard'
     } catch (error: any) {
-      setError(error.message || 'Login failed')
+      // Extract error message from validation errors if present
+      let errorMessage = 'Login failed'
+      if (error.message) {
+        errorMessage = error.message
+      } else if (error.details?.detail) {
+        if (Array.isArray(error.details.detail) && error.details.detail.length > 0) {
+          errorMessage = error.details.detail[0].msg || error.details.detail[0]
+        } else if (typeof error.details.detail === 'string') {
+          errorMessage = error.details.detail
+        }
+      }
+      setError(errorMessage)
     }
   }
 
