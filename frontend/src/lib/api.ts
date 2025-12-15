@@ -131,14 +131,15 @@ class ApiClient {
               url: error.config?.url 
             })
             
-            if (authState.isHydrated && authState.refreshToken && !this.isRefreshing) {
+            if (authState.refreshToken && !this.isRefreshing) {
               this.isRefreshing = true
               this.refreshPromise = this.performTokenRefresh(error.config)
+              return this.refreshPromise
             } else if (this.isRefreshing && this.refreshPromise) {
               // If already refreshing, wait for the existing refresh to complete
               return this.refreshPromise
             } else {
-              logger.debug('🔄 No refresh token, not hydrated, or already refreshing')
+              logger.debug('🔄 No refresh token or already refreshing')
               // If no refresh token available, logout immediately
               if (authState.isHydrated) {
                 authState.logout()
@@ -176,9 +177,19 @@ class ApiClient {
       await authState.refreshAccessToken()
       logger.debug('✅ Token refresh successful')
       
-      // Retry the original request
+      // Retry the original request with new token
       const newAuthState = useAuthStore.getState()
+      if (!newAuthState.accessToken) {
+        throw new Error('No access token after refresh')
+      }
+      
+      // Ensure headers object exists
+      if (!originalConfig.headers) {
+        originalConfig.headers = {}
+      }
       originalConfig.headers.Authorization = `Bearer ${newAuthState.accessToken}`
+      
+      // Retry the request
       return this.client(originalConfig)
     } catch (refreshError) {
       logger.debug('🔄 Token refresh failed:', refreshError instanceof Error ? refreshError.message : 'Unknown error')
