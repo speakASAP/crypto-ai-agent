@@ -16,9 +16,21 @@ export default function LoginPage() {
   const { login, loading } = useAuthStore()
   const router = useRouter()
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    console.log('Form submitted', { email: email || 'EMPTY', password: password ? '***' : 'EMPTY', loading })
+    const form = e.currentTarget
+    const formData = new FormData(form)
+    const formEmail = formData.get('email') as string || email || ''
+    const formPassword = formData.get('password') as string || password || ''
+    
+    console.log('Form submitted', { 
+      email: email || 'EMPTY', 
+      password: password ? '***' : 'EMPTY',
+      formEmail: formEmail || 'EMPTY',
+      formPassword: formPassword ? '***' : 'EMPTY',
+      loading 
+    })
+    
     if (loading) {
       console.log('Already loading, preventing submission')
       return // Prevent multiple submissions
@@ -26,14 +38,14 @@ export default function LoginPage() {
     
     setError('')
     
-    // Client-side validation
-    const trimmedEmail = email?.trim() || ''
+    // Use form values if state values are empty (fallback for cases where onChange doesn't fire)
+    const trimmedEmail = (formEmail || email || '').trim()
     if (!trimmedEmail) {
       console.log('Email validation failed - email is empty or whitespace')
       setError('Email is required')
       return
     }
-    const trimmedPassword = password?.trim() || ''
+    const trimmedPassword = (formPassword || password || '').trim()
     if (!trimmedPassword) {
       console.log('Password validation failed - password is empty or whitespace')
       setError('Password is required')
@@ -79,6 +91,7 @@ export default function LoginPage() {
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
                   value={email}
                   onChange={(e) => {
@@ -101,6 +114,7 @@ export default function LoginPage() {
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
+                  name="password"
                   type="password"
                   value={password}
                   onChange={(e) => {
