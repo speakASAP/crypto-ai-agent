@@ -212,7 +212,7 @@ class AuthService:
                     headers={"Content-Type": "application/json"},
                 )
 
-                if response.status_code == 200:
+                if response.status_code == 200 or response.status_code == 201:
                     data = response.json()
                     if data.get("valid") and data.get("user"):
                         return data["user"]
