@@ -74,15 +74,17 @@ class ApiClient {
             }
           }
           
-          // Add token if available (don't require hydration for immediate use after login)
-          // Also check if token is being passed directly in config (for retry after refresh)
-          const authHeader = config.headers?.Authorization
-          const tokenFromConfig = typeof authHeader === 'string' ? authHeader.replace('Bearer ', '') : null
-          const tokenToUse = tokenFromConfig || authState.accessToken
+          // If Authorization header is already set (from retry), don't override it
+          const existingAuthHeader = config.headers?.Authorization
+          if (existingAuthHeader && typeof existingAuthHeader === 'string' && existingAuthHeader.startsWith('Bearer ')) {
+            logger.debug('✅ Using existing auth header from config (retry):', config.url)
+            return config
+          }
           
-          if (tokenToUse) {
-            config.headers.Authorization = `Bearer ${tokenToUse}`
-            logger.debug('✅ Added auth header to request:', config.url, 'Token:', tokenToUse.substring(0, 30) + '...')
+          // Add token if available (don't require hydration for immediate use after login)
+          if (authState.accessToken) {
+            config.headers.Authorization = `Bearer ${authState.accessToken}`
+            logger.debug('✅ Added auth header to request:', config.url, 'Token:', authState.accessToken.substring(0, 30) + '...')
           } else if (authState.isHydrated) {
             logger.debug('❌ No access token available for request:', config.url)
           } else {
