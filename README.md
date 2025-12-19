@@ -838,6 +838,8 @@ For more details, see [Database Migration Guide](docs/DATABASE_MIGRATION_COMPLET
 
 Use `.env` (not committed) and refer to `.env.example` for keys. Important:
 
+- `DOMAIN`: Service domain used by nginx-microservice for auto-registry (required for correct domain detection, default: crypto-ai-agent.statex.cz)
+- `SERVICE_NAME`: Service name identifier (default: crypto-ai-agent)
 - `DATABASE_URL`: PostgreSQL connection string
   - Production: `postgresql+psycopg://user:pass@db-server-postgres:5432/crypto_ai_agent`
   - Development: `postgresql+psycopg://crypto:crypto_pass@db-server-postgres:5432/crypto_ai_agent`

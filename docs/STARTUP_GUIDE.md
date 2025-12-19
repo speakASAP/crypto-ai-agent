@@ -44,7 +44,7 @@
 
 ### Environment selection
 
-- Set `ENVIRONMENT=development|production` in `.env` (default: development).
+- Set `NODE_ENV=development|production` in `.env` (default: development).
 - Override per command with `--env production`.
 
 ## What the Scripts Do

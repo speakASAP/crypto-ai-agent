@@ -74,10 +74,10 @@ class ApiClient {
             }
           }
           
-          // If Authorization header is already set (from retry), don't override it
+          // If Authorization header is already set (from retry or direct call), don't override it
           const existingAuthHeader = config.headers?.Authorization
           if (existingAuthHeader && typeof existingAuthHeader === 'string' && existingAuthHeader.startsWith('Bearer ')) {
-            logger.debug('✅ Using existing auth header from config (retry):', config.url)
+            logger.debug('✅ Using existing auth header from config:', config.url, 'Token:', existingAuthHeader.substring(0, 30) + '...')
             return config
           }
           
