@@ -26,6 +26,7 @@ services:
       resources:
         limits:
           memory: 300M
+          cpus: '0.5'
         reservations:
           memory: 100M
     networks:
@@ -55,6 +56,7 @@ services:
       resources:
         limits:
           memory: 300M
+          cpus: '0.5'
         reservations:
           memory: 100M
     networks:
