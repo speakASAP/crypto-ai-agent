@@ -392,7 +392,7 @@ The system includes the following local tables:
 All services use the same host and container ports for consistency:
 
 | Service | Host Port (Blue) | Host Port (Green) | Container Port | Description |
-|---------|------------------|-------------------|----------------|-------------|
+| ------- | ---------------- | ----------------- | -------------- | ----------- |
 | **Frontend** | 3100 | 3101 | 3100 | Next.js frontend application |
 | **Backend API** | 3102 | 3103 | 3102 | FastAPI backend service |
 | **UI Port** | 3104 | 3104 | 3104 | Additional UI interface (Streamlit) |
