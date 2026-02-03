@@ -181,7 +181,7 @@ CREATE TABLE portfolio_items (
 ### Authentication Endpoints
 
 | Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
+| ------ | -------- | ----------- | ------------- |
 | POST | `/api/auth/register` | Register new user | No |
 | POST | `/api/auth/login` | Login user | No |
 | POST | `/api/auth/refresh` | Refresh access token | No |

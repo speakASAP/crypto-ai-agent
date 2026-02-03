@@ -28,7 +28,7 @@ python test_binance_import.py
 ## 📋 API Endpoints
 
 | Endpoint | Method | Purpose |
-|----------|--------|---------|
+| -------- | ------ | ------- |
 | `/api/import/binance/test-connection` | POST | Test API credentials |
 | `/api/import/binance/preview` | POST | Preview import without saving |
 | `/api/import/binance/execute` | POST | Execute import and save |
@@ -39,7 +39,7 @@ python test_binance_import.py
 ### Common Issues
 
 | Error | Cause | Solution |
-|-------|-------|----------|
+| ----- | ----- | -------- |
 | `Signature for this request is not valid` | Wrong API secret | Regenerate API key |
 | `Invalid API-key, IP, or permissions` | No reading permission | Enable "Enable Reading" |
 | `Binance API is not accessible: 404` | Wrong API URL | Check `BINANCE_API_URL` |
