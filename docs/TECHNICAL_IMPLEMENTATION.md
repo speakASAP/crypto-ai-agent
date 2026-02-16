@@ -744,7 +744,7 @@ import pytest
 from backend.app.utils.auth import verify_password, get_password_hash
 
 def test_password_hashing():
-    password = "testpassword123"
+    password = "sample-test-password-check-env"
     hashed = get_password_hash(password)
     assert verify_password(password, hashed)
     assert not verify_password("wrongpassword", hashed)
