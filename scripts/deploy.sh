@@ -33,16 +33,24 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
     NODE_ENV="${NODE_ENV:-}"
 fi
 
-# Deploy only code from repository: sync with remote (discard local changes on server)
+# Pull from remote in production; preserve local changes (stash uncommitted if any, then reapply).
 # Only sync if NODE_ENV is set to "production"
 if [ -d ".git" ]; then
     if [ "$NODE_ENV" = "production" ]; then
         echo -e "${BLUE}Production environment detected (NODE_ENV=production)${NC}"
-        echo -e "${BLUE}Syncing with remote repository (discarding local changes)...${NC}"
+        echo -e "${BLUE}Pulling from remote (local changes preserved)...${NC}"
         git fetch origin
         BRANCH=$(git rev-parse --abbrev-ref HEAD)
-        git reset --hard "origin/$BRANCH"
-        echo -e "${GREEN}✓ Repository synced to origin/$BRANCH${NC}"
+        STASHED=0
+        if [ -n "$(git status --porcelain)" ]; then
+            git stash push -u -m "deploy.sh: stash before pull"
+            STASHED=1
+        fi
+        git pull origin "$BRANCH"
+        if [ "$STASHED" = "1" ]; then
+            git stash pop
+        fi
+        echo -e "${GREEN}✓ Repository updated from origin/$BRANCH (local changes preserved)${NC}"
         echo ""
     else
         echo -e "${YELLOW}Development environment detected (NODE_ENV=${NODE_ENV:-not set})${NC}"
@@ -69,12 +77,12 @@ if [ -d "/home/statex/nginx-microservice" ]; then
     NGINX_MICROSERVICE_PATH="/home/statex/nginx-microservice"
 elif [ -d "/home/alfares/nginx-microservice" ]; then
     NGINX_MICROSERVICE_PATH="/home/alfares/nginx-microservice"
+elif [ -d "/home/belunga/nginx-microservice" ]; then
+    NGINX_MICROSERVICE_PATH="/home/belunga/nginx-microservice"
 elif [ -d "$HOME/nginx-microservice" ]; then
     NGINX_MICROSERVICE_PATH="$HOME/nginx-microservice"
-# Check if nginx-microservice is a sibling directory (for local dev)
 elif [ -d "$(dirname "$PROJECT_ROOT")/nginx-microservice" ]; then
     NGINX_MICROSERVICE_PATH="$(dirname "$PROJECT_ROOT")/nginx-microservice"
-# Check if nginx-microservice is in the same directory as beauty
 elif [ -d "$PROJECT_ROOT/../nginx-microservice" ]; then
     NGINX_MICROSERVICE_PATH="$(cd "$PROJECT_ROOT/../nginx-microservice" && pwd)"
 fi
@@ -86,6 +94,7 @@ if [ -z "$NGINX_MICROSERVICE_PATH" ] || [ ! -d "$NGINX_MICROSERVICE_PATH" ]; the
     echo "Please ensure nginx-microservice is installed in one of these locations:"
     echo "  - /home/statex/nginx-microservice"
     echo "  - /home/alfares/nginx-microservice"
+    echo "  - /home/belunga/nginx-microservice"
     echo "  - $HOME/nginx-microservice"
     echo "  - $(dirname "$PROJECT_ROOT")/nginx-microservice (sibling directory)"
     echo ""
@@ -136,7 +145,6 @@ start_phase() {
     echo "$phase_name|START|$timestamp" >> "$PHASE_TIMING_FILE"
     local msg="⏱️  PHASE START: $phase_name"
     echo -e "${YELLOW}$msg${NC}" >&2
-    echo -e "${YELLOW}$msg${NC}"
 }
 
 end_phase() {
@@ -152,7 +160,6 @@ end_phase() {
         local duration=$(awk "BEGIN {printf \"%.2f\", $timestamp - $start_time}")
         local msg="⏱️  PHASE END: $phase_name (duration: ${duration}s)"
         echo -e "${GREEN}$msg${NC}" >&2
-        echo -e "${GREEN}$msg${NC}"
     fi
 }
 
@@ -271,10 +278,10 @@ START_TIME=$(get_timestamp_seconds)
             health_check_started=2
         fi
     done
-    exit ${PIPESTATUS[0]}
 }
 
-DEPLOY_EXIT_CODE=$?
+# Pipeline's left side (deploy script) exit code; PIPESTATUS[0] in main shell is correct
+DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
 END_TIME=$(get_timestamp_seconds)
 TOTAL_DURATION=$(awk "BEGIN {printf \"%.2f\", $END_TIME - $START_TIME}")
 

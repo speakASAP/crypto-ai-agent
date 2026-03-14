@@ -119,7 +119,7 @@ class PriceService:
                     logger.warning(f"API returned status {response.status} for {symbol}")
                     return None
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout fetching price for {symbol}")
+            logger.error(f"Timeout fetching price for {symbol} (connectivity or slow execution)")
             return None
         except Exception as e:
             logger.warning(f"Error fetching price for {symbol}: {e}")
