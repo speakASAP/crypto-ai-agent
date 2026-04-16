@@ -28,7 +28,7 @@ class AuthService:
     def __init__(self):
         self.auth_service_url = os.getenv(
             'AUTH_SERVICE_URL',
-            'https://auth.statex.cz'
+            'https://auth.alfares.cz'
         )
         self.timeout = 10.0
 

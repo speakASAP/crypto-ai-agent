@@ -143,7 +143,7 @@ Look for:
 
 ```bash
 # Check backend health endpoint
-curl https://crypto-ai-agent.statex.cz/api/health
+curl https://crypto-ai-agent.alfares.cz/api/health
 
 # Should show:
 # {

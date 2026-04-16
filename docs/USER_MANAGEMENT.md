@@ -322,7 +322,7 @@ JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 DATABASE_URL=postgresql://user:password@localhost:${DB_SERVER_PORT:-5432}/crypto_ai_agent  # DB_SERVER_PORT from database-server/.env
 
 # CORS
-CORS_ORIGINS=http://localhost:${FRONTEND_PORT:-3100},https://yourdomain.com  # FRONTEND_PORT configured in crypto-ai-agent/.env
+CORS_ORIGINS=http://localhost:${FRONTEND_PORT:-3100},https://alfares.cz  # FRONTEND_PORT configured in crypto-ai-agent/.env
 ```
 
 ### Backend Configuration

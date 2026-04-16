@@ -130,7 +130,7 @@ cd /path/to/nginx-microservice
 ### Test 110: Verify Upstream Weights Change
 
 ```bash
-cat nginx/conf.d/crypto-ai-agent.statex.cz.conf | grep -A 2 "upstream crypto-ai-frontend"
+cat nginx/conf.d/crypto-ai-agent.alfares.cz.conf | grep -A 2 "upstream crypto-ai-frontend"
 ```
 
 **Expected Result:**
@@ -260,7 +260,7 @@ cd /path/to/nginx-microservice
 ### Test 122: Verify Upstream Weights Revert
 
 ```bash
-cat nginx/conf.d/crypto-ai-agent.statex.cz.conf | grep -A 2 "upstream crypto-ai-frontend"
+cat nginx/conf.d/crypto-ai-agent.alfares.cz.conf | grep -A 2 "upstream crypto-ai-frontend"
 ```
 
 **Expected Result:**

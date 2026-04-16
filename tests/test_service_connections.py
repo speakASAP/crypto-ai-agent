@@ -154,7 +154,7 @@ class ServiceConnectionTester:
         test_urls = [
             ('Internal', 'http://crypto-ai-backend:8100/health'),
             ('External', 'http://localhost:8100/health'),
-            ('Via Nginx', 'https://crypto-ai-agent.statex.cz/health'),
+            ('Via Nginx', 'https://crypto-ai-agent.alfares.cz/health'),
         ]
         
         all_passed = True
@@ -202,7 +202,7 @@ class ServiceConnectionTester:
         test_urls = [
             ('Internal Direct', 'http://crypto-ai-backend:8100'),
             ('External Direct', 'http://localhost:8100'),
-            ('Via Nginx', 'https://crypto-ai-agent.statex.cz'),
+            ('Via Nginx', 'https://crypto-ai-agent.alfares.cz'),
         ]
         
         all_passed = True
@@ -249,7 +249,7 @@ class ServiceConnectionTester:
         test_urls = [
             ('Internal', f"http://crypto-ai-frontend:{os.getenv('FRONTEND_PORT', '3100')}"),
             ('External', f"http://localhost:{os.getenv('FRONTEND_PORT', '3100')}"),
-            ('Via Nginx', 'https://crypto-ai-agent.statex.cz'),
+            ('Via Nginx', 'https://crypto-ai-agent.alfares.cz'),
         ]
         
         all_passed = True
@@ -293,7 +293,7 @@ class ServiceConnectionTester:
         ]
         
         all_passed = True
-        nginx_url = 'https://crypto-ai-agent.statex.cz'
+        nginx_url = 'https://crypto-ai-agent.alfares.cz'
         
         logger.info(f"📋 Testing API proxy through nginx: {nginx_url}")
         
