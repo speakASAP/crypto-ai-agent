@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 360
     jwt_refresh_token_expire_days: int = 7
-    cors_origins: str = os.getenv("CORS_ORIGINS", f"http://localhost:{os.getenv('FRONTEND_PORT', '3100')},https://yourdomain.com")
+    cors_origins: str = os.getenv("CORS_ORIGINS", f"http://localhost:{os.getenv('FRONTEND_PORT', '3100')},https://alfares.cz")
     api_host: str = "0.0.0.0"
     api_port: int = int(os.getenv("API_PORT", "3102"))
     

@@ -2519,7 +2519,7 @@ export default function Home() {
                   </Link>
                 </li>
                 <li>
-                  <a href="https://crypto-ai-agent.statex.cz" className="hover:text-blue-600 transition-colors">
+                  <a href="https://crypto-ai-agent.alfares.cz" className="hover:text-blue-600 transition-colors">
                     Homepage
                   </a>
                 </li>

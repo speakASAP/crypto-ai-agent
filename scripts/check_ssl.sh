@@ -1,5 +1,5 @@
 #!/bin/bash
-# SSL/HTTPS Diagnostic Script for crypto-ai-agent.statex.cz
+# SSL/HTTPS Diagnostic Script for crypto-ai-agent.alfares.cz
 # Run this on the production server: ssh statex && cd crypto-ai-agent && ./scripts/check_ssl.sh
 
 set -e
@@ -35,7 +35,7 @@ fi
 # Check SSL certificates
 echo ""
 echo "🔐 Checking SSL Certificates..."
-CERT_DIR="$NGINX_DIR/certificates/crypto-ai-agent.statex.cz"
+CERT_DIR="$NGINX_DIR/certificates/crypto-ai-agent.alfares.cz"
 if [ -d "$CERT_DIR" ]; then
     echo "✅ Certificate directory exists: $CERT_DIR"
     
@@ -80,7 +80,7 @@ fi
 # Check nginx configuration
 echo ""
 echo "⚙️  Checking Nginx Configuration..."
-NGINX_CONF="$NGINX_DIR/nginx/conf.d/crypto-ai-agent.statex.cz.conf"
+NGINX_CONF="$NGINX_DIR/nginx/conf.d/crypto-ai-agent.alfares.cz.conf"
 if [ -f "$NGINX_CONF" ]; then
     echo "✅ Nginx config file exists: $NGINX_CONF"
     
@@ -141,9 +141,9 @@ fi
 echo ""
 echo "🔍 Testing HTTPS Connection..."
 if command -v curl >/dev/null 2>&1; then
-    echo "   Testing: https://crypto-ai-agent.statex.cz"
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://crypto-ai-agent.statex.cz 2>&1 || echo "000")
-    SSL_ERROR=$(curl -s -o /dev/null -w "%{ssl_verify_result}" --max-time 10 https://crypto-ai-agent.statex.cz 2>&1 || echo "999")
+    echo "   Testing: https://crypto-ai-agent.alfares.cz"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://crypto-ai-agent.alfares.cz 2>&1 || echo "000")
+    SSL_ERROR=$(curl -s -o /dev/null -w "%{ssl_verify_result}" --max-time 10 https://crypto-ai-agent.alfares.cz 2>&1 || echo "999")
     
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "301" ] || [ "$HTTP_CODE" = "302" ]; then
         echo "✅ HTTPS connection successful (HTTP $HTTP_CODE)"

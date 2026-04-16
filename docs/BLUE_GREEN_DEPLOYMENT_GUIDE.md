@@ -188,7 +188,7 @@ tail -f /path/to/nginx-microservice/logs/blue-green/deploy.log
 1. Check nginx status: `docker ps | grep nginx-microservice`
 2. Test config: `docker compose exec nginx nginx -t`
 3. Check logs: `docker compose logs nginx | tail -50`
-4. Verify SSL certificates exist: `ls -la certificates/crypto-ai-agent.statex.cz/`
+4. Verify SSL certificates exist: `ls -la certificates/crypto-ai-agent.alfares.cz/`
 
 ## Best Practices
 
@@ -263,7 +263,7 @@ Tracks active color and deployment status. **DO NOT** edit manually. Use scripts
 
 ### Nginx Config
 
-Location: `/nginx-microservice/nginx/conf.d/crypto-ai-agent.statex.cz.conf`
+Location: `/nginx-microservice/nginx/conf.d/crypto-ai-agent.alfares.cz.conf`
 
 Managed automatically by `switch-traffic.sh`. **DO NOT** edit manually unless troubleshooting.
 
@@ -312,7 +312,7 @@ docker compose logs nginx --tail 100 -f
 - [ ] Verify green containers are healthy
 - [ ] Run full deployment: `./scripts/blue-green/deploy.sh crypto-ai-agent`
 - [ ] Monitor logs for 5+ minutes after deployment
-- [ ] Verify website is accessible: `curl -I https://crypto-ai-agent.statex.cz/`
+- [ ] Verify website is accessible: `curl -I https://crypto-ai-agent.alfares.cz/`
 - [ ] Check application functionality
 - [ ] Verify old color was cleaned up (if successful)
 

@@ -830,7 +830,7 @@ describe('AuthStore', () => {
 ```bash
 # Production environment variables
 JWT_SECRET=your-super-secure-jwt-secret-key
-CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+CORS_ORIGINS=https://alfares.cz,https://www.alfares.cz
 
 # Database configuration
 DATABASE_URL=postgresql+psycopg://crypto:crypto_pass@postgres:${DB_SERVER_PORT:-5432}/crypto_ai_agent  # DB_SERVER_PORT from database-server/.env

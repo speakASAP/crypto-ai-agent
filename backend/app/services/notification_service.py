@@ -18,7 +18,7 @@ except Exception:  # pragma: no cover
 logger = get_logger("backend.app.services.notification_service")
 
 # Notification microservice URL
-NOTIFICATION_SERVICE_URL = os.getenv("NOTIFICATION_SERVICE_URL", "https://notifications.statex.cz")
+NOTIFICATION_SERVICE_URL = os.getenv("NOTIFICATION_SERVICE_URL", "https://notifications.alfares.cz")
 
 # Initialize price service for alert checking
 price_service = PriceService()
