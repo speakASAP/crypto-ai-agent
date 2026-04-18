@@ -9,6 +9,10 @@
 config.json
 secrets.json
 api_keys.txt
+k8s/secret.yaml
+secrets/
+**/client_secret*.json
+**/*.apps.googleusercontent.com.json
 
 # Database files
 *.db
@@ -306,4 +310,3 @@ staging/
 stage/
 
 !frontend/src/lib/
-!frontend/src/lib/.tsk8s/secret.yaml
