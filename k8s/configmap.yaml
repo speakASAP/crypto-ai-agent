@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crypto-ai-agent-config
+  namespace: statex-apps
+  labels:
+    app: crypto-ai-agent
+    managed-by: k8s-migration
+data:
+  NODE_ENV: "production"
+  SERVICE_NAME: "crypto-ai-agent"
+  DOMAIN: "crypto-ai-agent.alfares.cz"
+  PORT: "3000"
+  # Add environment variables from .env that are non-sensitive (no secrets, API keys, passwords)
+  # Examples:
+  # DATABASE_POOL_SIZE: "10"
+  # LOG_LEVEL: "info"
+  DB_HOST: "192.168.88.53"
+  DB_PORT: "5432"
+  DB_USER: "dbadmin"
+  DB_NAME: "crypto"
+  DB_SYNC: "false"
+  DB_AUTO_CREATE: "true"
+  # TIMEOUT_MS: "30000"
