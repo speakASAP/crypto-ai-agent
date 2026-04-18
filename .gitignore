@@ -310,3 +310,27 @@ staging/
 stage/
 
 !frontend/src/lib/
+
+# --- baseline: secrets-env-artifacts (synced across repos) ---
+
+*.bak*
+# Environment variables
+# OS files
+.env
+.venv*
+# Local credential files (never commit)
+*.tsbuildinfo
+# Security: Never commit keys or certificates
+keys/*
+!keys/README.md
+*.pem
+*.key
+*.crt
+*.cer
+*.pfx
+*.p12
+*private*
+*.rsa
+*.dsa
+*.ec
+*.der
