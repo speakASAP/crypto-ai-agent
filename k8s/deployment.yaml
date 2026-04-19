@@ -31,8 +31,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: crypto-ai-agent-config
-            - secretRef:
-                name: crypto-ai-agent-secret
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-credentials
+                  key: DB_PASSWORD
           livenessProbe:
             httpGet:
               path: /health
