@@ -31,23 +31,17 @@ spec:
           envFrom:
             - configMapRef:
                 name: crypto-ai-agent-config
-          env:
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: database-credentials
-                  key: DB_PASSWORD
+            - secretRef:
+                name: crypto-ai-agent-secret
           livenessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: 3000
             initialDelaySeconds: 15
             periodSeconds: 30
             failureThreshold: 3
-            timeoutSeconds: 5
           readinessProbe:
             httpGet:
-              path: /health
+              path: /api/health
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10

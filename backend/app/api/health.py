@@ -62,10 +62,9 @@ async def health_check():
         db_error = str(e)
         db_connected = False
     
-    # Service is only healthy if database is connected AND has data
-    # For production: database must have data (customer accounts)
-    status = "healthy" if (db_connected and db_has_data) else "unhealthy"
-    
+    # K8s readiness: healthy if DB is reachable (data presence is application state, not service health)
+    status = "healthy" if db_connected else "unhealthy"
+
     response = {
         "status": status,
         "database": "postgres",
@@ -75,12 +74,11 @@ async def health_check():
         "version": "2.0.0",
         "websocket_connections": len(manager.active_connections),
     }
-    
+
     if db_error:
         response["database_error"] = db_error
-    
-    # Return 503 if database is not connected or has no data (service unavailable)
-    if not db_connected or not db_has_data:
+
+    if not db_connected:
         raise HTTPException(status_code=503, detail=response)
-    
+
     return response
