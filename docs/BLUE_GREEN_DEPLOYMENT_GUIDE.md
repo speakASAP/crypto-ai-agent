@@ -1,8 +1,10 @@
 # Blue/Green Deployment Guide - Crypto AI Agent
 
+> **K8s is the primary production deployment** (rolling update via `kubectl apply -f k8s/ -n statex-apps`). This guide covers the legacy Docker blue/green fallback only. For rollback: `kubectl rollout undo deployment/crypto-ai-agent -n statex-apps`.
+
 ## Overview
 
-This guide covers the complete blue/green deployment system for crypto-ai-agent, enabling zero-downtime deployments with automatic rollback on failure.
+This guide covers the Docker blue/green deployment system for crypto-ai-agent (legacy/fallback), enabling zero-downtime deployments with automatic rollback on failure.
 
 ## Architecture
 
@@ -191,35 +193,6 @@ tail -f /path/to/nginx-microservice/logs/blue-green/deploy.log
 4. Verify SSL certificates exist: `ls -la certificates/crypto-ai-agent.alfares.cz/`
 
 ## Best Practices
-
-### 1. Always Test Before Production
-
-```bash
-# Test prepare-green (doesn't switch traffic)
-./scripts/blue-green/prepare-green.sh crypto-ai-agent
-
-# Verify green containers are healthy
-docker ps | grep green
-docker logs crypto-ai-backend-green
-docker logs crypto-ai-frontend-green
-
-# Then proceed with full deployment
-./scripts/blue-green/deploy.sh crypto-ai-agent
-```
-
-### 2. Monitor After Deployment
-
-```bash
-# Watch deployment logs
-tail -f /path/to/nginx-microservice/logs/blue-green/deploy.log
-
-# Monitor container health
-watch -n 5 'docker ps | grep crypto-ai'
-
-# Check application logs
-docker logs -f crypto-ai-backend-green
-docker logs -f crypto-ai-frontend-green
-```
 
 ### 3. Keep State File Accurate
 
