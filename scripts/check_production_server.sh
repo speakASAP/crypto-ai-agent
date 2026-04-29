@@ -1,6 +1,6 @@
 #!/bin/bash
 # Production server status check script
-# Run this on the production server: ssh statex && cd crypto-ai-agent && ./scripts/check_production_server.sh
+# Run this on the production server: ssh alfares && cd crypto-ai-agent && ./scripts/check_production_server.sh
 
 set -e
 

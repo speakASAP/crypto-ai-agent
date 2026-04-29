@@ -32,7 +32,7 @@ print_error() {
 
 # Default production server (adjust as needed)
 PROD_SERVER="${1:-statex}"
-PROD_PATH="/home/statex/crypto-ai-agent"
+PROD_PATH="~/Documents/Github/crypto-ai-agent"
 
 print_status "Updating ports on production server: $PROD_SERVER"
 print_status "Production path: $PROD_PATH"
@@ -52,7 +52,7 @@ REMOTE_SCRIPT=$(cat <<'REMOTE_EOF'
 #!/bin/bash
 set -e
 
-ENV_FILE="/home/statex/crypto-ai-agent/.env"
+ENV_FILE="~/Documents/Github/crypto-ai-agent/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "ERROR: .env file not found at $ENV_FILE"

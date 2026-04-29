@@ -1,6 +1,6 @@
 #!/bin/bash
 # SSL/HTTPS Diagnostic Script for crypto-ai-agent.alfares.cz
-# Run this on the production server: ssh statex && cd crypto-ai-agent && ./scripts/check_ssl.sh
+# Run this on the production server: ssh alfares && cd crypto-ai-agent && ./scripts/check_ssl.sh
 
 set -e
 
@@ -10,10 +10,10 @@ echo "==========================================================================
 echo ""
 
 # Check if nginx-microservice directory exists
-NGINX_DIR="/home/statex/nginx-microservice"
+NGINX_DIR="~/Documents/Github/nginx-microservice"
 if [ ! -d "$NGINX_DIR" ]; then
     echo "❌ ERROR: nginx-microservice directory not found at $NGINX_DIR"
-    echo "   Expected location: /home/statex/nginx-microservice"
+    echo "   Expected location: ~/Documents/Github/nginx-microservice"
     exit 1
 fi
 
@@ -172,7 +172,7 @@ if docker ps --filter "name=crypto-ai" --format "{{.Names}}: {{.Status}}" | grep
     docker ps --filter "name=crypto-ai" --format "   {{.Names}}: {{.Status}}"
 else
     echo "⚠️  No application containers running"
-    echo "   Run: cd /home/statex/crypto-ai-agent && ./scripts/status.sh"
+    echo "   Run: cd ~/Documents/Github/crypto-ai-agent && ./scripts/status.sh"
 fi
 
 # Summary
