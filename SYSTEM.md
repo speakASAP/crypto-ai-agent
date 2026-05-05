@@ -21,8 +21,10 @@ Next.js 14 frontend + FastAPI backend + PostgreSQL + Redis + WebSocket.
 
 ## Deployment
 
-**Primary:** Kubernetes — namespace `statex-apps`. See [docs/DEPLOYMENT_K8S.md](docs/DEPLOYMENT_K8S.md).
-**Legacy (dev only):** Docker Compose. See [docs/DEPLOYMENT_DOCKER.md](docs/DEPLOYMENT_DOCKER.md).
+**Platform:** Kubernetes (k3s) · namespace `statex-apps`. See [docs/DEPLOYMENT_K8S.md](docs/DEPLOYMENT_K8S.md).  
+**Image:** `localhost:5000/crypto-ai-agent:latest`  
+**Deploy:** `./scripts/deploy.sh`  
+**Logs:** `kubectl logs -n statex-apps -l app=crypto-ai-agent -f`
 
 ## Secrets
 
@@ -31,8 +33,7 @@ Synced to K8s via ExternalSecret. See [../shared/docs/VAULT.md](../shared/docs/V
 
 ## Database
 
-Shared `database-server` service. Connection: `db-server-postgres:5432`, DB: `crypto_ai_agent`.
-Blue/green both connect to the same instance — never stop DB during deploy.
+Shared `database-server` service. Connection: `db-server-postgres:5432` (within cluster: `192.168.88.53:5432`), DB: `crypto_ai_agent`.
 
 ## Current State
 <!-- AI-maintained -->

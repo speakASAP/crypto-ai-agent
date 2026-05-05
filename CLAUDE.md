@@ -22,4 +22,4 @@
 | notifications-microservice:3368 | Telegram price alerts |
 | payments-microservice:3468 | Subscription |
 
-**Ops**: `docker compose logs -f` · `./scripts/deploy.sh`
+**Ops**: `kubectl logs -n statex-apps -l app=crypto-ai-agent -f` · `kubectl rollout restart deployment/crypto-ai-agent -n statex-apps` · `./scripts/deploy.sh`
