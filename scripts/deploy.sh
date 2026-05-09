@@ -8,80 +8,149 @@ GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC
 
 SERVICE_NAME="crypto-ai-agent"
 NAMESPACE="${NAMESPACE:-statex-apps}"
+REGISTRY="${REGISTRY:-localhost:5000}"
+IMAGE_TAG="${1:-$(cd "$PROJECT_ROOT" && git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)-$(date -u +%Y%m%d%H%M%S)}"
+IMAGE="${REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}"
+IMAGE_LATEST="${REGISTRY}/${SERVICE_NAME}:latest"
 K8S_DIR="$PROJECT_ROOT/k8s"
+EXTERNAL_SECRET_NAME="${SERVICE_NAME}-secret"
+HEALTH_PATH="/api/health"
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+log() { local level="$1"; shift; printf "[%s] [%s] %s\n" "$(ts)" "$level" "$*"; }
+phase() { echo -e "${BLUE}[$(ts)] $*${NC}"; }
+
+diagnose() {
+  log ERROR "Collecting deployment diagnostics"
+  kubectl get deploy "$SERVICE_NAME" -n "$NAMESPACE" -o wide || true
+  kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" -o wide || true
+  kubectl describe deployment "$SERVICE_NAME" -n "$NAMESPACE" || true
+  kubectl describe externalsecret "$EXTERNAL_SECRET_NAME" -n "$NAMESPACE" || true
+  kubectl get events -n "$NAMESPACE" --sort-by=.metadata.creationTimestamp | tail -n 40 || true
+
+  local pod
+  for pod in $(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true); do
+    echo -e "${YELLOW}[$(ts)] --- describe pod/${pod} ---${NC}"
+    kubectl describe pod -n "$NAMESPACE" "$pod" || true
+    echo -e "${YELLOW}[$(ts)] --- logs pod/${pod} (tail 160) ---${NC}"
+    kubectl logs -n "$NAMESPACE" "$pod" --tail=160 || true
+    echo -e "${YELLOW}[$(ts)] --- health pod/${pod} ---${NC}"
+    kubectl exec -n "$NAMESPACE" "$pod" -- curl -sS -i "http://127.0.0.1:3000${HEALTH_PATH}" || true
+  done
+}
+
+on_error() {
+  local exit_code="$?"
+  echo -e "${RED}[$(ts)] Deployment failed with exit code ${exit_code}${NC}" >&2
+  diagnose
+  exit "$exit_code"
+}
+trap on_error ERR
 
 preflight_service_health() {
-  echo -e "${YELLOW}Preflight: checking Kubernetes and current service health...${NC}"
+  log INFO "Preflight: checking Kubernetes, Docker, registry, and current service state"
 
   if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-    echo -e "${RED}Namespace not found: $NAMESPACE${NC}"
+    log ERROR "Namespace not found: $NAMESPACE"
     exit 1
   fi
 
   if ! kubectl get nodes >/dev/null 2>&1; then
-    echo -e "${RED}kubectl cannot reach cluster${NC}"
+    log ERROR "kubectl cannot reach cluster"
+    exit 1
+  fi
+
+  if ! docker info >/dev/null 2>&1; then
+    log ERROR "Docker is not available"
+    exit 1
+  fi
+
+  if ! curl -fsS "http://${REGISTRY}/v2/" >/dev/null 2>&1; then
+    log ERROR "Local registry is not reachable: ${REGISTRY}"
     exit 1
   fi
 
   BAD_PODS=$(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" --no-headers 2>/dev/null | awk '$3 ~ /Error|CrashLoopBackOff|ImagePullBackOff|CreateContainerConfigError|CreateContainerError|ErrImagePull/ {print $1}')
   if [ -n "$BAD_PODS" ]; then
-    echo -e "${RED}Service has unhealthy pods before deploy:${NC}"
-    kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" -o wide || true
-    for pod in $BAD_PODS; do
-      echo -e "${YELLOW}--- describe pod/$pod ---${NC}"
-      kubectl describe pod -n "$NAMESPACE" "$pod" || true
-      echo -e "${YELLOW}--- logs pod/$pod (tail 80) ---${NC}"
-      kubectl logs -n "$NAMESPACE" "$pod" --tail=80 || true
-    done
-    echo -e "${RED}Fix pod errors first, then redeploy.${NC}"
+    log ERROR "Service has pod errors before deploy: $BAD_PODS"
+    diagnose
     exit 1
   fi
 
-  echo -e "${GREEN}Preflight passed${NC}"
+  echo -e "${GREEN}[$(ts)] Preflight passed${NC}"
 }
 
+wait_for_external_secret_ready() {
+  phase "Waiting for ExternalSecret ${EXTERNAL_SECRET_NAME}"
+  kubectl wait \
+    --for=condition=Ready \
+    "externalsecret/${EXTERNAL_SECRET_NAME}" \
+    -n "$NAMESPACE" \
+    --timeout=60s
+}
 
-echo -e "${BLUE}==========================================================${NC}"
-echo -e "${BLUE}  ${SERVICE_NAME} - Kubernetes Deployment${NC}"
-echo -e "${BLUE}==========================================================${NC}"
+echo -e "${BLUE}[$(ts)] ==========================================================${NC}"
+echo -e "${BLUE}[$(ts)]   Crypto AI Agent - Kubernetes Deployment${NC}"
+echo -e "${BLUE}[$(ts)] ==========================================================${NC}"
 
 if [ ! -d "$K8S_DIR" ]; then
-  echo -e "${RED}Missing k8s directory: $K8S_DIR${NC}"
+  log ERROR "Missing k8s directory: $K8S_DIR"
   exit 1
 fi
 
+cd "$PROJECT_ROOT"
 preflight_service_health
 
-echo -e "${YELLOW}[1/4] Applying Kubernetes manifests...${NC}"
-for manifest in configmap.yaml external-secret.yaml deployment.yaml service.yaml ingress.yaml; do
+phase "[1/7] Building Docker image ${IMAGE}"
+docker build -t "$IMAGE" -t "$IMAGE_LATEST" "$PROJECT_ROOT"
+log INFO "Image build completed"
+
+phase "[2/7] Pushing Docker image to ${REGISTRY}"
+docker push "$IMAGE"
+docker push "$IMAGE_LATEST"
+log INFO "Image push completed"
+
+phase "[3/7] Applying Kubernetes support manifests"
+for manifest in configmap.yaml external-secret.yaml service.yaml ingress.yaml; do
   if [ -f "$K8S_DIR/$manifest" ]; then
     kubectl apply -f "$K8S_DIR/$manifest" -n "$NAMESPACE"
   fi
 done
-echo -e "${GREEN}OK Kubernetes manifests applied${NC}"
+log INFO "Kubernetes support manifests applied"
 
-echo -e "${YELLOW}[2/4] Triggering rollout restart...${NC}"
-kubectl rollout restart deployment/"$SERVICE_NAME" -n "$NAMESPACE"
-echo -e "${GREEN}OK Rollout restart triggered${NC}"
+phase "[4/7] Verifying ExternalSecret"
+wait_for_external_secret_ready
+log INFO "ExternalSecret is ready"
 
-echo -e "${YELLOW}[3/4] Waiting for rollout...${NC}"
-if ! kubectl rollout status deployment/"$SERVICE_NAME" -n "$NAMESPACE" --timeout=120s; then
-  echo -e "${YELLOW}Rollout did not complete in time. Diagnosing terminating pods...${NC}"
-  kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" -o wide || true
-  TERMINATING_PODS=$(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" --no-headers 2>/dev/null | awk '$3=="Terminating"{print $1}')
-  if [ -n "$TERMINATING_PODS" ]; then
-    echo -e "${YELLOW}Force deleting stuck terminating pods...${NC}"
-    for pod in $TERMINATING_PODS; do
-      kubectl delete pod -n "$NAMESPACE" "$pod" --grace-period=0 --force || true
-    done
-  fi
-  kubectl rollout status deployment/"$SERVICE_NAME" -n "$NAMESPACE" --timeout=120s
+phase "[5/7] Applying deployment with image ${IMAGE}"
+kubectl set env deployment/"$SERVICE_NAME" DATABASE_URL- -n "$NAMESPACE" || true
+kubectl set image -f "$K8S_DIR/deployment.yaml" app="$IMAGE" --local -o yaml | kubectl apply -f - -n "$NAMESPACE"
+log INFO "Deployment applied"
+
+phase "[6/7] Waiting for rollout"
+kubectl rollout status deployment/"$SERVICE_NAME" -n "$NAMESPACE" --timeout=120s
+log INFO "Rollout complete"
+
+TERMINATING_PODS="$(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" --no-headers 2>/dev/null | awk '$3=="Terminating" {print $1}')"
+if [ -n "$TERMINATING_PODS" ]; then
+  log WARNING "Cleaning stale terminating pods: ${TERMINATING_PODS}"
+  for pod in $TERMINATING_PODS; do
+    kubectl delete pod -n "$NAMESPACE" "$pod" --grace-period=0 --force || true
+  done
 fi
-echo -e "${GREEN}OK Rollout complete${NC}"
 
-echo -e "${YELLOW}[4/4] Current pods:${NC}"
+phase "[7/7] Verifying pod health"
+POD="$(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" --no-headers | awk '$2=="1/1" && $3=="Running" {print $1; exit}')"
+if [ -z "$POD" ]; then
+  log ERROR "No ready pod found for ${SERVICE_NAME}"
+  exit 1
+fi
+kubectl exec -n "$NAMESPACE" "$POD" -- curl -fsS "http://127.0.0.1:3000${HEALTH_PATH}" >/dev/null
+log INFO "Health endpoint passed on pod/${POD}"
+
+phase "Current pods"
 kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME"
 
 echo -e "${GREEN}==========================================================${NC}"
-echo -e "${GREEN}  Deployment successful${NC}"
+echo -e "${GREEN}  Crypto AI Agent Deployment successful${NC}"
 echo -e "${GREEN}==========================================================${NC}"

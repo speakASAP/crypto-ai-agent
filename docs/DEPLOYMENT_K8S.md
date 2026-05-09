@@ -47,7 +47,7 @@ Synced automatically via ExternalSecret. Never put secrets in manifests.
 
 ## Database
 
-Connects to shared `database-server` via K8s service name `db-server-postgres`.
+Connects to shared `database-server` via K8s service name `db-server-postgres`, database `crypto`.
 See `../shared/docs/VAULT.md` for credential paths.
 
 ## Ports

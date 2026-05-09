@@ -24,7 +24,7 @@ spec:
       containers:
         - name: app
           image: localhost:5000/crypto-ai-agent:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
           envFrom:

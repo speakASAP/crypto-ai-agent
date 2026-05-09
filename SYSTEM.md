@@ -33,7 +33,7 @@ Synced to K8s via ExternalSecret. See [../shared/docs/VAULT.md](../shared/docs/V
 
 ## Database
 
-Shared `database-server` service. Connection: `db-server-postgres:5432` (within cluster: `192.168.88.53:5432`), DB: `crypto_ai_agent`.
+Shared `database-server` service. Connection: `db-server-postgres:5432` (within cluster: `192.168.88.53:5432`), DB: `crypto`.
 
 ## Current State
 <!-- AI-maintained -->
