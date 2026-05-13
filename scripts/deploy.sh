@@ -124,7 +124,7 @@ log INFO "ExternalSecret is ready"
 
 phase "[5/7] Applying deployment with image ${IMAGE}"
 kubectl set env deployment/"$SERVICE_NAME" DATABASE_URL- -n "$NAMESPACE" || true
-kubectl set image -f "$K8S_DIR/deployment.yaml" app="$IMAGE" --local -o yaml | kubectl apply -f - -n "$NAMESPACE"
+kubectl set image deployment/"$SERVICE_NAME" app="$IMAGE_LATEST" -n "$NAMESPACE"
 log INFO "Deployment applied"
 
 phase "[6/7] Waiting for rollout"
