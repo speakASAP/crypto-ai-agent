@@ -16,6 +16,12 @@ K8S_DIR="$PROJECT_ROOT/k8s"
 EXTERNAL_SECRET_NAME="${SERVICE_NAME}-secret"
 HEALTH_PATH="/api/health"
 
+# shellcheck disable=SC1091
+source "$(dirname "$PROJECT_ROOT")/shared/scripts/load-deploy-phase-timing.sh" "$PROJECT_ROOT" 2>/dev/null \
+  || source "$HOME/Documents/Github/shared/scripts/load-deploy-phase-timing.sh" "$PROJECT_ROOT" \
+  || { echo "Error: deploy timing library not found" >&2; exit 1; }
+deploy_timing_init "crypto-ai-agent"
+
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 log() { local level="$1"; shift; printf "[%s] [%s] %s\n" "$(ts)" "$level" "$*"; }
 phase() { echo -e "${BLUE}[$(ts)] $*${NC}"; }
@@ -99,47 +105,40 @@ if [ ! -d "$K8S_DIR" ]; then
 fi
 
 cd "$PROJECT_ROOT"
-preflight_service_health
+deploy_timing_run_phase "Preflight" preflight_service_health
 
+deploy_timing_phase_start "Build image"
 phase "[1/7] Building Docker image ${IMAGE}"
 docker build -t "$IMAGE" -t "$IMAGE_LATEST" "$PROJECT_ROOT"
-log INFO "Image build completed"
+deploy_timing_phase_end "Build image"
 
-phase "[2/7] Pushing Docker image to ${REGISTRY}"
+deploy_timing_phase_start "Push image"
 docker push "$IMAGE"
 docker push "$IMAGE_LATEST"
-log INFO "Image push completed"
+deploy_timing_phase_end "Push image"
 
-phase "[3/7] Applying Kubernetes support manifests"
+deploy_timing_phase_start "Apply Kubernetes manifests"
 for manifest in configmap.yaml external-secret.yaml service.yaml ingress.yaml; do
   if [ -f "$K8S_DIR/$manifest" ]; then
     kubectl apply -f "$K8S_DIR/$manifest" -n "$NAMESPACE"
   fi
 done
-log INFO "Kubernetes support manifests applied"
+deploy_timing_phase_end "Apply Kubernetes manifests"
 
-phase "[4/7] Verifying ExternalSecret"
+deploy_timing_phase_start "Verify ExternalSecret"
 wait_for_external_secret_ready
-log INFO "ExternalSecret is ready"
+deploy_timing_phase_end "Verify ExternalSecret"
 
-phase "[5/7] Applying deployment with image ${IMAGE}"
+deploy_timing_phase_start "Apply deployment image"
 kubectl set env deployment/"$SERVICE_NAME" DATABASE_URL- -n "$NAMESPACE" || true
 kubectl set image deployment/"$SERVICE_NAME" app="$IMAGE_LATEST" -n "$NAMESPACE"
-log INFO "Deployment applied"
+deploy_timing_phase_end "Apply deployment image"
 
-phase "[6/7] Waiting for rollout"
-kubectl rollout status deployment/"$SERVICE_NAME" -n "$NAMESPACE" --timeout=120s
-log INFO "Rollout complete"
+deploy_timing_phase_start "Wait for rollout"
+deploy_timing_k8s_rollout_wait kubectl "$SERVICE_NAME" "$NAMESPACE"
+deploy_timing_phase_end "Wait for rollout"
 
-TERMINATING_PODS="$(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" --no-headers 2>/dev/null | awk '$3=="Terminating" {print $1}')"
-if [ -n "$TERMINATING_PODS" ]; then
-  log WARNING "Cleaning stale terminating pods: ${TERMINATING_PODS}"
-  for pod in $TERMINATING_PODS; do
-    kubectl delete pod -n "$NAMESPACE" "$pod" --grace-period=0 --force || true
-  done
-fi
-
-phase "[7/7] Verifying pod health"
+deploy_timing_phase_start "Health check"
 POD="$(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" --no-headers | awk '$2=="1/1" && $3=="Running" {print $1; exit}')"
 if [ -z "$POD" ]; then
   log ERROR "No ready pod found for ${SERVICE_NAME}"
@@ -148,9 +147,9 @@ fi
 kubectl exec -n "$NAMESPACE" "$POD" -- curl -fsS "http://127.0.0.1:3000${HEALTH_PATH}" >/dev/null
 log INFO "Health endpoint passed on pod/${POD}"
 
-phase "Current pods"
 kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME"
+deploy_timing_phase_end "Health check"
 
-echo -e "${GREEN}==========================================================${NC}"
-echo -e "${GREEN}  Crypto AI Agent Deployment successful${NC}"
-echo -e "${GREEN}==========================================================${NC}"
+deploy_timing_finish_success "Crypto AI Agent"
+DEPLOY_TIMING_FINISHED=1
+exit 0
