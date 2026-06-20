@@ -12,6 +12,7 @@ async def health_check():
     # Test PostgreSQL database connectivity and verify it has data
     # Use timeout to prevent hanging on slow database connections
     db_connected = False
+    schema_ready = False
     db_has_data = False
     db_error = None
     user_count = 0
@@ -26,32 +27,33 @@ async def health_check():
             cursor.execute("SELECT 1")
             cursor.fetchone()
             
-            # Verify database has data (users table exists and has records)
+            # Verify the minimum schema required for runtime work exists.
             cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'users'
-                )
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_name IN ('users', 'portfolio_items', 'currency_rates')
             """)
-            users_table_exists = cursor.fetchone()[0]
+            existing_tables = {row[0] for row in cursor.fetchall()}
+            required_tables = {'users', 'portfolio_items', 'currency_rates'}
+            schema_ready = required_tables.issubset(existing_tables)
             
             user_count = 0
-            if users_table_exists:
+            if 'users' in existing_tables:
                 cursor.execute("SELECT COUNT(*) FROM users")
                 user_count = cursor.fetchone()[0]
             
             cursor.close()
             conn.close()
             
-            return True, user_count > 0, user_count, None
+            return True, schema_ready, user_count > 0, user_count, None
         except Exception as e:
-            return False, False, 0, str(e)
+            return False, False, False, 0, str(e)
     
     try:
         # Run database check with 5 second timeout to prevent hanging
         # Use asyncio.to_thread to run the synchronous function in a thread pool
-        db_connected, db_has_data, user_count, db_error = await asyncio.wait_for(
+        db_connected, schema_ready, db_has_data, user_count, db_error = await asyncio.wait_for(
             asyncio.to_thread(check_database),
             timeout=5.0
         )
@@ -62,13 +64,15 @@ async def health_check():
         db_error = str(e)
         db_connected = False
     
-    # K8s readiness: healthy if DB is reachable (data presence is application state, not service health)
-    status = "healthy" if db_connected else "unhealthy"
+    # K8s readiness should fail when the service points at a database
+    # connection that is reachable but missing the runtime schema.
+    status = "healthy" if db_connected and schema_ready else "unhealthy"
 
     response = {
         "status": status,
         "database": "postgres",
         "database_connected": db_connected,
+        "database_schema_ready": schema_ready,
         "database_has_data": db_has_data,
         "user_count": user_count,
         "version": "2.0.0",
@@ -78,7 +82,7 @@ async def health_check():
     if db_error:
         response["database_error"] = db_error
 
-    if not db_connected:
+    if not db_connected or not schema_ready:
         raise HTTPException(status_code=503, detail=response)
 
     return response

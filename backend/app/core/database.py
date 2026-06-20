@@ -134,11 +134,10 @@ def init_postgres_database():
             comments TEXT
         )
     ''')
-        # Add comments column if it doesn't exist (for existing databases)
-        try:
-            cur.execute('ALTER TABLE portfolio_items ADD COLUMN comments TEXT')
-        except Exception:
-            pass  # Column already exists
+        # `comments` is already included in the table definition above.
+        # Do not run a duplicate ALTER TABLE here: swallowing that error still
+        # leaves the PostgreSQL transaction aborted and prevents the rest of
+        # the bootstrap schema from being created.
 
         # Create alerts table
         cur.execute('''
