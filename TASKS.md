@@ -2,11 +2,12 @@
 
 ## Backlog
 
-- [ ] Generate weekly portfolio performance summary after live portfolio data exists (priority: 2)
-- [ ] Analyze market trend for BTC/ETH after tracked/live holdings exist (priority: 2)
-- [ ] Review alert thresholds for top 10 coins after active users and alerts exist (priority: 3)
+- [ ] Data-gated: generate weekly portfolio performance summary after live user portfolio data exists (priority: 2)
+- [ ] Data-gated: analyze market trend for BTC/ETH after tracked/live holdings exist (priority: 2)
+- [ ] Data-gated: review alert thresholds for top 10 coins after active users and alert records exist (priority: 3)
 
 ## Completed
 <!-- AI appends here. Never modifies previous entries. -->
 - [x] 2026-06-20 Fixed PostgreSQL schema bootstrap transaction abort and health-readiness false positive; deployed new pod, created runtime schema, and confirmed production currently has 0 users / no live portfolio data
 - [x] 2026-04-05 Documentation standard applied
+- [x] 2026-06-21 Clarified that the service is healthy and remaining analytics items are data-gated by live user/portfolio/alert records, not blocked by a runtime fault.
