@@ -40,7 +40,10 @@ class AuthService:
         full_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Register a new user via auth-microservice
+        Register a new user via auth-microservice.
+
+        Compatibility path only: user-facing registration should use hosted Auth
+        redirect/callback with client_id=crypto-ai-agent.
 
         Args:
             email: User email
@@ -118,7 +121,10 @@ class AuthService:
 
     async def login(self, email: str, password: str) -> Dict[str, Any]:
         """
-        Login user via auth-microservice
+        Login user via auth-microservice.
+
+        Compatibility path only: user-facing sign in should use hosted Auth
+        redirect/callback with client_id=crypto-ai-agent.
 
         Args:
             email: User email
@@ -478,4 +484,3 @@ class AuthService:
 
 # Create singleton instance
 auth_service = AuthService()
-

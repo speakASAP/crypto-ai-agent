@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import List, Optional
 import asyncio
 
@@ -41,8 +41,9 @@ from ..utils.db import (
 
 
 @router.post("/register", response_model=TokenResponse)
-async def register(user_data: UserCreate):
-    # Use auth-microservice for registration
+async def register(user_data: UserCreate, response: Response):
+    response.headers["X-Auth-Proxy-Deprecated"] = "Use hosted Auth /register with client_id=crypto-ai-agent"
+    # Compatibility endpoint: primary human registration is Auth-hosted.
     try:
         auth_result = await auth_service.register(
             email=user_data.email,
@@ -115,8 +116,9 @@ async def register(user_data: UserCreate):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(user_data: UserLogin):
-    # Use auth-microservice for login
+async def login(user_data: UserLogin, response: Response):
+    response.headers["X-Auth-Proxy-Deprecated"] = "Use hosted Auth /login with client_id=crypto-ai-agent"
+    # Compatibility endpoint: primary human sign in is Auth-hosted.
     try:
         auth_result = await auth_service.login(
             email=user_data.email,
@@ -250,7 +252,19 @@ async def get_me(current_user: dict = Depends(get_current_active_user)):
     user = cursor.fetchone()
     conn.close()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        return UserResponse(
+            id=current_user["id"],
+            email=current_user.get("email"),
+            username=current_user.get("username") or current_user.get("email", "").split("@")[0],
+            full_name=current_user.get("full_name"),
+            preferred_currency=current_user.get("preferred_currency", "USD"),
+            is_active=bool(current_user.get("is_active", True)),
+            created_at=str(current_user.get("created_at") or datetime.now().isoformat() + "Z"),
+            telegram_bot_token=current_user.get("telegram_bot_token"),
+            telegram_chat_id=current_user.get("telegram_chat_id"),
+            default_alert_percentage_above=current_user.get("default_alert_percentage_above") or 60.0,
+            default_alert_percentage_below=current_user.get("default_alert_percentage_below") or 20.0,
+        )
     # Convert datetime to ISO format string if needed
     created_at = user[6]
     if isinstance(created_at, datetime):
@@ -533,5 +547,4 @@ async def delete_bitfinex_credentials(current_user: dict = Depends(get_current_a
         return {"message": "Bitfinex credentials deleted successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to delete Bitfinex credentials")
-
 

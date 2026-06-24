@@ -11,6 +11,7 @@ import {
   PasswordChange
 } from '@/types/auth'
 import { apiClient } from '@/lib/api'
+import { HostedAuthSession } from '@/lib/hostedAuth'
 import { usePortfolioStore } from './portfolioStore'
 
 // Cookie storage for server-side access
@@ -43,6 +44,7 @@ interface AuthState {
   
   // Actions
   login: (credentials: UserLogin) => Promise<void>
+  completeHostedAuth: (session: HostedAuthSession) => Promise<void>
   logout: () => void
   refreshAccessToken: () => Promise<void>
   register: (userData: UserRegister) => Promise<void>
@@ -102,6 +104,38 @@ export const useAuthStore = create<AuthState>()(
           set({ 
             error: error.message || 'Login failed', 
             loading: false 
+          })
+          throw error
+        }
+      },
+
+      completeHostedAuth: async (session: HostedAuthSession) => {
+        set({
+          loading: true,
+          error: null,
+          accessToken: session.accessToken,
+          refreshToken: session.refreshToken,
+        })
+
+        try {
+          const completeUser = await apiClient.getCurrentUser(session.accessToken)
+
+          set({
+            user: completeUser,
+            isAuthenticated: calculateIsAuthenticated(session.accessToken, completeUser),
+            loading: false,
+          })
+
+          const portfolioStore = usePortfolioStore.getState()
+          portfolioStore.setCurrencyFromUserPreference(completeUser.preferred_currency as any)
+        } catch (error: any) {
+          set({
+            accessToken: null,
+            refreshToken: null,
+            user: null,
+            isAuthenticated: false,
+            loading: false,
+            error: error.message || 'Hosted Auth session failed',
           })
           throw error
         }

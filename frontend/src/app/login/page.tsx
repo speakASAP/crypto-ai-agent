@@ -1,165 +1,46 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useAuthStore } from '@/stores/authStore'
+import { beginHostedAuth } from '@/lib/hostedAuth'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const { login, loading } = useAuthStore()
-  const router = useRouter()
+  const [redirecting, setRedirecting] = useState(false)
+  const [nextPath, setNextPath] = useState('/dashboard')
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const form = e.currentTarget
-    const formData = new FormData(form)
-    const formEmail = formData.get('email') as string || email || ''
-    const formPassword = formData.get('password') as string || password || ''
-    
-    console.log('Form submitted', { 
-      email: email || 'EMPTY', 
-      password: password ? '***' : 'EMPTY',
-      formEmail: formEmail || 'EMPTY',
-      formPassword: formPassword ? '***' : 'EMPTY',
-      loading 
-    })
-    
-    if (loading) {
-      console.log('Already loading, preventing submission')
-      return // Prevent multiple submissions
-    }
-    
-    setError('')
-    
-    // Use form values if state values are empty (fallback for cases where onChange doesn't fire)
-    const trimmedEmail = (formEmail || email || '').trim()
-    if (!trimmedEmail) {
-      console.log('Email validation failed - email is empty or whitespace')
-      setError('Email is required')
-      return
-    }
-    const trimmedPassword = (formPassword || password || '').trim()
-    if (!trimmedPassword) {
-      console.log('Password validation failed - password is empty or whitespace')
-      setError('Password is required')
-      return
-    }
-    
-    console.log('Calling login function with:', { email: trimmedEmail, password: '***' })
-    try {
-      await login({ email: trimmedEmail, password: trimmedPassword })
-      console.log('Login successful, redirecting')
-      // Use window.location.href to ensure full page reload and proper cookie handling
-      window.location.href = '/dashboard'
-    } catch (error: any) {
-      console.error('Login error:', error)
-      // Extract error message from validation errors if present
-      let errorMessage = 'Login failed'
-      if (error.message) {
-        errorMessage = error.message
-      } else if (error.details?.detail) {
-        if (Array.isArray(error.details.detail) && error.details.detail.length > 0) {
-          errorMessage = error.details.detail[0].msg || error.details.detail[0]
-        } else if (typeof error.details.detail === 'string') {
-          errorMessage = error.details.detail
-        }
-      }
-      setError(errorMessage)
-    }
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get('next') || '/dashboard'
+    setNextPath(next)
+    setRedirecting(true)
+    beginHostedAuth('login', next)
+  }, [])
+
+  const handleRetry = () => {
+    setRedirecting(true)
+    beginHostedAuth('login', nextPath)
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
+      <div className="max-w-md w-full">
         <Card>
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl font-bold text-center">Sign in</CardTitle>
             <CardDescription className="text-center">
-              Enter your email and password to access your portfolio
+              Redirecting to Alfares Auth for secure sign in.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => {
-                    console.log('Email onChange:', e.target.value)
-                    setEmail(e.target.value)
-                  }}
-                  onInput={(e) => {
-                    const target = e.target as HTMLInputElement
-                    console.log('Email onInput:', target.value)
-                    setEmail(target.value)
-                  }}
-                  placeholder="Enter your email"
-                  autoComplete="email"
-                  required
-                  disabled={loading}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => {
-                    console.log('Password onChange:', e.target.value ? '***' : 'EMPTY')
-                    setPassword(e.target.value)
-                  }}
-                  onInput={(e) => {
-                    const target = e.target as HTMLInputElement
-                    console.log('Password onInput:', target.value ? '***' : 'EMPTY')
-                    setPassword(target.value)
-                  }}
-                  placeholder="Enter your password"
-                  autoComplete="current-password"
-                  required
-                  disabled={loading}
-                />
-              </div>
-
-              {error && (
-                <div className="text-red-600 text-sm text-center">
-                  {error}
-                </div>
-              )}
-
-              <Button 
-                type="submit" 
-                className="w-full" 
-                disabled={loading}
-              >
-                {loading ? 'Signing in...' : 'Sign in'}
-              </Button>
-            </form>
-
-            <div className="mt-6 text-center space-y-2">
-              <div className="text-sm text-gray-600">
-                Don't have an account?{' '}
-                <Link href="/register" className="text-blue-600 hover:text-blue-500">
-                  Sign up
-                </Link>
-              </div>
-              <div className="text-sm text-gray-600">
-                <Link href="/forgot-password" className="text-blue-600 hover:text-blue-500">
-                  Forgot your password?
-                </Link>
-              </div>
+          <CardContent className="space-y-4">
+            <Button type="button" className="w-full" onClick={handleRetry} disabled={redirecting}>
+              {redirecting ? 'Redirecting...' : 'Continue with Alfares Auth'}
+            </Button>
+            <div className="text-center text-sm text-gray-600">
+              Need an account?{' '}
+              <Link href={`/register?next=${encodeURIComponent(nextPath)}`} className="text-blue-600 hover:text-blue-500">
+                Create one
+              </Link>
             </div>
           </CardContent>
         </Card>

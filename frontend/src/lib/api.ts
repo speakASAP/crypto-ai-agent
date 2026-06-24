@@ -65,7 +65,7 @@ class ApiClient {
           // Skip interceptor if token is already set (for retry after refresh)
           if ((config as any)._skipAuthInterceptor) {
             if (config.headers?.Authorization) {
-              logger.debug('⏭️ Skipping interceptor - token already set for retry:', config.url, 'Token:', (config.headers.Authorization as string).substring(0, 30) + '...')
+              logger.debug('⏭️ Skipping interceptor - token already set for retry:', config.url)
               delete (config as any)._skipAuthInterceptor // Clean up flag
               return config
             } else {
@@ -77,14 +77,14 @@ class ApiClient {
           // If Authorization header is already set (from retry or direct call), don't override it
           const existingAuthHeader = config.headers?.Authorization
           if (existingAuthHeader && typeof existingAuthHeader === 'string' && existingAuthHeader.startsWith('Bearer ')) {
-            logger.debug('✅ Using existing auth header from config:', config.url, 'Token:', existingAuthHeader.substring(0, 30) + '...')
+            logger.debug('✅ Using existing auth header from config:', config.url)
             return config
           }
           
           // Add token if available (don't require hydration for immediate use after login)
           if (authState.accessToken) {
             config.headers.Authorization = `Bearer ${authState.accessToken}`
-            logger.debug('✅ Added auth header to request:', config.url, 'Token:', authState.accessToken.substring(0, 30) + '...')
+            logger.debug('✅ Added auth header to request:', config.url)
           } else if (authState.isHydrated) {
             logger.debug('❌ No access token available for request:', config.url)
           } else {
@@ -222,7 +222,7 @@ class ApiClient {
         isAuthenticated: true,
       })
       
-      logger.debug('✅ Token refresh successful, new token:', tokenData.access_token.substring(0, 30) + '...')
+      logger.debug('✅ Token refresh successful')
       
       // Wait a bit for store to update
       await new Promise(resolve => setTimeout(resolve, 200))
@@ -242,7 +242,7 @@ class ApiClient {
         retryConfig.headers.Authorization = `Bearer ${tokenData.access_token}`
       }
       
-      logger.debug('🔄 Retrying request with new token:', retryConfig.url, 'Token:', tokenData.access_token.substring(0, 30) + '...')
+      logger.debug('🔄 Retrying request with new token:', retryConfig.url)
       
       // Retry the request using request() method - interceptor will preserve the token we set
       const retryResponse = await this.client.request(retryConfig)
@@ -307,11 +307,13 @@ class ApiClient {
 
   // Authentication endpoints
   async register(userData: UserRegister): Promise<TokenResponse> {
+    // Compatibility only: primary human registration now starts at Auth-hosted /register.
     const response = await this.client.post('/api/auth/register', userData)
     return response.data
   }
 
   async login(credentials: UserLogin): Promise<TokenResponse> {
+    // Compatibility only: primary human sign in now starts at Auth-hosted /login.
     const response = await this.client.post('/api/auth/login', credentials)
     return response.data
   }
@@ -745,4 +747,3 @@ class ApiClient {
 // Create singleton instance
 export const apiClient = new ApiClient()
 export default apiClient
-
