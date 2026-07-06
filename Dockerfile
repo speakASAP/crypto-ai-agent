@@ -20,4 +20,4 @@ RUN mkdir -p /app/logs
 ENV API_PORT=3000
 EXPOSE $API_PORT
 
-CMD ["sh", "-c", "gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT} --timeout 90 --access-logfile - --error-logfile -"]
+CMD ["sh", "-c", "gunicorn app.main:app --workers ${GUNICORN_WORKERS:-1} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT} --timeout 90 --access-logfile - --error-logfile -"]

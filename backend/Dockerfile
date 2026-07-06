@@ -27,7 +27,7 @@ ENV API_PORT=8100
 EXPOSE $API_PORT
 
 # Start application with Gunicorn (production-ready ASGI server)
-# Using 2 workers for better concurrency and fault tolerance
-CMD ["sh", "-c", "gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT} --timeout 90 --access-logfile - --error-logfile -"]
+# Default to one worker to keep the pod inside its memory limit; override with GUNICORN_WORKERS.
+CMD ["sh", "-c", "gunicorn app.main:app --workers ${GUNICORN_WORKERS:-1} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT} --timeout 90 --access-logfile - --error-logfile -"]
 
 
