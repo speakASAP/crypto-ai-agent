@@ -9,6 +9,7 @@ metadata:
 data:
   NODE_ENV: "production"
   SERVICE_NAME: "crypto-ai-agent"
+  LOGGING_SERVICE_URL: "http://logging-microservice.statex-apps.svc.cluster.local:3367"
   DOMAIN: "crypto-ai-agent.alfares.cz"
   PORT: "3000"
   # Add environment variables from .env that are non-sensitive (no secrets, API keys, passwords)
