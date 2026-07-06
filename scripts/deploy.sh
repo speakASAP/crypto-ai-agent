@@ -131,7 +131,7 @@ deploy_timing_phase_end "Verify ExternalSecret"
 
 deploy_timing_phase_start "Apply deployment image"
 kubectl set env deployment/"$SERVICE_NAME" DATABASE_URL- -n "$NAMESPACE" || true
-kubectl set image deployment/"$SERVICE_NAME" app="$IMAGE_LATEST" -n "$NAMESPACE"
+kubectl set image deployment/"$SERVICE_NAME" app="$IMAGE" -n "$NAMESPACE"
 deploy_timing_phase_end "Apply deployment image"
 
 deploy_timing_phase_start "Wait for rollout"
