@@ -27,6 +27,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
+          env:
+            - name: LOGGING_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: logging-ingest-credentials
+                  key: LOGGING_SERVICE_TOKEN
           envFrom:
             - configMapRef:
                 name: crypto-ai-agent-config

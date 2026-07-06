@@ -126,6 +126,11 @@ async def _send_to_external_service(
         if metadata:
             log_metadata.update(metadata)
 
+        headers = {"Content-Type": "application/json"}
+        logging_service_token = os.getenv("LOGGING_SERVICE_TOKEN", "").strip()
+        if logging_service_token:
+            headers["Authorization"] = f"Bearer {logging_service_token}"
+
         # Create JSON payload
         payload = {
             "level": microservice_level,
@@ -141,7 +146,7 @@ async def _send_to_external_service(
                 await client.post(
                     f"{logging_service_url}/api/logs",
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                 )
             except Exception:
                 # Silently fail - already in outer try-except

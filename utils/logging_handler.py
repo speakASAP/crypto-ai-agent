@@ -39,6 +39,13 @@ class ExternalLoggingHandler(logging.Handler):
         self.service_url = service_url or os.getenv("LOGGING_SERVICE_URL")
         self.timeout = 2.0  # 2 second timeout for HTTP requests
 
+    def _headers(self) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        token = os.getenv("LOGGING_SERVICE_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
     def _map_log_level(self, level: int) -> str:
         """
         Map Python logging levels to microservice log levels.
@@ -149,7 +156,7 @@ class ExternalLoggingHandler(logging.Handler):
                 response = client.post(
                     f"{self.service_url}/api/logs",
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers=self._headers(),
                 )
                 # Check response status (but don't log errors - avoid infinite loops)
                 if response.status_code not in [200, 201]:
