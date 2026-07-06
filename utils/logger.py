@@ -13,6 +13,11 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Avoid recursive external logging noise from the HTTP client used by the
+# external logging handler itself.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 # Import external logging handler
 try:
     from .logging_handler import ExternalLoggingHandler, SERVICE_NAME

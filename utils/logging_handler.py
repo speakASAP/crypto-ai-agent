@@ -175,6 +175,12 @@ class ExternalLoggingHandler(logging.Handler):
         Args:
             record: Log record from Python logging
         """
+        # Never forward logs emitted by the HTTP client used by this handler.
+        # Forwarding them creates a self-amplifying loop: send log -> httpx logs
+        # the POST -> handler sends that log again.
+        if record.name.startswith(("httpx", "httpcore")):
+            return
+
         # Always log locally first (this is handled by other handlers)
         # Then send to external service in background thread (non-blocking)
         if self.service_url:
