@@ -14,7 +14,7 @@ IMAGE="${REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}"
 IMAGE_LATEST="${REGISTRY}/${SERVICE_NAME}:latest"
 K8S_DIR="$PROJECT_ROOT/k8s"
 EXTERNAL_SECRET_NAME="${SERVICE_NAME}-secret"
-HEALTH_PATH="/api/health"
+HEALTH_PATH="/api/ready"
 
 # shellcheck disable=SC1091
 source "$(dirname "$PROJECT_ROOT")/shared/scripts/load-deploy-phase-timing.sh" "$PROJECT_ROOT" 2>/dev/null \
