@@ -4,6 +4,15 @@ from ..utils.db import connect_with_retry
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
+ALLOWED_APP_ROLES = {
+    "app:crypto-ai-agent:admin",
+    "app:crypto-ai-agent:user",
+}
+
+def has_crypto_entitlement(auth_user: dict) -> bool:
+    roles = auth_user.get("roles") or []
+    return isinstance(roles, list) and any(role in ALLOWED_APP_ROLES for role in roles)
+
 def get_db_connection():
     """Get PostgreSQL database connection with retry logic."""
     # Use retry logic for runtime connections (max 3 retries, faster backoff)
@@ -43,6 +52,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
                 columns = [desc[0] for desc in cur.description]
                 user = {columns[i]: row[i] for i in range(len(columns))}
             else:
+                if not has_crypto_entitlement(auth_user):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Crypto AI access requires an existing local profile or app:crypto-ai-agent:user/admin",
+                    )
                 # User exists in auth-microservice but not in local DB - create minimal record
                 user = {
                     "id": user_id,
