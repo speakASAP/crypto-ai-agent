@@ -135,7 +135,7 @@ kubectl set image deployment/"$SERVICE_NAME" app="$IMAGE" -n "$NAMESPACE"
 deploy_timing_phase_end "Apply deployment image"
 
 deploy_timing_phase_start "Wait for rollout"
-deploy_timing_k8s_rollout_wait kubectl "$SERVICE_NAME" "$NAMESPACE"
+deploy_timing_k8s_rollout_wait kubectl "$SERVICE_NAME" "$NAMESPACE" "900s"
 deploy_timing_phase_end "Wait for rollout"
 
 deploy_timing_phase_start "Health check"
