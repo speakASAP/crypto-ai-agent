@@ -118,7 +118,7 @@ docker push "$IMAGE_LATEST"
 deploy_timing_phase_end "Push image"
 
 deploy_timing_phase_start "Apply Kubernetes manifests"
-for manifest in configmap.yaml external-secret.yaml service.yaml ingress.yaml; do
+for manifest in configmap.yaml external-secret.yaml service.yaml ingress.yaml deployment.yaml; do
   if [ -f "$K8S_DIR/$manifest" ]; then
     kubectl apply -f "$K8S_DIR/$manifest" -n "$NAMESPACE"
   fi
