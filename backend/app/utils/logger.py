@@ -8,13 +8,9 @@ load_dotenv()
 
 # Import external logging handler
 try:
-    from utils.logging_handler import ExternalLoggingHandler, SERVICE_NAME
+    from .logging_handler import ExternalLoggingHandler, SERVICE_NAME
 except ImportError:
     try:
-        import sys
-        from pathlib import Path
-        # Add parent directory to path to import from utils
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
         from utils.logging_handler import ExternalLoggingHandler, SERVICE_NAME
     except ImportError:
         ExternalLoggingHandler = None
