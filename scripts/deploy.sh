@@ -29,7 +29,7 @@ compute_default_tag() {
   fi
 }
 
-IMAGE_TAG="${1:-$(compute_default_tag)-$(date -u +%Y%m%d%H%M%S)}"
+IMAGE_TAG="${1:-$(compute_default_tag)}"
 IMAGE="${REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}"
 IMAGE_LATEST="${REGISTRY}/${SERVICE_NAME}:latest"
 K8S_DIR="$PROJECT_ROOT/k8s"
