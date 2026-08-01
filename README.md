@@ -13,7 +13,7 @@ AI-powered cryptocurrency portfolio management. Real-time price tracking via Bin
 | Deploy (K8s — primary) | [docs/DEPLOYMENT_K8S.md](docs/DEPLOYMENT_K8S.md) |
 | Deploy (Docker — dev only) | [docs/DEPLOYMENT_DOCKER.md](docs/DEPLOYMENT_DOCKER.md) |
 | Blue/green deployment | [docs/BLUE_GREEN_DEPLOYMENT_GUIDE.md](docs/BLUE_GREEN_DEPLOYMENT_GUIDE.md) |
-| Secrets | `secret/prod/crypto-ai-agent` in Vault — see [shared/docs/VAULT.md](../shared/docs/VAULT.md) |
+| Secrets | `secret/prod/crypto-ai-agent` in Vault |
 | AI Advisor | [docs/AI_ADVISOR.md](docs/AI_ADVISOR.md) |
 | Binance import | [docs/BINANCE_IMPORT_GUIDE.md](docs/BINANCE_IMPORT_GUIDE.md) |
 | CSV import | [docs/CSV_IMPORT_GUIDE.md](docs/CSV_IMPORT_GUIDE.md) |
