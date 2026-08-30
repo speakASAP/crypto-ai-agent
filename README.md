@@ -43,3 +43,27 @@ Requires `.env` — see `.env.example`. All secrets come from Vault in productio
 - Exchange API keys in `.env` only — never log them
 - Price alerts: max 1/hour per coin per user
 - All AI predictions via ai-microservice — no direct LLM calls
+
+## Status
+Status: documented; existing repository status is retained in this file.
+
+## Documentation Authority
+Git-tracked project documents and runtime manifests are authoritative.
+
+## Capabilities
+AI-powered cryptocurrency portfolio management with Binance price tracking, AI predictions, price alerts, and Telegram notifications.
+
+## Interfaces
+Next.js and FastAPI runtime with PostgreSQL, Redis, auth, AI, notifications, payments, logging, and Vault-backed Kubernetes configuration.
+
+## Development
+Use the repository’s existing development commands and inspect its source before changing behavior.
+
+## Configuration
+Configuration is defined by the tracked environment examples and deployment manifests where present.
+
+## Deployment
+Deployment is defined by this repository’s tracked runtime configuration.
+
+## Health and Observability
+Use the declared runtime probe and ecosystem logging and monitoring paths.

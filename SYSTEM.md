@@ -42,3 +42,35 @@ Stage: active
 ## Known Issues
 <!-- AI-maintained -->
 - None
+
+## Purpose
+AI-powered cryptocurrency portfolio management with Binance price tracking, AI predictions, price alerts, and Telegram notifications.
+
+## Responsibilities
+Provide the behavior and runtime described by the tracked project documentation.
+
+## Non-Responsibilities
+Do not add integrations, persistence, or product scope not declared by repository sources.
+
+## Inputs
+Inputs are the browser, runtime, and configuration inputs described in existing project sources.
+
+## Outputs
+Outputs are the user-visible or operational results described in existing project sources.
+
+## Dependencies
+Next.js and FastAPI runtime with PostgreSQL, Redis, auth, AI, notifications, payments, logging, and Vault-backed Kubernetes configuration.
+
+## Upstream Traceability
+The approved business baseline and vision define this system’s intent.
+
+## Downstream Artifacts
+The integration contract and bootstrap chain record planning evidence.
+
+## Validation Criteria
+Run the IPS planning validator and applicable existing project checks.
+
+## Open Questions
+No new open question is asserted by this documentation-only adoption.
+Status: reviewed
+completeness_level: complete

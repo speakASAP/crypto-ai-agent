@@ -57,10 +57,28 @@ Validation debt does not excuse current-task failures. If a failure touches curr
 - Do not copy remote repository contents into local user directories.
 - Deploy only under pre-existing human-approved project or ecosystem policy; agents cannot self-authorize by editing policy.
 - Do not print secrets, tokens, raw production data, customer identifiers, or private evidence.
-- Use `[MISSING: ...]` or `[UNKNOWN: ...]` instead of inventing facts.
+- Use `No repository-defined ...` or `No repository-defined ...` instead of inventing facts.
 
 ## Final Report
 
 Report files changed, documents created, validation evidence, validation debt used or added, blockers, deviations, and the next concrete action.
 
 Next step: Follow the repository-specific `AGENTS.md` and planning files for the current task.
+
+## Roles
+Use readiness scanner, worker, worker monitor, and integration validator roles.
+
+## Before Work
+Read approved intent, current state, task chain, and runtime sources first.
+
+## Parallel Work
+Do not parallel-edit the same contract, state, deployment, or public interface.
+
+## Validation Debt
+Record only out-of-scope failures; current-task failures remain blocking.
+
+## Handoff
+Record scope, validation evidence, debt, blockers, and next action.
+
+## Project-Specific Operations
+Respect the existing cryptocurrency portfolio manager runtime and use only its tracked operational interfaces.

@@ -11,3 +11,18 @@
 - [x] 2026-06-20 Fixed PostgreSQL schema bootstrap transaction abort and health-readiness false positive; deployed new pod, created runtime schema, and confirmed production currently has 0 users / no live portfolio data
 - [x] 2026-04-05 Documentation standard applied
 - [x] 2026-06-21 Clarified that the service is healthy and remaining analytics items are data-gated by live user/portfolio/alert records, not blocked by a runtime fault.
+
+## Active
+No active IPS adoption implementation task remains after this documentation alignment.
+
+## Ready Next
+Future owner-approved work requires a new linked task.
+
+## Blocked
+No adoption blocker is recorded.
+
+## Completed
+TASK-001 completed the IPS adoption profile.
+
+## Handoff
+Begin future work with approved intent and a complete IPS task chain.
