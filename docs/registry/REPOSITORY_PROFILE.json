@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "repository": "crypto-ai-agent",
+  "profile": "service",
+  "project_registration": {
+    "runlayer_project_slug": null,
+    "status": "unverified",
+    "warning": "RunLayer project mapping has not been verified for crypto-ai-agent."
+  },
+  "collectable_paths": [
+    "AGENTS.md",
+    "AGENT_OPERATIONS.md",
+    "BUSINESS.md",
+    "SYSTEM.md",
+    "TASKS.md",
+    "STATE.json",
+    "docs/registry/ARTIFACT_INDEX.json",
+    "docs/registry/REPOSITORY_PROFILE.json"
+  ],
+  "excluded_path_patterns": [
+    ".env*",
+    "**/secrets/**",
+    "**/*.pem",
+    "**/node_modules/**",
+    "**/coverage/**"
+  ],
+  "owners": {
+    "business_intent": "human",
+    "technical_system": "service-owner",
+    "planning_state": "repository-orchestrator",
+    "integration": "service-owner"
+  }
+}

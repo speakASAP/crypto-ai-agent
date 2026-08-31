@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "repository": "crypto-ai-agent",
+  "generated_at": "2026-08-31T18:25:00Z",
+  "artifacts": [],
+  "warnings": [
+    "MISSING_RUNLAYER_PROJECT_MAPPING: RunLayer mapping is not yet verified for crypto-ai-agent."
+  ]
+}
