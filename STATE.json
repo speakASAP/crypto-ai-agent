@@ -39,6 +39,5 @@
     "profile": "service",
     "artifact_index": "docs/registry/ARTIFACT_INDEX.json",
     "status_source": "human-and-agent-maintained; legacy state retained during Wave contract adoption"
-  },
-  "status": "ready"
+  }
 }
