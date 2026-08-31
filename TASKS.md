@@ -12,14 +12,11 @@
 - [x] 2026-04-05 Documentation standard applied
 - [x] 2026-06-21 Clarified that the service is healthy and remaining analytics items are data-gated by live user/portfolio/alert records, not blocked by a runtime fault.
 
-## Active
-No active IPS adoption implementation task remains after this documentation alignment.
+## ActiveNo active IPS adoption implementation task remains after this documentation alignment.
 
-## Ready Next
-Future owner-approved work requires a new linked task.
+## Ready NextFuture owner-approved work requires a new linked task.
 
-## Blocked
-No adoption blocker is recorded.
+## BlockedNo adoption blocker is recorded.
 
 ## Completed
 TASK-001 completed the IPS adoption profile.
