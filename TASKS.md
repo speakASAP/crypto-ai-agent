@@ -19,6 +19,7 @@ No active IPS adoption implementation task remains after this documentation alig
 ## Ready Next
 
 Future owner-approved work requires a new linked task.
+- Owner-approved work must begin with a linked IPS task.
 
 ## Blocked
 
