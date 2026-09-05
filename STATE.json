@@ -4,7 +4,7 @@
   "service": {
     "name": "crypto-ai-agent",
     "kind": "service",
-    "lifecycle": "documented",
+    "lifecycle": "documentation",
     "deployment": "kubernetes"
   },
   "planning": {
